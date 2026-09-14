@@ -34,23 +34,23 @@ if (!supportedPlatforms.has(process.platform) || !supportedArchitectures.has(pro
 const cargo = process.env.CARGO || "cargo";
 const cargoVersion = spawnSync(cargo, ["--version"], { encoding: "utf8" });
 if (cargoVersion.status !== 0) {
-  throw new Error("Hyperconsciousness currently builds from source. Install Rust 1.88 or newer, then run `npm rebuild brainmesh`.");
+  throw new Error("Hyperconsciousness currently builds from source. Install Rust 1.88 or newer, then run `npm rebuild hyperconsciousness`.");
 }
 
 const rustc = process.env.RUSTC || "rustc";
 const rustcVersion = spawnSync(rustc, ["--version"], { encoding: "utf8" });
 const parsedRust = rustcVersion.status === 0 ? parseVersion(rustcVersion.stdout) : null;
 if (!parsedRust || !versionAtLeast(parsedRust, minimumRust)) {
-  throw new Error("Hyperconsciousness requires Rust 1.88 or newer. Update Rust, then run `npm rebuild brainmesh`.");
+  throw new Error("Hyperconsciousness requires Rust 1.88 or newer. Update Rust, then run `npm rebuild hyperconsciousness`.");
 }
 
 if (process.platform === "linux") {
   console.log("Hyperconsciousness requires pkg-config, libssl development headers, and libdbus-1 development headers on Linux.");
 }
 
-const buildRoot = fs.mkdtempSync(path.join(os.tmpdir(), "brainmesh-npm-build-"));
-const executable = process.platform === "win32" ? "brainmesh.exe" : "brainmesh";
-const destinationDirectory = path.join(root, ".brainmesh-bin", `${process.platform}-${process.arch}`);
+const buildRoot = fs.mkdtempSync(path.join(os.tmpdir(), "hc-npm-build-"));
+const executable = process.platform === "win32" ? "hc.exe" : "hc";
+const destinationDirectory = path.join(root, ".hc-bin", `${process.platform}-${process.arch}`);
 const destination = path.join(destinationDirectory, executable);
 const temporaryDestination = `${destination}.${process.pid}.part`;
 const rollbackDestination = `${destination}.${process.pid}.rollback`;
@@ -58,7 +58,7 @@ const rollbackDestination = `${destination}.${process.pid}.rollback`;
 try {
   const build = spawnSync(
     cargo,
-    ["build", "--release", "--locked", "--bin", "brainmesh", "--target-dir", buildRoot],
+    ["build", "--release", "--locked", "--bin", "hc", "--target-dir", buildRoot],
     { cwd: root, env: process.env, stdio: "inherit" },
   );
   if (build.status !== 0) {

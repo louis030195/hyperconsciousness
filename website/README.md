@@ -5,8 +5,7 @@
 # hyperconsciousness website
 
 Static, text-only one-page paper for Hyperconsciousness at
-[hyperconsciousness.ai](https://hyperconsciousness.ai). The original
-[brainmesh.sh](https://brainmesh.sh) address remains available for compatibility. The
+[hyperconsciousness.ai](https://hyperconsciousness.ai). The
 page uses plain semantic HTML and loads no CSS, JavaScript, images, fonts, or
 media. The site stays dependency-free so the CLI package at the repository root
 remains an independent npm package.

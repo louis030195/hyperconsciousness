@@ -4,6 +4,11 @@
 
 # SPEC
 
+Compatibility note: historical byte strings and format prefixes in this
+specification are retained exactly so existing encrypted records, grants,
+recovery kits, and peers remain interoperable. They are not product names.
+
+
 Normative. Everything here must be implementable from this text with no
 reference to the Rust source. Byte offsets are exact, integers are big endian,
 and any field not described is a bug in this document.
@@ -979,7 +984,7 @@ One advisory lock serializes drills and cleanup. A drill creates its identity
 only below a mode-0700 recovery workspace, in a mode-0700 `attempt-*` directory
 with an exact regular-file marker written and durably flushed before any secret
 is created. On ordinary success or failure the temporary directory is removed.
-At the start of every later drill, and on explicit `recovery cleanup`, Brainmesh
+At the start of every later drill, and on explicit `recovery cleanup`, HC
 removes stale private attempt directories only if they are empty or carry the
 exact marker. A symlink, non-directory, non-private directory, invalid marker,
 or nonempty unmarked attempt fails closed and remains for manual inspection.
@@ -1278,7 +1283,7 @@ contain no credentials, fragment, query or control characters, and end exactly
 in `/v1/org/inbox`. The implementation uses the existing curl transport so
 HTTPS follows the operating system trust configuration; the envelope is sent
 over child stdin. `request --to` never puts it in argv, while retry callers use
-dash to keep it out of brainmesh argv too. A successful response must be JSON
+dash to keep it out of hc argv too. A successful response must be JSON
 whose full request id equals the envelope request id and whose `queued` field is
 boolean. HTTP success with a different or missing id fails closed.
 
@@ -1516,7 +1521,7 @@ files without a pointer are ignored; wrong-device delivery mutates neither
 disk nor membership state. Reopening reconstructs and verifies the entire
 contiguous transition/key-commitment chain from epoch one.
 
-`brainmesh epoch rotate --keep-self [--keep <signed-introduction> ...]`
+`hc epoch rotate --keep-self [--keep <signed-introduction> ...]`
 appends the transition and retained-device enrollments atomically under the old
 epoch, then activates the local delivery. `epoch status` reports the authority
 epoch, highest held data-key epoch and current signed device set. Opening a

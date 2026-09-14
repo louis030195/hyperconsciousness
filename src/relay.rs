@@ -16,7 +16,7 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use brainmesh::error::{Error, Result};
+use hyperconsciousness::error::{Error, Result};
 
 const MAGIC: &[u8; 8] = b"BMRLY001";
 const ROLE_LISTENER: u8 = 1;
@@ -233,9 +233,9 @@ pub fn listen(bind: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use brainmesh::identity::{Identity, NO_KEYSTORE_ENV};
-    use brainmesh::log::Store;
-    use brainmesh::wire::Peer;
+    use hyperconsciousness::identity::{Identity, NO_KEYSTORE_ENV};
+    use hyperconsciousness::log::Store;
+    use hyperconsciousness::wire::Peer;
 
     fn broker(connections: usize) -> (String, Rooms, std::thread::JoinHandle<()>) {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();

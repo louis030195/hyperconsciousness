@@ -27,7 +27,7 @@ done
 installed=0
 for root in "${roots[@]}"; do
   mkdir -p "$root"
-  target="$root/brainmesh"
+  target="$root/hyperconsciousness-ops"
   install_mode=link
   case "$root" in
     "$HOME/.screenpipe/skills") install_mode=screenpipe-store ;;
@@ -37,12 +37,12 @@ for root in "${roots[@]}"; do
   esac
 
   if test "$install_mode" = link; then
-    if test "$(cd "$root" && pwd -P)/brainmesh" = "$skill_dir"; then
+    if test "$(cd "$root" && pwd -P)/hyperconsciousness-ops" = "$skill_dir"; then
       :
     elif test -L "$target"; then
       resolved_target=$(cd "$target" && pwd -P)
       if test "$resolved_target" != "$skill_dir"; then
-        grep -q '^name: brainmesh$' "$target/SKILL.md" 2>/dev/null || {
+        grep -q '^name: hyperconsciousness-ops$' "$target/SKILL.md" 2>/dev/null || {
           printf 'refusing unrelated link: %s\n' "$target" >&2
           exit 1
         }
@@ -50,7 +50,7 @@ for root in "${roots[@]}"; do
         ln -s "$skill_dir" "$target"
       fi
     elif test -e "$target"; then
-      grep -q '^name: brainmesh$' "$target/SKILL.md" 2>/dev/null || {
+      grep -q '^name: hyperconsciousness-ops$' "$target/SKILL.md" 2>/dev/null || {
         printf 'refusing unrelated target: %s\n' "$target" >&2
         exit 1
       }
@@ -67,7 +67,7 @@ for root in "${roots[@]}"; do
       unlink "$target"
     elif test -e "$target"; then
       if test -f "$target/SKILL.md"; then
-        grep -q '^name: brainmesh$' "$target/SKILL.md" || {
+        grep -q '^name: hyperconsciousness-ops$' "$target/SKILL.md" || {
           printf 'refusing unrelated target: %s\n' "$target" >&2
           exit 1
         }

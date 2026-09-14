@@ -23,7 +23,7 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use brainmesh::error::{Error, Result};
+use hyperconsciousness::error::{Error, Result};
 
 const TIMEOUT: Duration = Duration::from_secs(30);
 // A verified peer may scan a large archive before requesting its missing
@@ -226,7 +226,7 @@ fn authenticate(stream: &mut TcpStream, key: &[u8; 32], dialling: bool) -> Resul
 pub fn serve_stream(dir: &Path, mut stream: TcpStream, key: &[u8; 32]) -> Result<()> {
     stream = authenticate_listener(stream, key)?;
     let mut reading = stream.try_clone()?;
-    brainmesh::wire::serve_root(dir, &mut reading, &mut stream)
+    hyperconsciousness::wire::serve_root(dir, &mut reading, &mut stream)
 }
 
 /// answer the protocol on a socket, for peers that cannot reach us over ssh

@@ -18,7 +18,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use brainmesh::error::{Error, Result};
+use hyperconsciousness::error::{Error, Result};
 use serde::{Deserialize, Serialize};
 
 const MAGIC: &[u8; 8] = b"BMTUN001";
@@ -130,12 +130,12 @@ fn check_private(_metadata: &fs::Metadata) -> Result<()> {
 }
 
 fn write_new_private(path: &Path, bytes: &[u8]) -> Result<()> {
-    brainmesh::guard::no_symlink(path)?;
+    hyperconsciousness::guard::no_symlink(path)?;
     let parent = path
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty())
         .unwrap_or_else(|| Path::new("."));
-    brainmesh::guard::no_symlink(parent)?;
+    hyperconsciousness::guard::no_symlink(parent)?;
     let name = path
         .file_name()
         .ok_or(Error::Malformed("tunnel route path has no file name"))?
@@ -167,7 +167,7 @@ fn write_new_private(path: &Path, bytes: &[u8]) -> Result<()> {
         file.write_all(bytes)?;
         file.write_all(b"\n")?;
         file.flush()?;
-        brainmesh::fsync::durable(&file)?;
+        hyperconsciousness::fsync::durable(&file)?;
         drop(file);
         fs::hard_link(&temporary, path).map_err(|error| {
             if error.kind() == std::io::ErrorKind::AlreadyExists {

@@ -118,7 +118,7 @@ fn fake_bucket(
 }
 
 fn brainmesh(args: &[String], store: &Path) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_brainmesh"))
+    Command::new(env!("CARGO_BIN_EXE_hc"))
         .args(args)
         .arg("--dir")
         .arg(store)

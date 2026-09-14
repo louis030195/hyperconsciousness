@@ -1,6 +1,6 @@
 ---
 name: hyperconsciousness
-description: Find local skills, PKM notes, encrypted HC knowledge, and opaque secret capabilities. Use for public Hyperconsciousness knowledge, search, encrypted sync, and capability discovery. Device control, private-agent orchestration, and phone notifications belong to the separate Hyperconsciousness Companion layer. Brainmesh is the legacy protocol and CLI name.
+description: Find local skills, PKM notes, encrypted HC knowledge, and opaque secret capabilities. Use for public Hyperconsciousness knowledge, search, encrypted sync, and capability discovery. Device control, private-agent orchestration, and phone notifications belong to the separate Hyperconsciousness Companion layer.
 ---
 
 <!-- screenpipe — AI that knows everything you've seen, said, or heard -->
@@ -9,8 +9,7 @@ description: Find local skills, PKM notes, encrypted HC knowledge, and opaque se
 
 # hyperconsciousness
 
-Use `hc` as the human-facing command. `brainmesh` remains a compatibility name
-for the encrypted protocol, store, grants, peers, and advanced recovery work.
+Use `hc` for knowledge discovery and encrypted storage.
 
 Installing this skill teaches a harness how to use HC. It does not grant access
 to the encrypted store, PKM, adapters, or any secret.
@@ -88,7 +87,7 @@ this repository. Installing this skill grants no control-plane credentials.
 ## Advanced operations
 
 For pairing, grants, revocation, sync verification, recovery, workspace
-projection, HTTP/MCP access, or protocol changes, use the legacy `brainmesh`
+projection, HTTP/MCP access, or protocol changes, use the [`hyperconsciousness-ops`](../hyperconsciousness-ops/SKILL.md)
 operating skill and preserve its fail-closed boundaries.
 
 Install this skill into Claude, Codex, Hermes, Pi, screenpipe, and shared agent

@@ -19,10 +19,10 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use base64ct::{Base64UrlUnpadded, Encoding};
-use brainmesh::error::{Error, Result};
-use brainmesh::grant::{Grant, Scope, READ, USE};
-use brainmesh::hlc::Clock;
-use brainmesh::identity::Identity;
+use hyperconsciousness::error::{Error, Result};
+use hyperconsciousness::grant::{Grant, Scope, READ, USE};
+use hyperconsciousness::hlc::Clock;
+use hyperconsciousness::identity::Identity;
 use p256::ecdsa::{signature::Signer, Signature, SigningKey};
 use p256::elliptic_curve::sec1::ToEncodedPoint;
 use rand_core::{OsRng, RngCore};
@@ -350,7 +350,7 @@ impl Store {
                 "permission requests support search, recent, files or use_secret",
             ));
         }
-        if !scope.encodable() || scope.max_sensitivity > brainmesh::grant::SECRET {
+        if !scope.encodable() || scope.max_sensitivity > hyperconsciousness::grant::SECRET {
             return Err(Error::Malformed("permission scope is invalid"));
         }
         let encoded = serde_json::to_vec(&arguments)?;
@@ -1143,7 +1143,7 @@ fn append_event(path: &Path, value: &Value) -> Result<()> {
             max: MAX_REQUEST_BYTES,
         });
     }
-    brainmesh::guard::no_symlink(path)?;
+    hyperconsciousness::guard::no_symlink(path)?;
     let mut options = private_options();
     let mut file = options.create(true).append(true).open(path)?;
     let metadata = file.metadata()?;
@@ -1164,7 +1164,7 @@ fn append_event(path: &Path, value: &Value) -> Result<()> {
     }
     file.write_all(&line)?;
     file.flush()?;
-    brainmesh::fsync::durable(&file)?;
+    hyperconsciousness::fsync::durable(&file)?;
     Ok(())
 }
 
@@ -1194,22 +1194,22 @@ fn ensure_vapid_key(path: &Path) -> Result<()> {
 }
 
 fn create_private(path: &Path, bytes: &[u8]) -> Result<()> {
-    brainmesh::guard::no_symlink(path)?;
+    hyperconsciousness::guard::no_symlink(path)?;
     let mut options = private_options();
     let mut file = options.create_new(true).write(true).open(path)?;
     tighten(&file)?;
     file.write_all(bytes)?;
     file.flush()?;
-    brainmesh::fsync::durable(&file)?;
+    hyperconsciousness::fsync::durable(&file)?;
     #[cfg(unix)]
     if let Some(parent) = path.parent() {
-        brainmesh::fsync::durable(&File::open(parent)?)?;
+        hyperconsciousness::fsync::durable(&File::open(parent)?)?;
     }
     Ok(())
 }
 
 fn replace_private(path: &Path, bytes: &[u8]) -> Result<()> {
-    brainmesh::guard::no_symlink(path)?;
+    hyperconsciousness::guard::no_symlink(path)?;
     let parent = path
         .parent()
         .ok_or(Error::Malformed("private state has no parent directory"))?;
@@ -1224,7 +1224,7 @@ fn replace_private(path: &Path, bytes: &[u8]) -> Result<()> {
         return Err(error.into());
     }
     #[cfg(unix)]
-    brainmesh::fsync::durable(&File::open(parent)?)?;
+    hyperconsciousness::fsync::durable(&File::open(parent)?)?;
     Ok(())
 }
 
@@ -1261,7 +1261,7 @@ fn replace_file(temporary: &Path, path: &Path) -> std::io::Result<()> {
 }
 
 fn read_private(path: &Path, max: usize) -> Result<Option<Vec<u8>>> {
-    brainmesh::guard::no_symlink(path)?;
+    hyperconsciousness::guard::no_symlink(path)?;
     let mut options = private_options();
     let mut file = match options.read(true).open(path) {
         Ok(file) => file,
@@ -1285,9 +1285,9 @@ fn read_private(path: &Path, max: usize) -> Result<Option<Vec<u8>>> {
 }
 
 fn secure_dir(dir: &Path) -> Result<()> {
-    brainmesh::guard::no_symlink(dir)?;
+    hyperconsciousness::guard::no_symlink(dir)?;
     std::fs::create_dir_all(dir)?;
-    brainmesh::guard::no_symlink(dir)?;
+    hyperconsciousness::guard::no_symlink(dir)?;
     let metadata = std::fs::metadata(dir)?;
     if !metadata.is_dir() {
         return Err(Error::Malformed(
@@ -1361,8 +1361,8 @@ fn valid_human_text(value: &str, max: usize) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use brainmesh::grant::{NORMAL, PERSONAL, SECRET};
-    use brainmesh::identity::Identity;
+    use hyperconsciousness::grant::{NORMAL, PERSONAL, SECRET};
+    use hyperconsciousness::identity::Identity;
     use p256::ecdsa::signature::Verifier;
     use tempfile::tempdir;
 

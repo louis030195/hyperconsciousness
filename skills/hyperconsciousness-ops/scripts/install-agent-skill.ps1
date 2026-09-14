@@ -5,7 +5,7 @@
 $ErrorActionPreference = "Stop"
 $Source = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot ".."))
 if (-not (Test-Path (Join-Path $Source "SKILL.md"))) {
-  throw "brainmesh skill source is incomplete: $Source"
+  throw "hyperconsciousness-ops skill source is incomplete: $Source"
 }
 
 $roots = [System.Collections.Generic.List[string]]::new()
@@ -44,14 +44,14 @@ $sourcePath = $Source.TrimEnd("\")
 $installed = 0
 foreach ($root in $roots | Sort-Object -Unique) {
   New-Item -ItemType Directory -Path $root -Force | Out-Null
-  $target = Join-Path $root "brainmesh"
+  $target = Join-Path $root "hyperconsciousness-ops"
   $targetPath = [System.IO.Path]::GetFullPath($target).TrimEnd("\")
   if ($targetPath -ne $sourcePath) {
     if (Test-Path $target) {
       $targetSkill = Join-Path $target "SKILL.md"
       if (Test-Path $targetSkill) {
         $header = Get-Content $targetSkill -TotalCount 4
-        if ($header -notcontains "name: brainmesh") {
+        if ($header -notcontains "name: hyperconsciousness-ops") {
           throw "refusing unrelated target: $target"
         }
       } elseif ((Get-ChildItem -LiteralPath $target -Force | Select-Object -First 1)) {
@@ -71,7 +71,7 @@ foreach ($root in $roots | Sort-Object -Unique) {
 
 $expected = (Get-FileHash -Algorithm SHA256 (Join-Path $Source "SKILL.md")).Hash
 foreach ($root in $roots | Sort-Object -Unique) {
-  $actual = (Get-FileHash -Algorithm SHA256 (Join-Path $root "brainmesh\SKILL.md")).Hash
+  $actual = (Get-FileHash -Algorithm SHA256 (Join-Path $root "hyperconsciousness-ops\SKILL.md")).Hash
   if ($actual -ne $expected) { throw "skill hash mismatch: $root" }
 }
 Write-Output "installed_roots=$installed"

@@ -3,12 +3,12 @@
 
 //! Synthetic, local-only memory regression probe. Never accepts an existing
 //! brain for fixture creation. Run modes in separate processes under time -l.
-use brainmesh::hlc::Clock;
-use brainmesh::identity::Identity;
-use brainmesh::keyring::RuntimeKeys;
-use brainmesh::log::Store;
-use brainmesh::query::Snapshot;
-use brainmesh::record::Record;
+use hyperconsciousness::hlc::Clock;
+use hyperconsciousness::identity::Identity;
+use hyperconsciousness::keyring::RuntimeKeys;
+use hyperconsciousness::log::Store;
+use hyperconsciousness::query::Snapshot;
+use hyperconsciousness::record::Record;
 use std::path::PathBuf;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {

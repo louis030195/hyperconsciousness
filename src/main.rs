@@ -12,19 +12,19 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use brainmesh::blob::{BlobRef, Blobs};
-use brainmesh::catalog::FileCatalog;
-use brainmesh::discovery::SearchHit;
-use brainmesh::error::{Error, Result};
-use brainmesh::grant::{Grant, Scope, READ, USE};
-use brainmesh::hlc::Clock;
-use brainmesh::id::{DeviceId, Hash, ZERO_HASH};
-use brainmesh::identity::{Identity, Introduction, Invite};
-use brainmesh::keyring::{DataKeys, RuntimeKeys};
-use brainmesh::log::Store;
-use brainmesh::record::Record;
-use brainmesh::space;
-use brainmesh::wire::{self, Peer};
+use hyperconsciousness::blob::{BlobRef, Blobs};
+use hyperconsciousness::catalog::FileCatalog;
+use hyperconsciousness::discovery::SearchHit;
+use hyperconsciousness::error::{Error, Result};
+use hyperconsciousness::grant::{Grant, Scope, READ, USE};
+use hyperconsciousness::hlc::Clock;
+use hyperconsciousness::id::{DeviceId, Hash, ZERO_HASH};
+use hyperconsciousness::identity::{Identity, Introduction, Invite};
+use hyperconsciousness::keyring::{DataKeys, RuntimeKeys};
+use hyperconsciousness::log::Store;
+use hyperconsciousness::record::Record;
+use hyperconsciousness::space;
+use hyperconsciousness::wire::{self, Peer};
 use zeroize::Zeroizing;
 
 mod bucket;
@@ -42,187 +42,187 @@ mod tunnel;
 
 const USAGE: &str = "\
 hyperconsciousness (hc), one encrypted brain across your devices
-short command: hc. brainmesh remains supported.
+short command: hc.
 
   hc find <query> [--scope all|hc|skills|pkm|secrets] [--limit n]
                                   find knowledge and capabilities without exposing secret values
 
-  brainmesh start                 begin a new brain on this machine
-  brainmesh join <ssh host>       join the brain on another machine
-  brainmesh recovery create <file> [--phrase-output <file>]
+  hc start                 begin a new brain on this machine
+  hc join <ssh host>       join the brain on another machine
+  hc recovery create <file> [--phrase-output <file>]
                                   encrypt every held key under 24 random words
-  brainmesh recovery verify <file> [--phrase-file <file>]
+  hc recovery verify <file> [--phrase-file <file>]
                                   test the paper phrase without restoring keys
-  brainmesh recovery status <file> [--phrase-file <file>]
+  hc recovery status <file> [--phrase-file <file>]
                                   fail if the kit omits any key held today
-  brainmesh recovery restore <file> [--phrase-file <file>]
+  hc recovery restore <file> [--phrase-file <file>]
                                   recover into a fresh device identity
-  brainmesh recovery drill <kit> <personal-bundle>
+  hc recovery drill <kit> <personal-bundle>
                     [--space-bundle <space> <bundle> ...] [--phrase-file <file>]
                                   prove a complete fresh-identity restore, then erase it
-  brainmesh recovery cleanup     remove exactly marked interrupted drill workspaces
-  brainmesh witness create <file> root-sign the minimum history a restore must contain
-  brainmesh witness advance <file>
+  hc recovery cleanup     remove exactly marked interrupted drill workspaces
+  hc witness create <file> root-sign the minimum history a restore must contain
+  hc witness advance <file>
                                   atomically ratchet an existing external lower bound
-  brainmesh witness verify <file> reject a rolled-back or incomplete store
-  brainmesh epoch status          current authority/key epoch and signed device set
-  brainmesh epoch rotate --keep-self [--keep <signed introduction> ...]
+  hc witness verify <file> reject a rolled-back or incomplete store
+  hc epoch status          current authority/key epoch and signed device set
+  hc epoch rotate --keep-self [--keep <signed introduction> ...]
                                   new key; omitted devices lose future access
-  brainmesh status                what this machine knows
-  brainmesh authority status      who may issue root grants
-  brainmesh authority harden      separate an old brain's grant and data keys
-  brainmesh write <text> [opts]   append a note
-  brainmesh read [n]              read the last n notes, default 20
-  brainmesh add <file> [--archive peer]
+  hc status                what this machine knows
+  hc authority status      who may issue root grants
+  hc authority harden      separate an old brain's grant and data keys
+  hc write <text> [opts]   append a note
+  hc read [n]              read the last n notes, default 20
+  hc add <file> [--archive peer]
                                   store a file; optionally prove a remote encrypted copy
-  brainmesh screenpipe archive <peer> [--port 3030] [--staging folder]
+  hc screenpipe archive <peer> [--port 3030] [--staging folder]
                                   snapshot the live database into a proved remote archive
-  brainmesh files [--space name] [--json]
+  hc files [--space name] [--json]
                                   list stored files, newest version of each
-  brainmesh blobs pin metadata|all [--space name]
+  hc blobs pin metadata|all [--space name]
                                   choose on-demand metadata or a full local archive
-  brainmesh blobs status [--space name] [--json]
+  hc blobs status [--space name] [--json]
                                   show the exact retained/missing chunk promise
-  brainmesh blobs verify [--space name]
+  hc blobs verify [--space name]
                                   scrub every pinned manifest end to end
-  brainmesh blobs offload <name> <archive peer|remote> [--version n] [--space name]
+  hc blobs offload <name> <archive peer|remote> [--version n] [--space name]
                     [--json] [--apply --expect <plan id>]
                                   plan first; remote is keyless object storage
-  brainmesh history <name>        every version of one file
-  brainmesh get <name> [dest] [--version n]
+  hc history <name>        every version of one file
+  hc get <name> [dest] [--version n]
                                   write a file back out, fetching if needed
-  brainmesh workspace status <name> <folder>
+  hc workspace status <name> <folder>
                                   preview a path-preserving directory scan
-  brainmesh workspace scan <name> <folder> [--allow-deletes] [--allow-mass-delete]
+  hc workspace scan <name> <folder> [--allow-deletes] [--allow-mass-delete]
                                   [--skip-secret-files]
                                   append changed files; deletes are guarded
-  brainmesh workspace checkpoint <name> <folder> [--skip-secret-files]
+  hc workspace checkpoint <name> <folder> [--skip-secret-files]
                                   append stable content; defer live files and deletes
-  brainmesh workspace restore <name> <empty-folder> [--from peer]
+  hc workspace restore <name> <empty-folder> [--from peer]
                                   reconstruct the current conflict-free view
-  brainmesh workspace verify <name> <folder>
+  hc workspace verify <name> <folder>
                                   hash-check a folder against the brain
-  brainmesh workspace track <name> <folder> [--skip-secret-files]
+  hc workspace track <name> <folder> [--skip-secret-files]
                                   pin the exact local view before bidirectional sync
-  brainmesh workspace track-status <name> <folder>
+  hc workspace track-status <name> <folder>
                                   show that folder's durable projection cursor
-  brainmesh workspace pull <name> <folder> [--from peer]
+  hc workspace pull <name> <folder> [--from peer]
                                   materialize remote heads without overwriting edits
-  brainmesh workspace watch <name> <folder> [--peer host] [--interval 300]
+  hc workspace watch <name> <folder> [--peer host] [--interval 300]
                                   [--full-every 86400]
                                   wake on local edits; poll/sync as a backstop
-  brainmesh workspace watch-status <name> <folder>
+  hc workspace watch-status <name> <folder>
                                   last attempt, last success and pending counts
-  brainmesh workspace conflicts <name>
+  hc workspace conflicts <name>
                                   show divergent heads and their event ids
-  brainmesh workspace resolve <name> <object> <event>
+  hc workspace resolve <name> <object> <event>
                                   merge all heads by explicitly choosing one
-  brainmesh sync [host] [--remote] [--witness file]
+  hc sync [host] [--remote] [--witness file]
                                   sync, then ratchet one external rollback bound
-  brainmesh service install [--interval 300] [--remote] [--witness file]
+  hc service install [--interval 300] [--remote] [--witness file]
                                   prove a target, then register safe background sync
-  brainmesh service status       scheduler identity and last known health
-  brainmesh service uninstall    remove only the scheduler; preserve brain and logs
-  brainmesh peer add <host> [cmd] another of YOUR machines, syncs everything
-  brainmesh peer announce <addr>  tell the others how to reach THIS machine
-  brainmesh space peer <name> <host> [cmd]
+  hc service status       scheduler identity and last known health
+  hc service uninstall    remove only the scheduler; preserve brain and logs
+  hc peer add <host> [cmd] another of YOUR machines, syncs everything
+  hc peer announce <addr>  tell the others how to reach THIS machine
+  hc space peer <name> <host> [cmd]
                                   another PERSON, syncs only that space
-  brainmesh bundle <file> [--space name]
+  hc bundle <file> [--space name]
                                   write one encrypted brain/space for a usb stick
-  brainmesh import <file> [--space name]
+  hc import <file> [--space name]
                                   take one brain/space bundle, no network involved
-  brainmesh peers                 list them
-  brainmesh ask <grant> [text]    read as that grant sees it, and log it
-  brainmesh mcp --as <grant>      serve that grant to an ai client
-  brainmesh serve-http --as <g>   the same, over http, for phones
-  brainmesh grant <device> [opts] let a device or agent read a slice
-  brainmesh secret adapter set <name> <absolute-program>
+  hc peers                 list them
+  hc ask <grant> [text]    read as that grant sees it, and log it
+  hc mcp --as <grant>      serve that grant to an ai client
+  hc serve-http --as <g>   the same, over http, for phones
+  hc grant <device> [opts] let a device or agent read a slice
+  hc secret adapter set <name> <absolute-program>
                                   pin one local no-shell credential adapter
-  brainmesh secret register <name> --adapter <name> --operations <a,b>
+  hc secret register <name> --adapter <name> --operations <a,b>
                                   sync an opaque reference, never credential bytes
-  brainmesh secret grant <name> <device> [--operations <a,b>] [--minutes N]
+  hc secret grant <name> <device> [--operations <a,b>] [--minutes N]
                                   permit only named adapter operations
-  brainmesh secret use <grant> <name> <operation> [--input <file|->]
+  hc secret use <grant> <name> <operation> [--input <file|->]
                                   invoke locally and record a content-free receipt
-  brainmesh secret list          list owner-visible opaque references
-  brainmesh grants                what is granted, and to whom
-  brainmesh revoke <grant id>     cancel it, and everything below it
-  brainmesh audit                 who read what, and when
-  brainmesh space new <name>      a space to share with one person
-  brainmesh org new <name>        create a company root in your personal brain
-  brainmesh org role <org> <role> create a separately encrypted role compartment
-  brainmesh org roles <org>       list its compartments
-  brainmesh org migrate <org>     root-sign intact legacy roles without changing keys
-  brainmesh org delegate-owner <org> <roles> <device introduction> [--days N]
+  hc secret list          list owner-visible opaque references
+  hc grants                what is granted, and to whom
+  hc revoke <grant id>     cancel it, and everything below it
+  hc audit                 who read what, and when
+  hc space new <name>      a space to share with one person
+  hc org new <name>        create a company root in your personal brain
+  hc org role <org> <role> create a separately encrypted role compartment
+  hc org roles <org>       list its compartments
+  hc org migrate <org>     root-sign intact legacy roles without changing keys
+  hc org delegate-owner <org> <roles> <device introduction> [--days N]
                                   co-own exact role generations; ends by rotation
-  brainmesh org co-owners <org>   list root-signed role co-owner handoffs
-  brainmesh org delegate-admin <org> <roles> <device introduction> [--days N]
+  hc org co-owners <org>   list root-signed role co-owner handoffs
+  hc org delegate-admin <org> <roles> <device introduction> [--days N]
                                   may propose access; receives no role keys
-  brainmesh org admins <org>      list limited administrator certificates
-  brainmesh org revoke-admin <org> <device or certificate prefix>
+  hc org admins <org>      list limited administrator certificates
+  hc org revoke-admin <org> <device or certificate prefix>
                                   root blocks an exact admin certificate early
-  brainmesh org propose <org> <roles> <device introduction> [--days N]
+  hc org propose <org> <roles> <device introduction> [--days N]
                                   limited admin proposes access without releasing keys
-  brainmesh org request <proposal> [--to https://root/v1/org/inbox]
+  hc org request <proposal> [--to https://root/v1/org/inbox]
                                   employee signs and seals a keyless request to root
-  brainmesh org submit <envelope or -> <http(s) inbox URL>
+  hc org submit <envelope or -> <http(s) inbox URL>
                                   retry opaque delivery and verify its request id
-  brainmesh org receive <envelope>
+  hc org receive <envelope>
                                   root verifies and durably queues without approving
-  brainmesh org inbox <org>       list queued access requests and their state
-  brainmesh org listen-inbox <org> [addr:port]
+  hc org inbox <org>       list queued access requests and their state
+  hc org listen-inbox <org> [addr:port]
                                   receive opaque requests; loopback by default
-  brainmesh org poll <request id> <http(s) inbox URL>
+  hc org poll <request id> <http(s) inbox URL>
                                   fetch and decrypt a signed root decision
-  brainmesh org decision <request id>
+  hc org decision <request id>
                                   reopen a locally stored signed decision
-  brainmesh org approve <request or queued id> [--days N]
+  hc org approve <request or queued id> [--days N]
                                   root approves before encrypting any role key
-  brainmesh org deny <request or queued id>
+  hc org deny <request or queued id>
                                   root signs a terminal no-key decision
-  brainmesh org inspect-denial <signed denial>
+  hc org inspect-denial <signed denial>
                                   verify and render a denial receipt
-  brainmesh org rotate <org> <role> --keep <device introduction> ...
+  hc org rotate <org> <role> --keep <device introduction> ...
                                   new key generation; omitted devices lose future access
-  brainmesh org members <org>     list signed invitations and their role sets
-  brainmesh org invite <org> <roles> <device introduction>
+  hc org members <org>     list signed invitations and their role sets
+  hc org invite <org> <roles> <device introduction>
                                   invite one device only to comma-listed roles
-  brainmesh org join <bundle>     accept all selected role compartments
-  brainmesh org receipt <bundle>  reissue acceptance after proving every role key is held
-  brainmesh org accept <receipt> [delegated invitation]
+  hc org join <bundle>     accept all selected role compartments
+  hc org receipt <bundle>  reissue acceptance after proving every role key is held
+  hc org accept <receipt> [delegated invitation]
                                   root confirms current role generations
-  brainmesh spaces                the spaces on this machine
-  brainmesh space invite <name>   an invite for someone to join a space
-  brainmesh space rotate <name> --keep <device introduction> ...
+  hc spaces                the spaces on this machine
+  hc space invite <name>   an invite for someone to join a space
+  hc space rotate <name> --keep <device introduction> ...
                                   new key; omitted people lose future access
-  brainmesh space harden <name>   separate authority in an old shared space
-  brainmesh space join <invite>   accept one
-  brainmesh share <name> <text>   publish into a space
-  brainmesh space read <name>     read a space
+  hc space harden <name>   separate authority in an old shared space
+  hc space join <invite>   accept one
+  hc share <name> <text>   publish into a space
+  hc space read <name>     read a space
 
   write options: --kind k --tags x,y --sensitivity normal|personal|medical|secret
   grant options: --days N --kinds a,b --tags x,y --sensitivity <as above> --write
                  --workspace name [--paths company,shared/project] [--space name]
   ask, mcp, serve-http, grants, revoke and audit also accept --space name
-  brainmesh id                    print this device, for manual pairing
-  brainmesh invite <id>           wrap the brain key for a device
-  brainmesh accept <invite>       take an invite that was wrapped for you
-  brainmesh serve                 speak the protocol on stdin and stdout
-  brainmesh listen [addr:port]    speak it on a socket, for peers without ssh
-  brainmesh relay token           make an unguessable rendezvous room
-  brainmesh relay listen [addr]   run a blind byte-forwarding rendezvous
-  brainmesh relay expose <url>    wait outbound and serve peers through it
-  brainmesh tunnel route <file> <hostname>
+  hc id                    print this device, for manual pairing
+  hc invite <id>           wrap the brain key for a device
+  hc accept <invite>       take an invite that was wrapped for you
+  hc serve                 speak the protocol on stdin and stdout
+  hc listen [addr:port]    speak it on a socket, for peers without ssh
+  hc relay token           make an unguessable rendezvous room
+  hc relay listen [addr]   run a blind byte-forwarding rendezvous
+  hc relay expose <url>    wait outbound and serve peers through it
+  hc tunnel route <file> <hostname>
                                   create one private HTTPS routing capability
-  brainmesh tunnel listen <public> <control> --route <file> ...
+  hc tunnel listen <public> <control> --route <file> ...
                                   route public TLS by SNI without decrypting it
-  brainmesh tunnel expose <control> <route-file> [--to 127.0.0.1:8443] [--pool 4]
+  hc tunnel expose <control> <route-file> [--to 127.0.0.1:8443] [--pool 4]
                                   carry TLS outbound to a terminator on this node
-  brainmesh remote <endpoint> <region> <bucket> <prefix> <key>
+  hc remote <endpoint> <region> <bucket> <prefix> <key>
                    --secret-file <private-file> [--space name]
                                   keep a copy in any s3 compatible bucket
-  brainmesh push [--space name]   send the bucket what it lacks
-  brainmesh pull [--space name]   take what it has and we lack
+  hc push [--space name]   send the bucket what it lacks
+  hc pull [--space name]   take what it has and we lack
 
   --dir <path>                    where the brain lives, default ~/.brain
 ";
@@ -231,7 +231,7 @@ fn usage() -> String {
     let mut rendered = USAGE
         .lines()
         .map(|line| {
-            let Some(command) = line.strip_prefix("  brainmesh ") else {
+            let Some(command) = line.strip_prefix("  hc ") else {
                 return line.to_owned();
             };
             let mut short = format!("  hc {command}");
@@ -346,14 +346,14 @@ fn find_command(dir: &PathBuf, arguments: &[String]) -> Result<()> {
     let needle = query.to_lowercase();
     let mut hits = Vec::new();
     if matches!(scope.as_str(), "all" | "skills") {
-        hits.extend(brainmesh::discovery::search_skills(
-            &brainmesh::discovery::skill_roots(&home()),
+        hits.extend(hyperconsciousness::discovery::search_skills(
+            &hyperconsciousness::discovery::skill_roots(&home()),
             &query,
         ));
     }
     if matches!(scope.as_str(), "all" | "pkm") {
-        hits.extend(brainmesh::discovery::search_pkm(
-            &brainmesh::discovery::pkm_roots(&home()),
+        hits.extend(hyperconsciousness::discovery::search_pkm(
+            &hyperconsciousness::discovery::pkm_roots(&home()),
             &query,
         ));
     }
@@ -392,7 +392,7 @@ fn find_command(dir: &PathBuf, arguments: &[String]) -> Result<()> {
             }
         }
         if matches!(scope.as_str(), "all" | "secrets") {
-            for descriptor in brainmesh::secret::descriptors(&store, &keys)? {
+            for descriptor in hyperconsciousness::secret::descriptors(&store, &keys)? {
                 let searchable = format!(
                     "{} {} {}",
                     descriptor.name,
@@ -474,7 +474,7 @@ fn compact_search_excerpt(value: &str, needle: &str, maximum: usize) -> String {
 }
 
 fn external_witness_path(store: &Path, supplied: &Path) -> Result<PathBuf> {
-    brainmesh::guard::no_symlink(supplied)?;
+    hyperconsciousness::guard::no_symlink(supplied)?;
     let store = store.canonicalize()?;
     let resolved = if supplied.exists() {
         supplied.canonicalize()?
@@ -501,38 +501,38 @@ fn advance_external_witness(
     dir: &Path,
     path: &Path,
 ) -> Result<(
-    brainmesh::witness::Witness,
-    brainmesh::witness::Witness,
-    brainmesh::witness::Check,
+    hyperconsciousness::witness::Witness,
+    hyperconsciousness::witness::Witness,
+    hyperconsciousness::witness::Check,
 )> {
     let identity = Identity::load_for_brain(dir)?;
     let brain = identity_space_id(&identity)?;
     let authority = identity.grant_authority()?;
-    let previous = brainmesh::witness::read(path)?;
+    let previous = hyperconsciousness::witness::read(path)?;
     let store = Store::open(dir)?;
     let keys = runtime_keys(dir, &identity)?;
     let visible = match keys.authority_state() {
-        Some(state) => brainmesh::sync::have_authorized(&store, state)?,
+        Some(state) => hyperconsciousness::sync::have_authorized(&store, state)?,
         None => store.heads()?.into_iter().collect(),
     };
     let check = previous.check_visible(brain, authority, &store, &visible)?;
     let signing = identity.grant_authority_signing()?;
     let heads = visible.into_iter().collect::<Vec<_>>();
     let at = Clock::new().now().millis.max(previous.at.saturating_add(1));
-    let next = brainmesh::witness::Witness::issue(brain, &signing, at, &heads)?;
-    brainmesh::witness::replace(path, &previous, &next)?;
+    let next = hyperconsciousness::witness::Witness::issue(brain, &signing, at, &heads)?;
+    hyperconsciousness::witness::replace(path, &previous, &next)?;
     Ok((previous, next, check))
 }
 
-fn verify_external_witness(dir: &Path, path: &Path) -> Result<brainmesh::witness::Check> {
+fn verify_external_witness(dir: &Path, path: &Path) -> Result<hyperconsciousness::witness::Check> {
     let identity = Identity::load_for_brain(dir)?;
     let brain = identity_space_id(&identity)?;
     let authority = identity.grant_authority()?;
-    let witness = brainmesh::witness::read(path)?;
+    let witness = hyperconsciousness::witness::read(path)?;
     let store = Store::open(dir)?;
     let keys = runtime_keys(dir, &identity)?;
     let visible = match keys.authority_state() {
-        Some(state) => brainmesh::sync::have_authorized(&store, state)?,
+        Some(state) => hyperconsciousness::sync::have_authorized(&store, state)?,
         None => store.heads()?.into_iter().collect(),
     };
     witness.check_visible(brain, authority, &store, &visible)
@@ -560,7 +560,7 @@ fn recovery_phrase(rest: &[String]) -> Result<Zeroizing<String>> {
         let phrase_path = PathBuf::from(rest.get(index + 1).ok_or(Error::Malformed(
             "--phrase-file needs a file containing the 24 words",
         ))?);
-        brainmesh::guard::no_symlink(&phrase_path)?;
+        hyperconsciousness::guard::no_symlink(&phrase_path)?;
         let mut phrase = Zeroizing::new(String::new());
         File::open(&phrase_path)?
             .take(1025)
@@ -735,7 +735,7 @@ fn validate_peer(address: &str, command: &str) -> Result<()> {
 
 fn read_peers(dir: &Path) -> Result<Vec<(String, String)>> {
     let path = peers_path(dir);
-    brainmesh::guard::no_symlink(&path)?;
+    hyperconsciousness::guard::no_symlink(&path)?;
     let file = match File::open(&path) {
         Ok(file) => file,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
@@ -804,10 +804,10 @@ fn write_peers(dir: &Path, peers: &[(String, String)]) -> Result<()> {
         }
     }
 
-    brainmesh::guard::no_symlink(dir)?;
+    hyperconsciousness::guard::no_symlink(dir)?;
     std::fs::create_dir_all(dir)?;
     let path = peers_path(dir);
-    brainmesh::durable::write_private(&path, body.as_bytes())
+    hyperconsciousness::durable::write_private(&path, body.as_bytes())
 }
 
 /// spawn the same binary on another machine over ssh and talk to it.
@@ -849,7 +849,7 @@ fn ssh_command() -> Command {
 }
 
 // The CLI restores Unix's default SIGPIPE behavior so commands such as
-// `brainmesh read | head` stop quietly. Internal SSH pipes are different: a
+// `hc read | head` stop quietly. Internal SSH pipes are different: a
 // peer can disappear after spawn, and that must become an ordinary EPIPE so
 // sync can try the next route. Hold this process-wide guard only while one
 // child protocol session is active.
@@ -899,7 +899,7 @@ impl IgnoreSigpipe {
 }
 
 struct PeerSync {
-    pulled: brainmesh::sync::Applied,
+    pulled: hyperconsciousness::sync::Applied,
     pushed: u64,
     pinned: usize,
 }
@@ -922,7 +922,7 @@ fn hydrate_pinned_with<R: Read, W: Write, K: DataKeys + ?Sized>(
     blobs: &Blobs,
     keys: &K,
 ) -> Result<usize> {
-    let status = brainmesh::pin::status(store.root(), store, blobs, keys)?;
+    let status = hyperconsciousness::pin::status(store.root(), store, blobs, keys)?;
     if status.missing_chunks.is_empty() {
         return Ok(0);
     }
@@ -938,7 +938,7 @@ fn over_ssh(
     host: &str,
     remote: &str,
     store: &Store,
-    space: Option<&brainmesh::id::Hash>,
+    space: Option<&hyperconsciousness::id::Hash>,
 ) -> Result<PeerSync> {
     if host.starts_with(tcp::SCHEME) || host.starts_with(relay::SCHEME) {
         return over_tcp(host, store, space);
@@ -989,7 +989,11 @@ fn over_ssh(
     })
 }
 
-fn over_tcp(address: &str, store: &Store, space: Option<&brainmesh::id::Hash>) -> Result<PeerSync> {
+fn over_tcp(
+    address: &str,
+    store: &Store,
+    space: Option<&hyperconsciousness::id::Hash>,
+) -> Result<PeerSync> {
     let identity = Identity::load_or_create(store.root())?;
     let keys = runtime_keys(store.root(), &identity)?;
     let stream = if address.starts_with(relay::SCHEME) {
@@ -1226,7 +1230,7 @@ struct FileInventoryView {
     files: Vec<FileInventoryEntry>,
 }
 
-fn print_offload_receipt(receipt: &brainmesh::offload::Receipt, json: bool) -> Result<()> {
+fn print_offload_receipt(receipt: &hyperconsciousness::offload::Receipt, json: bool) -> Result<()> {
     if json {
         println!("{}", serde_json::to_string_pretty(receipt)?);
     } else {
@@ -1249,25 +1253,25 @@ fn finish_offload(
     target_dir: &Path,
     blobs: &Blobs,
     reference: &BlobRef,
-    mut journal: brainmesh::offload::Journal,
+    mut journal: hyperconsciousness::offload::Journal,
     newly_stored_chunks: usize,
     json: bool,
 ) -> Result<()> {
     // Persist `Evicting` before removing the first byte. A crash at any point
     // can rerun the exact idempotent deletion and still publish one receipt.
-    journal.progress = brainmesh::offload::Progress::Evicting {
+    journal.progress = hyperconsciousness::offload::Progress::Evicting {
         newly_stored_chunks,
     };
     journal.save(target_dir)?;
-    let released = brainmesh::pin::with_locked_policy(target_dir, |current| {
-        if current == brainmesh::pin::Policy::Metadata {
+    let released = hyperconsciousness::pin::with_locked_policy(target_dir, |current| {
+        if current == hyperconsciousness::pin::Policy::Metadata {
             blobs.evict_loose(&reference.chunks)?;
             Ok(true)
         } else {
             Ok(false)
         }
     })?;
-    let receipt = brainmesh::offload::Receipt {
+    let receipt = hyperconsciousness::offload::Receipt {
         schema: "hyperconsciousness.storage-offload-receipt.v1".to_string(),
         plan_id: journal.plan_id.clone(),
         peer: journal.peer.clone(),
@@ -1294,7 +1298,7 @@ fn finish_offload(
             0
         },
     };
-    journal.progress = brainmesh::offload::Progress::Complete {
+    journal.progress = hyperconsciousness::offload::Progress::Complete {
         receipt: receipt.clone(),
     };
     journal.save(target_dir)?;
@@ -1305,7 +1309,7 @@ fn offload_file(dir: &PathBuf, rest: &[String]) -> Result<()> {
     let options = parse_offload_options(rest)?;
     let (identity, target_dir) = selected_brain(dir, rest)?;
     let _lease = if options.apply {
-        Some(brainmesh::offload::OperationLease::acquire(
+        Some(hyperconsciousness::offload::OperationLease::acquire(
             &target_dir,
             options.expect.as_deref().expect("validated above"),
         )?)
@@ -1332,16 +1336,16 @@ fn offload_file(dir: &PathBuf, rest: &[String]) -> Result<()> {
     let mut existing_journal = None;
     if options.apply {
         let expected = options.expect.as_deref().expect("validated above");
-        if let Some(journal) = brainmesh::offload::Journal::load(&target_dir, expected)? {
+        if let Some(journal) = hyperconsciousness::offload::Journal::load(&target_dir, expected)? {
             journal.validate_binding(&options.name, &options.peer, selected_version, reference)?;
             match journal.progress.clone() {
-                brainmesh::offload::Progress::Complete { receipt } => {
+                hyperconsciousness::offload::Progress::Complete { receipt } => {
                     return print_offload_receipt(&receipt, options.json);
                 }
-                brainmesh::offload::Progress::RemoteProved {
+                hyperconsciousness::offload::Progress::RemoteProved {
                     newly_stored_chunks,
                 }
-                | brainmesh::offload::Progress::Evicting {
+                | hyperconsciousness::offload::Progress::Evicting {
                     newly_stored_chunks,
                 } => {
                     return finish_offload(
@@ -1353,7 +1357,7 @@ fn offload_file(dir: &PathBuf, rest: &[String]) -> Result<()> {
                         options.json,
                     );
                 }
-                brainmesh::offload::Progress::Started => {
+                hyperconsciousness::offload::Progress::Started => {
                     existing_journal = Some(journal);
                 }
             }
@@ -1367,23 +1371,23 @@ fn offload_file(dir: &PathBuf, rest: &[String]) -> Result<()> {
     let (route, target_kind) = match &keyless_remote {
         Some(remote) => (
             remote.binding(),
-            brainmesh::offload::TargetKind::KeylessRemote,
+            hyperconsciousness::offload::TargetKind::KeylessRemote,
         ),
         None => (
             remote_for(&read_peers(dir)?, &options.peer, remote_override()),
-            brainmesh::offload::TargetKind::KeyHoldingPeer,
+            hyperconsciousness::offload::TargetKind::KeyHoldingPeer,
         ),
     };
-    let policy = brainmesh::pin::load(&target_dir)?;
+    let policy = hyperconsciousness::pin::load(&target_dir)?;
     let preview = blobs.preview_evict_loose(&reference.chunks)?;
-    let request = brainmesh::offload::PlanRequest {
+    let request = hyperconsciousness::offload::PlanRequest {
         name: &options.name,
         peer: &options.peer,
         target_kind,
         space: options.space.as_deref(),
         json: options.json,
     };
-    let plan = brainmesh::offload::make_plan(
+    let plan = hyperconsciousness::offload::make_plan(
         &target_dir,
         &request,
         &route,
@@ -1444,7 +1448,7 @@ fn offload_file(dir: &PathBuf, rest: &[String]) -> Result<()> {
     }
 
     let mut journal =
-        existing_journal.unwrap_or_else(|| brainmesh::offload::Journal::started(&plan));
+        existing_journal.unwrap_or_else(|| hyperconsciousness::offload::Journal::started(&plan));
     journal.save(&target_dir)?;
     let stored = match keyless_remote {
         Some(remote) => {
@@ -1465,7 +1469,7 @@ fn offload_file(dir: &PathBuf, rest: &[String]) -> Result<()> {
             keys.current_key()?,
         )?,
     };
-    journal.progress = brainmesh::offload::Progress::RemoteProved {
+    journal.progress = hyperconsciousness::offload::Progress::RemoteProved {
         newly_stored_chunks: stored,
     };
     journal.save(&target_dir)?;
@@ -1534,7 +1538,7 @@ fn add_file(
 
     // Stream the source into bounded encrypted chunks. This local cache is
     // removed below only after the remote archive reproves the whole manifest.
-    brainmesh::guard::no_symlink(path)?;
+    hyperconsciousness::guard::no_symlink(path)?;
     let reference = blobs.put_for_epoch(
         std::fs::File::open(path)?,
         keys.current_epoch(),
@@ -1551,7 +1555,7 @@ fn add_file(
     let mut value: serde_json::Value = serde_json::from_str(&reference.to_json())?;
     value["kind"] = serde_json::json!("file");
     value["name"] = serde_json::json!(name);
-    value["of"] = serde_json::json!(brainmesh::id::Hash::of(name.as_bytes()).hex());
+    value["of"] = serde_json::json!(hyperconsciousness::id::Hash::of(name.as_bytes()).hex());
     if let Some(source) = source {
         value["source"] = serde_json::json!(source);
     }
@@ -1580,7 +1584,7 @@ fn add_file(
             .collect::<std::collections::BTreeSet<_>>()
             .len();
         println!("archive {host} confirmed all {unique} encrypted chunks ({stored} newly stored)");
-        if brainmesh::pin::load(dir)? == brainmesh::pin::Policy::Metadata {
+        if hyperconsciousness::pin::load(dir)? == hyperconsciousness::pin::Policy::Metadata {
             let evicted = blobs.evict_loose(&reference.chunks)?;
             println!(
                 "released {} local ciphertext bytes in {} chunks; {} packed chunks remain shared locally",
@@ -1726,10 +1730,10 @@ fn request_screenpipe_backup(port: u16, token: &[u8], destination: &Path) -> Res
 
 fn prepare_screenpipe_staging(path: &Path) -> Result<PathBuf> {
     if let Some(parent) = path.parent() {
-        brainmesh::guard::no_symlink(parent)?;
+        hyperconsciousness::guard::no_symlink(parent)?;
         std::fs::create_dir_all(parent)?;
     }
-    brainmesh::guard::no_symlink(path)?;
+    hyperconsciousness::guard::no_symlink(path)?;
     std::fs::create_dir_all(path)?;
     if !std::fs::symlink_metadata(path)?.is_dir() {
         return Err(Error::Malformed(
@@ -1764,7 +1768,7 @@ fn screenpipe_snapshot_path(staging: &Path) -> Result<PathBuf> {
 }
 
 fn validate_screenpipe_snapshot(path: &Path, reported_size: u64) -> Result<u64> {
-    brainmesh::guard::no_symlink(path)?;
+    hyperconsciousness::guard::no_symlink(path)?;
     let metadata = std::fs::symlink_metadata(path)?;
     if !metadata.is_file() || metadata.len() == 0 || metadata.len() != reported_size {
         return Err(Error::Denied(
@@ -1780,7 +1784,7 @@ fn validate_screenpipe_snapshot(path: &Path, reported_size: u64) -> Result<u64> 
 }
 
 fn remove_screenpipe_snapshot(path: &Path) -> Result<()> {
-    brainmesh::guard::no_symlink(path)?;
+    hyperconsciousness::guard::no_symlink(path)?;
     if !std::fs::symlink_metadata(path)?.is_file() {
         return Err(Error::Denied(
             "refusing to remove a replaced screenpipe snapshot",
@@ -1789,13 +1793,13 @@ fn remove_screenpipe_snapshot(path: &Path) -> Result<()> {
     std::fs::remove_file(path)?;
     #[cfg(unix)]
     if let Some(parent) = path.parent() {
-        brainmesh::fsync::durable(&File::open(parent)?)?;
+        hyperconsciousness::fsync::durable(&File::open(parent)?)?;
     }
     Ok(())
 }
 
 fn screenpipe_archive(dir: &PathBuf, host: &str, port: u16, staging: &Path) -> Result<()> {
-    if brainmesh::pin::load(dir)? != brainmesh::pin::Policy::Metadata {
+    if hyperconsciousness::pin::load(dir)? != hyperconsciousness::pin::Policy::Metadata {
         return Err(Error::Denied(
             "screenpipe archive needs local blob pin metadata so it can release duplicate ciphertext",
         ));
@@ -1922,14 +1926,14 @@ fn fetch_from_peer(
 
 /// name to id, from the personal brain, so a space can be called something
 /// a person would say out loud
-fn current_space(dir: &PathBuf, name: &str) -> Result<(brainmesh::id::Hash, u32)> {
+fn current_space(dir: &PathBuf, name: &str) -> Result<(hyperconsciousness::id::Hash, u32)> {
     let mut found = None;
     for value in payloads(dir, "space")? {
         if value.get("name").and_then(|n| n.as_str()) == Some(name) {
             let id = value
                 .get("id")
                 .and_then(|i| i.as_str())
-                .and_then(brainmesh::id::Hash::from_hex)
+                .and_then(hyperconsciousness::id::Hash::from_hex)
                 .ok_or(Error::Malformed("that space record is damaged"));
             let id = id?;
             let generation = value
@@ -1958,12 +1962,12 @@ fn current_space(dir: &PathBuf, name: &str) -> Result<(brainmesh::id::Hash, u32)
     }
 
     // an id works too, so a joiner who has no name yet is not stuck
-    brainmesh::id::Hash::from_hex(name)
+    hyperconsciousness::id::Hash::from_hex(name)
         .map(|id| (id, 1))
         .ok_or(Error::Malformed("no space by that name"))
 }
 
-fn space_id(dir: &PathBuf, name: &str) -> Result<brainmesh::id::Hash> {
+fn space_id(dir: &PathBuf, name: &str) -> Result<hyperconsciousness::id::Hash> {
     Ok(current_space(dir, name)?.0)
 }
 
@@ -1975,11 +1979,15 @@ fn space_identity(dir: &PathBuf, name: &str) -> Result<(Identity, PathBuf)> {
     Ok((personal.for_space(&space_dir)?, space_dir))
 }
 
-fn org_id(dir: &PathBuf, name: &str) -> Result<brainmesh::id::Hash> {
+fn org_id(dir: &PathBuf, name: &str) -> Result<hyperconsciousness::id::Hash> {
     let found: std::collections::BTreeSet<_> = payloads(dir, "org")?
         .into_iter()
         .filter(|value| value["name"].as_str() == Some(name))
-        .filter_map(|value| value["id"].as_str().and_then(brainmesh::id::Hash::from_hex))
+        .filter_map(|value| {
+            value["id"]
+                .as_str()
+                .and_then(hyperconsciousness::id::Hash::from_hex)
+        })
         .collect();
     match found.len() {
         1 => Ok(*found.iter().next().expect("one id")),
@@ -1992,19 +2000,19 @@ fn org_id(dir: &PathBuf, name: &str) -> Result<brainmesh::id::Hash> {
 
 fn org_roles(
     dir: &PathBuf,
-    org: brainmesh::id::Hash,
-) -> Result<Vec<(String, String, brainmesh::id::Hash, u32)>> {
+    org: hyperconsciousness::id::Hash,
+) -> Result<Vec<(String, String, hyperconsciousness::id::Hash, u32)>> {
     org_roles_from(&payloads(dir, "org_role")?, org)
 }
 
 fn org_roles_from(
     records: &[serde_json::Value],
-    org: brainmesh::id::Hash,
-) -> Result<Vec<(String, String, brainmesh::id::Hash, u32)>> {
+    org: hyperconsciousness::id::Hash,
+) -> Result<Vec<(String, String, hyperconsciousness::id::Hash, u32)>> {
     struct Candidate {
         role: String,
         name: String,
-        space: brainmesh::id::Hash,
+        space: hyperconsciousness::id::Hash,
         generation: u32,
         signed: bool,
     }
@@ -2020,7 +2028,7 @@ fn org_roles_from(
             value["space_name"].as_str(),
             value["space"]
                 .as_str()
-                .and_then(brainmesh::id::Hash::from_hex),
+                .and_then(hyperconsciousness::id::Hash::from_hex),
         ) else {
             continue;
         };
@@ -2038,21 +2046,21 @@ fn org_roles_from(
         let has_bundle = value["bundle"].is_string();
         let has_owner_bundle = value["owner_bundle"].is_string();
         let signed = if let Some(encoded) = value["state"].as_str() {
-            brainmesh::org::RoleState::decode(encoded).is_ok_and(|state| {
+            hyperconsciousness::org::RoleState::decode(encoded).is_ok_and(|state| {
                 state.org == org
                     && state.role == role
                     && state.generation == generation
                     && state.space == space
             })
         } else if let Some(encoded) = value["bundle"].as_str() {
-            brainmesh::org::InvitationBundle::decode(encoded).is_ok_and(|bundle| {
+            hyperconsciousness::org::InvitationBundle::decode(encoded).is_ok_and(|bundle| {
                 bundle.org == org
                     && bundle.roles.iter().any(|grant| {
                         grant.role == role && grant.generation == generation && grant.space == space
                     })
             })
         } else if let Some(encoded) = value["owner_bundle"].as_str() {
-            brainmesh::org::RoleOwnerBundle::decode(encoded).is_ok_and(|bundle| {
+            hyperconsciousness::org::RoleOwnerBundle::decode(encoded).is_ok_and(|bundle| {
                 bundle.org == org && bundle.role(role, generation, space).is_some()
             })
         } else {
@@ -2110,28 +2118,28 @@ fn org_roles_from(
 }
 
 enum OrgMemberInvitation {
-    Root(Box<brainmesh::org::InvitationBundle>),
-    Delegated(Box<brainmesh::org::DelegatedInvitation>),
-    Approved(Box<brainmesh::org::ApprovedInvitation>),
+    Root(Box<hyperconsciousness::org::InvitationBundle>),
+    Delegated(Box<hyperconsciousness::org::DelegatedInvitation>),
+    Approved(Box<hyperconsciousness::org::ApprovedInvitation>),
 }
 
 impl OrgMemberInvitation {
     fn decode(text: &str) -> Result<Self> {
-        if let Ok(bundle) = brainmesh::org::InvitationBundle::decode(text) {
+        if let Ok(bundle) = hyperconsciousness::org::InvitationBundle::decode(text) {
             return Ok(Self::Root(Box::new(bundle)));
         }
-        brainmesh::org::DelegatedInvitation::decode(text)
+        hyperconsciousness::org::DelegatedInvitation::decode(text)
             .map(Box::new)
             .map(Self::Delegated)
             .or_else(|_| {
-                brainmesh::org::ApprovedInvitation::decode(text)
+                hyperconsciousness::org::ApprovedInvitation::decode(text)
                     .map(Box::new)
                     .map(Self::Approved)
             })
             .map_err(|_| Error::Malformed("not an organization member invitation"))
     }
 
-    fn org(&self) -> brainmesh::id::Hash {
+    fn org(&self) -> hyperconsciousness::id::Hash {
         match self {
             Self::Root(bundle) => bundle.org,
             Self::Delegated(bundle) => bundle.org,
@@ -2139,7 +2147,7 @@ impl OrgMemberInvitation {
         }
     }
 
-    fn authority(&self) -> brainmesh::id::DeviceId {
+    fn authority(&self) -> hyperconsciousness::id::DeviceId {
         match self {
             Self::Root(bundle) => bundle.authority,
             Self::Delegated(bundle) => bundle.authority,
@@ -2155,7 +2163,7 @@ impl OrgMemberInvitation {
         }
     }
 
-    fn for_device(&self) -> brainmesh::id::DeviceId {
+    fn for_device(&self) -> hyperconsciousness::id::DeviceId {
         match self {
             Self::Root(bundle) => bundle.for_device,
             Self::Delegated(bundle) => bundle.for_device,
@@ -2171,7 +2179,7 @@ impl OrgMemberInvitation {
         }
     }
 
-    fn roles(&self) -> &[brainmesh::org::RoleInvitation] {
+    fn roles(&self) -> &[hyperconsciousness::org::RoleInvitation] {
         match self {
             Self::Root(bundle) => &bundle.roles,
             Self::Delegated(bundle) => &bundle.roles,
@@ -2179,7 +2187,7 @@ impl OrgMemberInvitation {
         }
     }
 
-    fn manager(&self) -> Option<brainmesh::id::DeviceId> {
+    fn manager(&self) -> Option<hyperconsciousness::id::DeviceId> {
         match self {
             Self::Root(_) => None,
             Self::Delegated(bundle) => Some(bundle.manager),
@@ -2207,7 +2215,7 @@ impl OrgMemberInvitation {
         }
     }
 
-    fn id(&self) -> Result<brainmesh::id::Hash> {
+    fn id(&self) -> Result<hyperconsciousness::id::Hash> {
         match self {
             Self::Root(bundle) => bundle.id(),
             Self::Delegated(bundle) => bundle.id(),
@@ -2225,8 +2233,8 @@ impl OrgMemberInvitation {
 
     fn role_authority(
         &self,
-        role: &brainmesh::org::RoleInvitation,
-    ) -> Result<Option<brainmesh::id::DeviceId>> {
+        role: &hyperconsciousness::org::RoleInvitation,
+    ) -> Result<Option<hyperconsciousness::id::DeviceId>> {
         match self {
             Self::Root(_) => Ok(None),
             Self::Delegated(bundle) => Ok(Some(bundle.role_owner(role)?.role_authority)),
@@ -2246,46 +2254,49 @@ impl OrgMemberInvitation {
         &self,
         signing: &ed25519_dalek::SigningKey,
         at: u64,
-    ) -> Result<brainmesh::org::Acceptance> {
+    ) -> Result<hyperconsciousness::org::Acceptance> {
         match self {
-            Self::Root(bundle) => brainmesh::org::Acceptance::issue(bundle, signing, at),
+            Self::Root(bundle) => hyperconsciousness::org::Acceptance::issue(bundle, signing, at),
             Self::Delegated(bundle) => {
-                brainmesh::org::Acceptance::issue_delegated(bundle, signing, at)
+                hyperconsciousness::org::Acceptance::issue_delegated(bundle, signing, at)
             }
             Self::Approved(bundle) => {
-                brainmesh::org::Acceptance::issue(&bundle.invitation, signing, at)
+                hyperconsciousness::org::Acceptance::issue(&bundle.invitation, signing, at)
             }
         }
     }
 
     fn membership(
         &self,
-        acceptance: &brainmesh::org::Acceptance,
+        acceptance: &hyperconsciousness::org::Acceptance,
         authority: &ed25519_dalek::SigningKey,
         at: u64,
-    ) -> Result<brainmesh::org::Membership> {
+    ) -> Result<hyperconsciousness::org::Membership> {
         match self {
             Self::Root(bundle) => {
-                brainmesh::org::Membership::issue(bundle, acceptance, authority, at)
+                hyperconsciousness::org::Membership::issue(bundle, acceptance, authority, at)
             }
-            Self::Delegated(bundle) => {
-                brainmesh::org::Membership::issue_delegated(bundle, acceptance, authority, at)
-            }
-            Self::Approved(bundle) => {
-                brainmesh::org::Membership::issue(&bundle.invitation, acceptance, authority, at)
-            }
+            Self::Delegated(bundle) => hyperconsciousness::org::Membership::issue_delegated(
+                bundle, acceptance, authority, at,
+            ),
+            Self::Approved(bundle) => hyperconsciousness::org::Membership::issue(
+                &bundle.invitation,
+                acceptance,
+                authority,
+                at,
+            ),
         }
     }
 }
 
 fn org_member_invitation_from(value: &serde_json::Value) -> Result<OrgMemberInvitation> {
     if let Some(encoded) = value["approved_bundle"].as_str() {
-        return brainmesh::org::ApprovedInvitation::decode(encoded)
+        return hyperconsciousness::org::ApprovedInvitation::decode(encoded)
             .map(Box::new)
             .map(OrgMemberInvitation::Approved);
     }
     if let Some(encoded) = value["delegated_bundle"].as_str() {
-        return brainmesh::org::DelegatedInvitation::decode(encoded)
+        return hyperconsciousness::org::DelegatedInvitation::decode(encoded)
             .map(Box::new)
             .map(OrgMemberInvitation::Delegated);
     }
@@ -2294,7 +2305,7 @@ fn org_member_invitation_from(value: &serde_json::Value) -> Result<OrgMemberInvi
         .ok_or(Error::Malformed(
             "organization member record has no signed invitation",
         ))
-        .and_then(brainmesh::org::InvitationBundle::decode)
+        .and_then(hyperconsciousness::org::InvitationBundle::decode)
         .map(Box::new)
         .map(OrgMemberInvitation::Root)
 }
@@ -2318,7 +2329,7 @@ fn org_member_record(invitation: &OrgMemberInvitation) -> Result<String> {
         .collect::<Vec<_>>();
     let mut value = serde_json::json!({
         "kind": "org_member",
-        "sensitivity": brainmesh::grant::PERSONAL,
+        "sensitivity": hyperconsciousness::grant::PERSONAL,
         "org": invitation.org().hex(),
         "device": invitation.for_device().hex(),
         "roles": role_names,
@@ -2346,7 +2357,7 @@ fn org_member_record(invitation: &OrgMemberInvitation) -> Result<String> {
             object.insert("manager".into(), serde_json::json!(bundle.manager.hex()));
         }
         OrgMemberInvitation::Approved(bundle) => {
-            let decision = brainmesh::org::AccessDecisionEnvelope::seal_approved(bundle)?;
+            let decision = hyperconsciousness::org::AccessDecisionEnvelope::seal_approved(bundle)?;
             object.insert(
                 "approved_bundle".into(),
                 serde_json::json!(invitation.encode()?),
@@ -2377,9 +2388,9 @@ fn org_member_record(invitation: &OrgMemberInvitation) -> Result<String> {
 struct LegacyRoleMigration {
     role: String,
     space_name: String,
-    space: brainmesh::id::Hash,
+    space: hyperconsciousness::id::Hash,
     generation: u32,
-    previous_space: Option<brainmesh::id::Hash>,
+    previous_space: Option<hyperconsciousness::id::Hash>,
 }
 
 /// Build the exact unsigned role states an organization owner may bless.
@@ -2389,13 +2400,13 @@ struct LegacyRoleMigration {
 /// permanent authority.
 fn legacy_role_migrations_from(
     records: &[serde_json::Value],
-    org: brainmesh::id::Hash,
+    org: hyperconsciousness::id::Hash,
 ) -> Result<Vec<LegacyRoleMigration>> {
     #[derive(Clone, Debug, PartialEq, Eq)]
     struct Generation {
         space_name: String,
-        space: brainmesh::id::Hash,
-        previous_space: Option<brainmesh::id::Hash>,
+        space: hyperconsciousness::id::Hash,
+        previous_space: Option<hyperconsciousness::id::Hash>,
     }
 
     fn field<'a>(value: &'a serde_json::Value, name: &str) -> Result<&'a str> {
@@ -2424,7 +2435,7 @@ fn legacy_role_migrations_from(
     fn optional_space(
         value: &serde_json::Value,
         name: &str,
-    ) -> Result<Option<brainmesh::id::Hash>> {
+    ) -> Result<Option<hyperconsciousness::id::Hash>> {
         let Some(raw) = value.get(name) else {
             return Ok(None);
         };
@@ -2432,7 +2443,7 @@ fn legacy_role_migrations_from(
             return Ok(None);
         }
         raw.as_str()
-            .and_then(brainmesh::id::Hash::from_hex)
+            .and_then(hyperconsciousness::id::Hash::from_hex)
             .map(Some)
             .ok_or(Error::Malformed(
                 "legacy organization role predecessor is invalid",
@@ -2452,7 +2463,7 @@ fn legacy_role_migrations_from(
     for value in &matching {
         let role = field(value, "role")?;
         let generation = generation(value)?;
-        let space = brainmesh::id::Hash::from_hex(field(value, "space")?).ok_or(
+        let space = hyperconsciousness::id::Hash::from_hex(field(value, "space")?).ok_or(
             Error::Malformed("legacy organization role space is invalid"),
         )?;
 
@@ -2460,7 +2471,7 @@ fn legacy_role_migrations_from(
             let encoded = encoded
                 .as_str()
                 .ok_or(Error::Malformed("organization role state proof is invalid"))?;
-            let state = brainmesh::org::RoleState::decode(encoded)?;
+            let state = hyperconsciousness::org::RoleState::decode(encoded)?;
             if state.org != org
                 || state.role != role
                 || state.generation != generation
@@ -2476,7 +2487,7 @@ fn legacy_role_migrations_from(
             let encoded = encoded.as_str().ok_or(Error::Malformed(
                 "organization role bundle proof is invalid",
             ))?;
-            let bundle = brainmesh::org::InvitationBundle::decode(encoded)?;
+            let bundle = hyperconsciousness::org::InvitationBundle::decode(encoded)?;
             if bundle.org != org
                 || !bundle.roles.iter().any(|grant| {
                     grant.role == role && grant.generation == generation && grant.space == space
@@ -2492,7 +2503,7 @@ fn legacy_role_migrations_from(
             let encoded = encoded
                 .as_str()
                 .ok_or(Error::Malformed("organization role-owner proof is invalid"))?;
-            let bundle = brainmesh::org::RoleOwnerBundle::decode(encoded)?;
+            let bundle = hyperconsciousness::org::RoleOwnerBundle::decode(encoded)?;
             if bundle.org != org || bundle.role(role, generation, space).is_none() {
                 return Err(Error::Denied(
                     "organization role-owner proof does not match its summary",
@@ -2521,7 +2532,7 @@ fn legacy_role_migrations_from(
         let generation = generation(value)?;
         let candidate = Generation {
             space_name: field(value, "space_name")?.to_string(),
-            space: brainmesh::id::Hash::from_hex(field(value, "space")?).ok_or(
+            space: hyperconsciousness::id::Hash::from_hex(field(value, "space")?).ok_or(
                 Error::Malformed("legacy organization role space is invalid"),
             )?,
             previous_space: optional_space(value, "previous_space")?,
@@ -2578,12 +2589,12 @@ fn legacy_role_migrations_from(
 fn migrate_org_roles(
     dir: &PathBuf,
     org_name: &str,
-    org: brainmesh::id::Hash,
+    org: hyperconsciousness::id::Hash,
 ) -> Result<Vec<(String, u32)>> {
     // Load every authority and validate every lineage before appending any of
     // the certificates. append_many_to then commits the batch under one log
     // lock, so an error cannot leave half the company's roles migrated.
-    let authority = brainmesh::org::owner_authority(dir, org)?;
+    let authority = hyperconsciousness::org::owner_authority(dir, org)?;
     let migrations = legacy_role_migrations_from(&payloads(dir, "org_role")?, org)?;
     if migrations.is_empty() {
         return Ok(Vec::new());
@@ -2600,7 +2611,7 @@ fn migrate_org_roles(
             ));
         }
         let identity = personal.for_space(&role_dir)?;
-        if identity.authority_role() != brainmesh::identity::AuthorityRole::Owner {
+        if identity.authority_role() != hyperconsciousness::identity::AuthorityRole::Owner {
             return Err(Error::Denied(
                 "legacy role migration requires the current compartment owner; harden it first",
             ));
@@ -2614,7 +2625,7 @@ fn migrate_org_roles(
         // organization root blesses this compartment.
         identity.grant_authority_signing()?;
 
-        let state = brainmesh::org::RoleState::issue(
+        let state = hyperconsciousness::org::RoleState::issue(
             org,
             &authority,
             migration.role.clone(),
@@ -2625,7 +2636,7 @@ fn migrate_org_roles(
         signed.push(
             serde_json::json!({
                 "kind": "org_role",
-                "sensitivity": brainmesh::grant::PERSONAL,
+                "sensitivity": hyperconsciousness::grant::PERSONAL,
                 "org": org.hex(),
                 "org_name": org_name,
                 "role": migration.role,
@@ -2647,7 +2658,7 @@ fn migrate_org_roles(
 fn role_space_name(
     org_name: &str,
     role: &str,
-    org: brainmesh::id::Hash,
+    org: hyperconsciousness::id::Hash,
     generation: u32,
 ) -> String {
     format!("{org_name}/{role}@{}#g{generation}", org.short())
@@ -2655,10 +2666,10 @@ fn role_space_name(
 
 fn delegated_owner_bundle(
     dir: &PathBuf,
-    org: brainmesh::id::Hash,
-    device: brainmesh::id::DeviceId,
+    org: hyperconsciousness::id::Hash,
+    device: hyperconsciousness::id::DeviceId,
     requested: &std::collections::BTreeSet<String>,
-) -> Result<brainmesh::org::RoleOwnerBundle> {
+) -> Result<hyperconsciousness::org::RoleOwnerBundle> {
     let current = org_roles(dir, org)?
         .into_iter()
         .map(|(role, _, space, generation)| (role, (space, generation)))
@@ -2674,7 +2685,7 @@ fn delegated_owner_bundle(
         let encoded = value["bundle"].as_str().ok_or(Error::Malformed(
             "role-owner record is missing its root-signed bundle",
         ))?;
-        let bundle = brainmesh::org::RoleOwnerBundle::decode(encoded)?;
+        let bundle = hyperconsciousness::org::RoleOwnerBundle::decode(encoded)?;
         if bundle.org != org || bundle.for_device != device {
             return Err(Error::Denied(
                 "role-owner record does not match its signed bundle",
@@ -2689,7 +2700,7 @@ fn delegated_owner_bundle(
             candidates.push(bundle);
         }
     }
-    candidates.sort_by_key(|bundle| bundle.id().unwrap_or(brainmesh::id::ZERO_HASH));
+    candidates.sort_by_key(|bundle| bundle.id().unwrap_or(hyperconsciousness::id::ZERO_HASH));
     let bundle = candidates.into_iter().next().ok_or(Error::Denied(
         "this device is not a root-authorized co-owner of every requested current role",
     ))?;
@@ -2703,7 +2714,7 @@ fn delegated_owner_bundle(
             .find(|role| role.role == *wanted)
             .ok_or(Error::Denied("role-owner bundle is incomplete"))?;
         let identity = personal.for_space(&space::dir_of(dir, &role.space))?;
-        if identity.authority_role() != brainmesh::identity::AuthorityRole::Owner
+        if identity.authority_role() != hyperconsciousness::identity::AuthorityRole::Owner
             || identity.grant_authority()? != role.role_authority
             || space::id_of(identity.brain_key()?) != role.space
         {
@@ -2717,11 +2728,11 @@ fn delegated_owner_bundle(
 
 fn delegated_admin_bundle(
     dir: &PathBuf,
-    org: brainmesh::id::Hash,
-    device: brainmesh::id::DeviceId,
+    org: hyperconsciousness::id::Hash,
+    device: hyperconsciousness::id::DeviceId,
     requested: &std::collections::BTreeSet<String>,
     now: u64,
-) -> Result<brainmesh::org::AdminBundle> {
+) -> Result<hyperconsciousness::org::AdminBundle> {
     let org_hex = org.hex();
     let device_hex = device.hex();
     let revoked = revoked_admin_certificates(dir, org)?;
@@ -2735,7 +2746,7 @@ fn delegated_admin_bundle(
         let encoded = value["bundle"].as_str().ok_or(Error::Malformed(
             "administrator record is missing its root-signed bundle",
         ))?;
-        let bundle = brainmesh::org::AdminBundle::decode(encoded)?;
+        let bundle = hyperconsciousness::org::AdminBundle::decode(encoded)?;
         if bundle.org != org || bundle.for_device != device {
             return Err(Error::Denied(
                 "administrator record does not match its signed bundle",
@@ -2776,14 +2787,14 @@ fn delegated_admin_bundle(
 
 fn revoked_admin_certificates(
     dir: &PathBuf,
-    org: brainmesh::id::Hash,
-) -> Result<std::collections::BTreeSet<brainmesh::id::Hash>> {
+    org: hyperconsciousness::id::Hash,
+) -> Result<std::collections::BTreeSet<hyperconsciousness::id::Hash>> {
     let mut revoked = std::collections::BTreeSet::new();
     for value in payloads(dir, "org_admin_revocation")? {
         let encoded = value["bundle"].as_str().ok_or(Error::Malformed(
             "administrator revocation record is missing its root signature",
         ))?;
-        let revocation = brainmesh::org::AdminRevocation::decode(encoded)?;
+        let revocation = hyperconsciousness::org::AdminRevocation::decode(encoded)?;
         if revocation.org == org {
             revoked.insert(revocation.certificate);
         }
@@ -2793,14 +2804,16 @@ fn revoked_admin_certificates(
 
 fn access_denials(
     dir: &PathBuf,
-    org: brainmesh::id::Hash,
-) -> Result<std::collections::BTreeMap<brainmesh::id::Hash, brainmesh::org::AccessDenial>> {
+    org: hyperconsciousness::id::Hash,
+) -> Result<
+    std::collections::BTreeMap<hyperconsciousness::id::Hash, hyperconsciousness::org::AccessDenial>,
+> {
     let mut denied = std::collections::BTreeMap::new();
     for value in payloads(dir, "org_access_denial")? {
         let encoded = value["denial"].as_str().ok_or(Error::Malformed(
             "access denial record is missing its root-signed decision",
         ))?;
-        let denial = brainmesh::org::AccessDenial::decode(encoded)?;
+        let denial = hyperconsciousness::org::AccessDenial::decode(encoded)?;
         let request = denial.request.id()?;
         if value["request"].as_str() != Some(request.hex().as_str()) {
             return Err(Error::Malformed(
@@ -2816,14 +2829,19 @@ fn access_denials(
 
 fn approved_access_requests(
     dir: &PathBuf,
-    org: brainmesh::id::Hash,
-) -> Result<std::collections::BTreeMap<brainmesh::id::Hash, brainmesh::org::ApprovedInvitation>> {
+    org: hyperconsciousness::id::Hash,
+) -> Result<
+    std::collections::BTreeMap<
+        hyperconsciousness::id::Hash,
+        hyperconsciousness::org::ApprovedInvitation,
+    >,
+> {
     let mut approved = std::collections::BTreeMap::new();
     for value in payloads(dir, "org_member")? {
         let Some(encoded) = value["approved_bundle"].as_str() else {
             continue;
         };
-        let invitation = brainmesh::org::ApprovedInvitation::decode(encoded)?;
+        let invitation = hyperconsciousness::org::ApprovedInvitation::decode(encoded)?;
         let request = invitation.request.id()?;
         let request_hex = request.hex();
         if value["access_request"].as_str() != Some(request_hex.as_str()) {
@@ -2846,8 +2864,8 @@ pub(crate) enum AccessDecisionLookup {
 
 pub(crate) fn access_decision_envelope(
     dir: &PathBuf,
-    org: brainmesh::id::Hash,
-    request: brainmesh::id::Hash,
+    org: hyperconsciousness::id::Hash,
+    request: hyperconsciousness::id::Hash,
 ) -> Result<AccessDecisionLookup> {
     let denials = access_denials(dir, org)?;
     let approvals = approved_access_requests(dir, org)?;
@@ -2874,7 +2892,7 @@ pub(crate) fn access_decision_envelope(
         let Some(encoded) = value["decision_envelope"].as_str() else {
             continue;
         };
-        let envelope = brainmesh::org::AccessDecisionEnvelope::decode(encoded)?;
+        let envelope = hyperconsciousness::org::AccessDecisionEnvelope::decode(encoded)?;
         if envelope.org != org || envelope.request != request {
             return Err(Error::Malformed(
                 "stored access decision envelope does not match its record",
@@ -2884,9 +2902,9 @@ pub(crate) fn access_decision_envelope(
     }
 
     let envelope = if let Some(denial) = denial {
-        brainmesh::org::AccessDecisionEnvelope::seal_denied(denial)?
+        hyperconsciousness::org::AccessDecisionEnvelope::seal_denied(denial)?
     } else {
-        brainmesh::org::AccessDecisionEnvelope::seal_approved(
+        hyperconsciousness::org::AccessDecisionEnvelope::seal_approved(
             approval.expect("one verified decision exists"),
         )?
     };
@@ -2907,7 +2925,7 @@ fn queued_access_envelope(dir: &PathBuf, prefix: &str) -> Result<String> {
         let encoded = value["envelope"].as_str().ok_or(Error::Malformed(
             "queued access record is missing its encrypted envelope",
         ))?;
-        let envelope = brainmesh::org::AccessEnvelope::decode(encoded)?;
+        let envelope = hyperconsciousness::org::AccessEnvelope::decode(encoded)?;
         if envelope.request.hex().starts_with(prefix) {
             if found.is_some() {
                 return Err(Error::Malformed("queued request id prefix is ambiguous"));
@@ -2919,23 +2937,23 @@ fn queued_access_envelope(dir: &PathBuf, prefix: &str) -> Result<String> {
 }
 
 pub(crate) struct ReceivedAccessEnvelope {
-    pub request: brainmesh::id::Hash,
+    pub request: hyperconsciousness::id::Hash,
     pub organization: String,
     pub queued: bool,
 }
 
 pub(crate) fn receive_access_envelope(
     dir: &PathBuf,
-    expected_org: Option<brainmesh::id::Hash>,
+    expected_org: Option<hyperconsciousness::id::Hash>,
     encoded: &str,
 ) -> Result<ReceivedAccessEnvelope> {
-    let envelope = brainmesh::org::AccessEnvelope::decode(encoded)?;
+    let envelope = hyperconsciousness::org::AccessEnvelope::decode(encoded)?;
     if expected_org.is_some_and(|org| org != envelope.org) {
         return Err(Error::Denied(
             "access envelope belongs to another organization inbox",
         ));
     }
-    let authority = brainmesh::org::owner_authority(dir, envelope.org)?;
+    let authority = hyperconsciousness::org::owner_authority(dir, envelope.org)?;
     let request = envelope.open(&authority)?;
     let received_at = Clock::new().now().millis;
     request.verify_at(received_at)?;
@@ -2954,7 +2972,7 @@ pub(crate) fn receive_access_envelope(
         dir,
         &serde_json::json!({
             "kind": "org_access_inbox",
-            "sensitivity": brainmesh::grant::PERSONAL,
+            "sensitivity": hyperconsciousness::grant::PERSONAL,
             "org": request.org.hex(),
             "request": request_hex,
             "received_at": received_at,
@@ -2969,7 +2987,10 @@ pub(crate) fn receive_access_envelope(
     })
 }
 
-fn submit_access_envelope(envelope: &brainmesh::org::AccessEnvelope, url: &str) -> Result<bool> {
+fn submit_access_envelope(
+    envelope: &hyperconsciousness::org::AccessEnvelope,
+    url: &str,
+) -> Result<bool> {
     let url = url.trim();
     if !http::valid_public_url(url) || !url.ends_with("/v1/org/inbox") || url.contains('?') {
         return Err(Error::Malformed(
@@ -3012,7 +3033,10 @@ fn submit_access_envelope(envelope: &brainmesh::org::AccessEnvelope, url: &str) 
         .ok_or(Error::Malformed("organization inbox omitted queue state"))
 }
 
-fn local_access_request(dir: &PathBuf, prefix: &str) -> Result<brainmesh::org::AccessRequest> {
+fn local_access_request(
+    dir: &PathBuf,
+    prefix: &str,
+) -> Result<hyperconsciousness::org::AccessRequest> {
     if prefix.len() < 8
         || !prefix.as_bytes().iter().all(u8::is_ascii_hexdigit)
         || prefix != prefix.to_ascii_lowercase()
@@ -3026,7 +3050,7 @@ fn local_access_request(dir: &PathBuf, prefix: &str) -> Result<brainmesh::org::A
         let encoded = value["bundle"].as_str().ok_or(Error::Malformed(
             "local access request record is missing its signed request",
         ))?;
-        let request = brainmesh::org::AccessRequest::decode(encoded)?;
+        let request = hyperconsciousness::org::AccessRequest::decode(encoded)?;
         let request_id = request.id()?;
         let request_hex = request_id.hex();
         if value["request"].as_str() != Some(request_hex.as_str()) {
@@ -3045,9 +3069,9 @@ fn local_access_request(dir: &PathBuf, prefix: &str) -> Result<brainmesh::org::A
 }
 
 fn fetch_access_decision(
-    request: &brainmesh::org::AccessRequest,
+    request: &hyperconsciousness::org::AccessRequest,
     inbox_url: &str,
-) -> Result<Option<brainmesh::org::AccessDecisionEnvelope>> {
+) -> Result<Option<hyperconsciousness::org::AccessDecisionEnvelope>> {
     let inbox_url = inbox_url.trim();
     if !http::valid_public_url(inbox_url)
         || !inbox_url.ends_with("/v1/org/inbox")
@@ -3088,7 +3112,7 @@ fn fetch_access_decision(
     let response = std::str::from_utf8(&output.stdout)
         .map_err(|_| Error::Malformed("organization inbox returned non-text decision data"))?
         .trim();
-    if let Ok(envelope) = brainmesh::org::AccessDecisionEnvelope::decode(response) {
+    if let Ok(envelope) = hyperconsciousness::org::AccessDecisionEnvelope::decode(response) {
         if envelope.org != request.org || envelope.request != request_id {
             return Err(Error::Denied(
                 "organization inbox returned a decision for another request",
@@ -3111,8 +3135,8 @@ fn fetch_access_decision(
 
 fn store_access_decision(
     dir: &PathBuf,
-    decision: &brainmesh::org::AccessDecision,
-    envelope: &brainmesh::org::AccessDecisionEnvelope,
+    decision: &hyperconsciousness::org::AccessDecision,
+    envelope: &hyperconsciousness::org::AccessDecisionEnvelope,
 ) -> Result<bool> {
     let request = decision.request().id()?;
     let request_hex = request.hex();
@@ -3124,7 +3148,7 @@ fn store_access_decision(
         let prior = value["bundle"].as_str().ok_or(Error::Malformed(
             "local access decision record is missing its signed decision",
         ))?;
-        let prior = brainmesh::org::AccessDecision::decode(prior)?;
+        let prior = hyperconsciousness::org::AccessDecision::decode(prior)?;
         if prior.encode()? != encoded {
             return Err(Error::Denied(
                 "conflicting root decisions exist for this access request",
@@ -3133,14 +3157,14 @@ fn store_access_decision(
         return Ok(false);
     }
     let status = match decision {
-        brainmesh::org::AccessDecision::Approved(_) => "approved",
-        brainmesh::org::AccessDecision::Denied(_) => "denied",
+        hyperconsciousness::org::AccessDecision::Approved(_) => "approved",
+        hyperconsciousness::org::AccessDecision::Denied(_) => "denied",
     };
     append(
         dir,
         &serde_json::json!({
             "kind": "org_access_decision",
-            "sensitivity": brainmesh::grant::PERSONAL,
+            "sensitivity": hyperconsciousness::grant::PERSONAL,
             "org": decision.request().org.hex(),
             "request": request_hex,
             "status": status,
@@ -3152,7 +3176,10 @@ fn store_access_decision(
     Ok(true)
 }
 
-fn local_access_decision(dir: &PathBuf, prefix: &str) -> Result<brainmesh::org::AccessDecision> {
+fn local_access_decision(
+    dir: &PathBuf,
+    prefix: &str,
+) -> Result<hyperconsciousness::org::AccessDecision> {
     if prefix.len() < 8
         || !prefix.as_bytes().iter().all(u8::is_ascii_hexdigit)
         || prefix != prefix.to_ascii_lowercase()
@@ -3166,7 +3193,7 @@ fn local_access_decision(dir: &PathBuf, prefix: &str) -> Result<brainmesh::org::
         let encoded = value["bundle"].as_str().ok_or(Error::Malformed(
             "local access decision record is missing its signed decision",
         ))?;
-        let decision = brainmesh::org::AccessDecision::decode(encoded)?;
+        let decision = hyperconsciousness::org::AccessDecision::decode(encoded)?;
         let request = decision.request().id()?;
         let request_hex = request.hex();
         if value["request"].as_str() != Some(request_hex.as_str()) {
@@ -3192,18 +3219,18 @@ fn local_access_decision(dir: &PathBuf, prefix: &str) -> Result<brainmesh::org::
     Ok(decision)
 }
 
-fn print_access_decision(decision: &brainmesh::org::AccessDecision) -> Result<()> {
+fn print_access_decision(decision: &hyperconsciousness::org::AccessDecision) -> Result<()> {
     println!("{}", decision.encode()?);
     println!();
     match decision {
-        brainmesh::org::AccessDecision::Approved(approved) => {
+        hyperconsciousness::org::AccessDecision::Approved(approved) => {
             println!(
                 "organization root approved request {}",
                 approved.request.id()?.short()
             );
             println!("install with: hc org join <the first line>");
         }
-        brainmesh::org::AccessDecision::Denied(denial) => {
+        hyperconsciousness::org::AccessDecision::Denied(denial) => {
             println!(
                 "organization root denied request {}",
                 denial.request.id()?.short()
@@ -3240,8 +3267,8 @@ fn days_option(rest: &[String], first_optional: usize, default: u64) -> Result<u
 }
 
 fn accepted_roles_are_current(
-    roles: &[brainmesh::org::AcceptedRole],
-    current: &[(String, String, brainmesh::id::Hash, u32)],
+    roles: &[hyperconsciousness::org::AcceptedRole],
+    current: &[(String, String, hyperconsciousness::id::Hash, u32)],
 ) -> bool {
     let current = current
         .iter()
@@ -3253,8 +3280,8 @@ fn accepted_roles_are_current(
 }
 
 fn admin_roles_are_current(
-    roles: &[brainmesh::org::AdminRole],
-    current: &[(String, String, brainmesh::id::Hash, u32)],
+    roles: &[hyperconsciousness::org::AdminRole],
+    current: &[(String, String, hyperconsciousness::id::Hash, u32)],
 ) -> bool {
     let current = current
         .iter()
@@ -3285,12 +3312,12 @@ fn selected_brain(dir: &PathBuf, rest: &[String]) -> Result<(Identity, PathBuf)>
     Ok((Identity::load_existing_for_brain(dir)?, dir.clone()))
 }
 
-fn local_blob_status(root: &Path) -> Result<brainmesh::pin::Status> {
+fn local_blob_status(root: &Path) -> Result<hyperconsciousness::pin::Status> {
     let identity = Identity::load_existing_for_brain(root)?;
     let keys = runtime_keys_read_only(root, &identity)?;
     let store = Store::open(root)?;
     let blobs = Blobs::open(root)?;
-    brainmesh::pin::status(root, &store, &blobs, &keys)
+    hyperconsciousness::pin::status(root, &store, &blobs, &keys)
 }
 
 #[derive(serde::Serialize)]
@@ -3306,7 +3333,7 @@ struct BlobStatusView {
     satisfied: bool,
 }
 
-fn blob_status_view(status: &brainmesh::pin::Status) -> BlobStatusView {
+fn blob_status_view(status: &hyperconsciousness::pin::Status) -> BlobStatusView {
     BlobStatusView {
         schema: "hyperconsciousness.blob-status.v1",
         retention: status.policy.name(),
@@ -3320,7 +3347,7 @@ fn blob_status_view(status: &brainmesh::pin::Status) -> BlobStatusView {
     }
 }
 
-fn print_blob_status(status: &brainmesh::pin::Status) {
+fn print_blob_status(status: &hyperconsciousness::pin::Status) {
     println!("blob policy {}", status.policy.name());
     if status.quarantined_packs > 0 {
         println!(
@@ -3328,7 +3355,7 @@ fn print_blob_status(status: &brainmesh::pin::Status) {
             status.quarantined_packs
         );
     }
-    if status.policy == brainmesh::pin::Policy::Metadata {
+    if status.policy == hyperconsciousness::pin::Policy::Metadata {
         println!("this device retains records and fetches file bytes on demand");
         return;
     }
@@ -3355,7 +3382,7 @@ fn print_blob_status(status: &brainmesh::pin::Status) {
 fn report_incomplete_pins(root: &Path) -> Result<usize> {
     let mut missing = 0usize;
     let personal = local_blob_status(root)?;
-    if personal.policy == brainmesh::pin::Policy::All && !personal.satisfied() {
+    if personal.policy == hyperconsciousness::pin::Policy::All && !personal.satisfied() {
         eprintln!(
             "personal blob archive incomplete: {} required chunks still missing",
             personal.missing_chunks.len()
@@ -3365,7 +3392,7 @@ fn report_incomplete_pins(root: &Path) -> Result<usize> {
     for id in space::list(root)? {
         let dir = space::dir_of(root, &id);
         let status = local_blob_status(&dir)?;
-        if status.policy == brainmesh::pin::Policy::All && !status.satisfied() {
+        if status.policy == hyperconsciousness::pin::Policy::All && !status.satisfied() {
             eprintln!(
                 "space {} blob archive incomplete: {} required chunks still missing",
                 id.short(),
@@ -3401,11 +3428,11 @@ fn scrub_pinned_archives(root: &Path) -> Result<ArchiveScrub> {
         let keys = runtime_keys(&dir, &identity)?;
         let store = Store::open(&dir)?;
         let blobs = Blobs::open(&dir)?;
-        let status = brainmesh::pin::status(&dir, &store, &blobs, &keys)?;
-        if status.policy != brainmesh::pin::Policy::All {
+        let status = hyperconsciousness::pin::status(&dir, &store, &blobs, &keys)?;
+        if status.policy != hyperconsciousness::pin::Policy::All {
             continue;
         }
-        let verified = brainmesh::pin::verify(&status, &blobs, &keys)?;
+        let verified = hyperconsciousness::pin::verify(&status, &blobs, &keys)?;
         if !verified.damaged_chunks.is_empty() {
             eprintln!(
                 "{label} blob archive quarantined {} corrupt chunks for peer repair",
@@ -3542,7 +3569,7 @@ fn stamp_of(millis: u64) -> String {
     )
 }
 
-fn identity_space_id(identity: &Identity) -> Result<brainmesh::id::Hash> {
+fn identity_space_id(identity: &Identity) -> Result<hyperconsciousness::id::Hash> {
     Ok(space::id_of(identity.brain_key()?))
 }
 
@@ -3551,10 +3578,13 @@ fn stored_grants(dir: &PathBuf) -> Result<std::collections::BTreeMap<String, Gra
     let identity = Identity::load_existing_for_brain(dir)?;
     let keys = runtime_keys_read_only(dir, &identity)?;
     let store = Store::open(dir)?;
-    Ok(
-        brainmesh::revocation::Index::load_or_build(dir, &store, &keys, keys.cache_fingerprint())?
-            .grants(),
-    )
+    Ok(hyperconsciousness::revocation::Index::load_or_build(
+        dir,
+        &store,
+        &keys,
+        keys.cache_fingerprint(),
+    )?
+    .grants())
 }
 
 /// rebuild the signed grant chain ending at `prefix`, root first.
@@ -3566,26 +3596,31 @@ fn grant_chain(dir: &PathBuf, prefix: &str) -> Result<Vec<Grant>> {
     let identity = Identity::load_existing_for_brain(dir)?;
     let keys = runtime_keys_read_only(dir, &identity)?;
     let store = Store::open(dir)?;
-    brainmesh::revocation::Index::load_or_build(dir, &store, &keys, keys.cache_fingerprint())?
-        .grant_chain(prefix)
+    hyperconsciousness::revocation::Index::load_or_build(
+        dir,
+        &store,
+        &keys,
+        keys.cache_fingerprint(),
+    )?
+    .grant_chain(prefix)
 }
 
 /// sensitivity by name, because "personal" is something a person can type and
 /// remember and 1 is not. digits still work for anything scripted.
 fn sensitivity(name: &str) -> Result<u8> {
     match name.trim().to_lowercase().as_str() {
-        "normal" | "0" => Ok(brainmesh::grant::NORMAL),
-        "personal" | "1" => Ok(brainmesh::grant::PERSONAL),
-        "medical" | "2" => Ok(brainmesh::grant::MEDICAL),
-        "secret" | "3" => Ok(brainmesh::grant::SECRET),
+        "normal" | "0" => Ok(hyperconsciousness::grant::NORMAL),
+        "personal" | "1" => Ok(hyperconsciousness::grant::PERSONAL),
+        "medical" | "2" => Ok(hyperconsciousness::grant::MEDICAL),
+        "secret" | "3" => Ok(hyperconsciousness::grant::SECRET),
         _ => Err(Error::Malformed(
             "sensitivity is normal, personal, medical or secret",
         )),
     }
 }
 
-fn print_workspace_plan(plan: &brainmesh::workspace::Plan, detailed: bool) {
-    use brainmesh::workspace::ChangeKind;
+fn print_workspace_plan(plan: &hyperconsciousness::workspace::Plan, detailed: bool) {
+    use hyperconsciousness::workspace::ChangeKind;
 
     if detailed {
         for change in &plan.changes {
@@ -3659,9 +3694,9 @@ fn print_workspace_plan(plan: &brainmesh::workspace::Plan, detailed: bool) {
 }
 
 fn merge_workspace_pull(
-    mut earlier: brainmesh::workspace::Pull,
-    mut later: brainmesh::workspace::Pull,
-) -> brainmesh::workspace::Pull {
+    mut earlier: hyperconsciousness::workspace::Pull,
+    mut later: hyperconsciousness::workspace::Pull,
+) -> hyperconsciousness::workspace::Pull {
     later.applied += earlier.applied;
     later.adopted += earlier.adopted;
     later.pending_deletes.append(&mut earlier.pending_deletes);
@@ -3680,7 +3715,7 @@ fn merge_workspace_pull(
     later
 }
 
-fn print_workspace_pull(pulled: &brainmesh::workspace::Pull) {
+fn print_workspace_pull(pulled: &hyperconsciousness::workspace::Pull) {
     println!(
         "materialized {}, adopted {}, {} blobs missing",
         pulled.applied,
@@ -3702,7 +3737,7 @@ fn print_workspace_pull(pulled: &brainmesh::workspace::Pull) {
 }
 
 struct WorkspaceCheckpointCycle {
-    checkpoint: brainmesh::workspace::Checkpoint,
+    checkpoint: hyperconsciousness::workspace::Checkpoint,
     pending_deletes: usize,
 }
 
@@ -3715,7 +3750,7 @@ fn checkpoint_workspace(
 ) -> Result<WorkspaceCheckpointCycle> {
     let identity = Identity::load_or_create(dir)?;
     let keys = runtime_keys(dir, &identity)?;
-    let plan = brainmesh::workspace::plan_with_keys(dir, &keys, name, folder)?;
+    let plan = hyperconsciousness::workspace::plan_with_keys(dir, &keys, name, folder)?;
     checkpoint_workspace_plan(dir, name, folder, skip_secret_files, detailed, plan)
 }
 
@@ -3725,14 +3760,14 @@ fn checkpoint_workspace_plan(
     folder: &Path,
     skip_secret_files: bool,
     detailed: bool,
-    plan: brainmesh::workspace::Plan,
+    plan: hyperconsciousness::workspace::Plan,
 ) -> Result<WorkspaceCheckpointCycle> {
     let identity = Identity::load_or_create(dir)?;
     let keys = runtime_keys(dir, &identity)?;
     print_workspace_plan(&plan, detailed);
-    let pending_deletes = plan.count(brainmesh::workspace::ChangeKind::Delete);
+    let pending_deletes = plan.count(hyperconsciousness::workspace::ChangeKind::Delete);
     let safe = plan.checkpoint();
-    let checkpoint = brainmesh::workspace::checkpoint_with_keys(
+    let checkpoint = hyperconsciousness::workspace::checkpoint_with_keys(
         dir,
         &keys,
         name,
@@ -3755,9 +3790,12 @@ fn checkpoint_workspace_plan(
             "left {pending_deletes} deletions pending; review with workspace status, then use scan --allow-deletes"
         );
     }
-    if let Some(projection) =
-        brainmesh::workspace::advance_projection_entries(dir, name, folder, &checkpoint.entries)?
-    {
+    if let Some(projection) = hyperconsciousness::workspace::advance_projection_entries(
+        dir,
+        name,
+        folder,
+        &checkpoint.entries,
+    )? {
         println!("projection cursor generation {}", projection.generation);
     }
     Ok(WorkspaceCheckpointCycle {
@@ -3771,10 +3809,11 @@ fn pull_workspace(
     name: &str,
     folder: &Path,
     host: Option<&str>,
-) -> Result<brainmesh::workspace::Pull> {
+) -> Result<hyperconsciousness::workspace::Pull> {
     let identity = Identity::load_or_create(dir)?;
     let keys = runtime_keys(dir, &identity)?;
-    let mut pulled = brainmesh::workspace::pull_projection_with_keys(dir, &keys, name, folder)?;
+    let mut pulled =
+        hyperconsciousness::workspace::pull_projection_with_keys(dir, &keys, name, folder)?;
     if !pulled.missing.is_empty() {
         let host = host.ok_or(Error::Malformed(
             "remote workspace blobs are missing; pull needs --from <peer>",
@@ -3784,7 +3823,8 @@ fn pull_workspace(
         let (chunks, completed) =
             fetch_from_peer(host, &blobs, &pulled.missing, &remote, keys.current_key()?)?;
         println!("fetched {chunks} chunks for {completed} files from {host}");
-        let after = brainmesh::workspace::pull_projection_with_keys(dir, &keys, name, folder)?;
+        let after =
+            hyperconsciousness::workspace::pull_projection_with_keys(dir, &keys, name, folder)?;
         pulled = merge_workspace_pull(pulled, after);
     }
     print_workspace_pull(&pulled);
@@ -3796,11 +3836,12 @@ fn pull_workspace_incremental(
     name: &str,
     folder: &Path,
     host: Option<&str>,
-) -> Result<brainmesh::workspace::Pull> {
+) -> Result<hyperconsciousness::workspace::Pull> {
     let identity = Identity::load_or_create(dir)?;
     let keys = runtime_keys(dir, &identity)?;
-    let mut pulled =
-        brainmesh::workspace::pull_projection_incremental_with_keys(dir, &keys, name, folder)?;
+    let mut pulled = hyperconsciousness::workspace::pull_projection_incremental_with_keys(
+        dir, &keys, name, folder,
+    )?;
     if !pulled.missing.is_empty() {
         let host = host.ok_or(Error::Malformed(
             "remote workspace blobs are missing; pull needs --from <peer>",
@@ -3810,8 +3851,9 @@ fn pull_workspace_incremental(
         let (chunks, completed) =
             fetch_from_peer(host, &blobs, &pulled.missing, &remote, keys.current_key()?)?;
         println!("fetched {chunks} chunks for {completed} files from {host}");
-        let after =
-            brainmesh::workspace::pull_projection_incremental_with_keys(dir, &keys, name, folder)?;
+        let after = hyperconsciousness::workspace::pull_projection_incremental_with_keys(
+            dir, &keys, name, folder,
+        )?;
         pulled = merge_workspace_pull(pulled, after);
     }
     print_workspace_pull(&pulled);
@@ -3843,14 +3885,14 @@ struct WorkspaceWatchCycle<'a> {
     folder: &'a Path,
     peer: Option<&'a str>,
     skip_secret_files: bool,
-    previous: Option<&'a brainmesh::workspace::WatchStatus>,
+    previous: Option<&'a hyperconsciousness::workspace::WatchStatus>,
     full_every: Duration,
     changed: Option<&'a fswatch::ChangeHint>,
 }
 
 fn workspace_watch_cycle(
     request: WorkspaceWatchCycle<'_>,
-) -> (brainmesh::workspace::WatchUpdate, Result<()>) {
+) -> (hyperconsciousness::workspace::WatchUpdate, Result<()>) {
     let WorkspaceWatchCycle {
         dir,
         name,
@@ -3861,13 +3903,13 @@ fn workspace_watch_cycle(
         full_every,
         changed,
     } = request;
-    let mut update = brainmesh::workspace::WatchUpdate {
+    let mut update = hyperconsciousness::workspace::WatchUpdate {
         peer: peer.map(str::to_string),
-        ..brainmesh::workspace::WatchUpdate::default()
+        ..hyperconsciousness::workspace::WatchUpdate::default()
     };
     let mut network_error = peer.and_then(|host| sync_peer_required(dir, host).err());
 
-    let before = match brainmesh::workspace::quick_state(dir, name, folder) {
+    let before = match hyperconsciousness::workspace::quick_state(dir, name, folder) {
         Ok(state) => state,
         Err(error) => return (update, Err(error)),
     };
@@ -3926,7 +3968,7 @@ fn workspace_watch_cycle(
                 )),
             );
         }
-        let after = match brainmesh::workspace::quick_state(dir, name, folder) {
+        let after = match hyperconsciousness::workspace::quick_state(dir, name, folder) {
             Ok(state) => state,
             Err(error) => return (update, Err(error)),
         };
@@ -3940,7 +3982,8 @@ fn workspace_watch_cycle(
     }
     if !full_due && heads_unchanged {
         if let Some(hint) = changed.filter(|hint| !hint.paths.is_empty()) {
-            let targeted = brainmesh::workspace::plan_changed_paths(dir, name, folder, &hint.paths);
+            let targeted =
+                hyperconsciousness::workspace::plan_changed_paths(dir, name, folder, &hint.paths);
             match targeted {
                 Ok(Some(plan)) => {
                     let local_changed = previous.is_some_and(|status| {
@@ -3981,10 +4024,12 @@ fn workspace_watch_cycle(
                             );
                         }
                         if hint.precise {
-                            let after = match brainmesh::workspace::quick_state(dir, name, folder) {
-                                Ok(state) => state,
-                                Err(error) => return (update, Err(error)),
-                            };
+                            let after =
+                                match hyperconsciousness::workspace::quick_state(dir, name, folder)
+                                {
+                                    Ok(state) => state,
+                                    Err(error) => return (update, Err(error)),
+                                };
                             update.files = after.files;
                             update.local_fingerprint = Some(after.local_fingerprint);
                             update.heads_fingerprint = Some(after.heads_fingerprint);
@@ -4064,7 +4109,7 @@ fn workspace_watch_cycle(
             )),
         );
     }
-    let after = match brainmesh::workspace::quick_state(dir, name, folder) {
+    let after = match hyperconsciousness::workspace::quick_state(dir, name, folder) {
         Ok(state) => state,
         Err(error) => return (update, Err(error)),
     };
@@ -4090,7 +4135,7 @@ fn append_many_to(
     dir: &PathBuf,
     identity: &Identity,
     payloads: &[String],
-) -> Result<Vec<brainmesh::id::Hash>> {
+) -> Result<Vec<hyperconsciousness::id::Hash>> {
     let keys = runtime_keys(dir, identity)?;
     keys.ensure_writer(identity.device())?;
     let store = Store::open(dir)?;
@@ -4117,7 +4162,7 @@ fn append_many_to(
             keys.current_key()?,
             payload.as_bytes(),
         )?;
-        head = brainmesh::log::Head {
+        head = hyperconsciousness::log::Head {
             seq: record.seq,
             id: record.id(),
             empty: false,
@@ -4137,10 +4182,10 @@ fn append_many_to(
 fn record_device_membership(
     dir: &PathBuf,
     identity: &Identity,
-    membership: &brainmesh::epoch::DeviceMembership,
+    membership: &hyperconsciousness::epoch::DeviceMembership,
 ) -> Result<()> {
     let encoded = membership.encode()?;
-    brainmesh::keyring::cache_memberships(dir, std::slice::from_ref(membership))?;
+    hyperconsciousness::keyring::cache_memberships(dir, std::slice::from_ref(membership))?;
     // This is an explicit mutation path. Publish any required owner migration
     // before the read-only duplicate check so we never append the same signed
     // membership once as migration evidence and once as a requested record.
@@ -4156,7 +4201,7 @@ fn record_device_membership(
         identity,
         &serde_json::json!({
             "kind": "device_membership",
-            "sensitivity": brainmesh::grant::PERSONAL,
+            "sensitivity": hyperconsciousness::grant::PERSONAL,
             "authority": membership.authority.hex(),
             "device": membership.device.hex(),
             "joined_epoch": membership.joined_epoch,
@@ -4175,7 +4220,7 @@ fn runtime_keys_read_only(dir: &Path, identity: &Identity) -> Result<RuntimeKeys
 }
 
 fn read_remote_secret(path: &Path) -> Result<String> {
-    brainmesh::guard::no_symlink(path)?;
+    hyperconsciousness::guard::no_symlink(path)?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -4184,7 +4229,7 @@ fn read_remote_secret(path: &Path) -> Result<String> {
             return Err(Error::Denied("remote secret file must be a 0600 file"));
         }
     }
-    let bytes = brainmesh::durable::read_bounded(path, 64 * 1024)?;
+    let bytes = hyperconsciousness::durable::read_bounded(path, 64 * 1024)?;
     let text = std::str::from_utf8(&bytes)
         .map_err(|_| Error::Malformed("remote secret file is not UTF-8"))?;
     let secret = text.trim_end_matches(&['\r', '\n'][..]);
@@ -4237,7 +4282,7 @@ fn run() -> Result<()> {
                 if args.rest.len() != 1 {
                     return Err(Error::Malformed("recovery cleanup takes no arguments"));
                 }
-                let removed = brainmesh::recovery::cleanup_stale_drills()?;
+                let removed = hyperconsciousness::recovery::cleanup_stale_drills()?;
                 println!("removed {removed} interrupted recovery drill workspaces");
                 return Ok(());
             }
@@ -4260,10 +4305,10 @@ fn run() -> Result<()> {
                         })
                         .transpose()?;
                     let created = match &phrase_output {
-                        Some(phrase) => {
-                            brainmesh::recovery::create_with_phrase_file(&args.dir, &path, phrase)?
-                        }
-                        None => brainmesh::recovery::create(&args.dir, &path)?,
+                        Some(phrase) => hyperconsciousness::recovery::create_with_phrase_file(
+                            &args.dir, &path, phrase,
+                        )?,
+                        None => hyperconsciousness::recovery::create(&args.dir, &path)?,
                     };
                     println!(
                         "created recovery kit for brain {} with {} compartments and {} organizations",
@@ -4279,7 +4324,7 @@ fn run() -> Result<()> {
                                 "separate that file from the kit now; neither one works alone"
                             );
                             println!(
-                                "verify with: brainmesh recovery verify {} --phrase-file {}",
+                                "verify with: hc recovery verify {} --phrase-file {}",
                                 path.display(),
                                 phrase.display()
                             );
@@ -4293,7 +4338,7 @@ fn run() -> Result<()> {
                                 "keep the kit beside encrypted backups and the paper elsewhere; neither one works alone"
                             );
                             println!(
-                                "verify the paper now with: brainmesh recovery verify {}",
+                                "verify the paper now with: hc recovery verify {}",
                                 path.display()
                             );
                         }
@@ -4302,7 +4347,7 @@ fn run() -> Result<()> {
                 }
                 "verify" => {
                     let phrase = recovery_phrase(&args.rest)?;
-                    let verified = brainmesh::recovery::verify(&path, phrase.trim())?;
+                    let verified = hyperconsciousness::recovery::verify(&path, phrase.trim())?;
                     println!(
                         "verified phrase for brain {} with {} compartments and {} organizations",
                         verified.brain.short(),
@@ -4314,7 +4359,7 @@ fn run() -> Result<()> {
                 }
                 "status" => {
                     let phrase = recovery_phrase(&args.rest)?;
-                    if !brainmesh::recovery::is_current(&args.dir, &path, phrase.trim())? {
+                    if !hyperconsciousness::recovery::is_current(&args.dir, &path, phrase.trim())? {
                         return Err(Error::Denied(
                             "recovery kit is valid but stale; create and verify a new kit",
                         ));
@@ -4324,7 +4369,8 @@ fn run() -> Result<()> {
                 }
                 "restore" => {
                     let phrase = recovery_phrase(&args.rest)?;
-                    let restored = brainmesh::recovery::restore(&args.dir, &path, phrase.trim())?;
+                    let restored =
+                        hyperconsciousness::recovery::restore(&args.dir, &path, phrase.trim())?;
                     Store::open(&args.dir)?;
                     println!(
                         "recovered brain {} into a fresh device identity",
@@ -4372,7 +4418,7 @@ fn run() -> Result<()> {
                         }
                     }
                     let phrase = recovery_phrase(&args.rest)?;
-                    let drilled = brainmesh::recovery::drill(
+                    let drilled = hyperconsciousness::recovery::drill(
                         &args.dir,
                         &path,
                         &personal_bundle,
@@ -4422,18 +4468,18 @@ fn run() -> Result<()> {
                     let store = Store::open(&args.dir)?;
                     let keys = runtime_keys(&args.dir, &identity)?;
                     let heads = match keys.authority_state() {
-                        Some(state) => brainmesh::sync::have_authorized(&store, state)?
+                        Some(state) => hyperconsciousness::sync::have_authorized(&store, state)?
                             .into_iter()
                             .collect::<Vec<_>>(),
                         None => store.heads()?,
                     };
-                    let witness = brainmesh::witness::Witness::issue(
+                    let witness = hyperconsciousness::witness::Witness::issue(
                         brain,
                         &signing,
                         Clock::new().now().millis,
                         &heads,
                     )?;
-                    brainmesh::witness::write_new(&path, &witness)?;
+                    hyperconsciousness::witness::write_new(&path, &witness)?;
                     println!(
                         "witnessed {} device heads in {}",
                         witness.heads.len(),
@@ -4462,11 +4508,11 @@ fn run() -> Result<()> {
                     Ok(())
                 }
                 "verify" => {
-                    let witness = brainmesh::witness::read(&path)?;
+                    let witness = hyperconsciousness::witness::read(&path)?;
                     let store = Store::open(&args.dir)?;
                     let keys = runtime_keys(&args.dir, &identity)?;
                     let visible = match keys.authority_state() {
-                        Some(state) => brainmesh::sync::have_authorized(&store, state)?,
+                        Some(state) => hyperconsciousness::sync::have_authorized(&store, state)?,
                         None => store.heads()?.into_iter().collect(),
                     };
                     let check = witness.check_visible(brain, authority, &store, &visible)?;
@@ -4561,8 +4607,9 @@ fn run() -> Result<()> {
                             "epoch rotation repeats a retained device introduction",
                         ));
                     }
-                    let evidence =
-                        brainmesh::keyring::membership_evidence(&args.dir, &identity, &keyring)?;
+                    let evidence = hyperconsciousness::keyring::membership_evidence(
+                        &args.dir, &identity, &keyring,
+                    )?;
                     let evidence: std::collections::BTreeMap<_, _> = evidence
                         .into_iter()
                         .map(|membership| (membership.device, membership))
@@ -4600,18 +4647,18 @@ fn run() -> Result<()> {
                         .filter(|device| !retained_set.contains(device))
                     {
                         let head = store.log(*device)?.head()?;
-                        removed.push(brainmesh::epoch::AuthorCutoff {
+                        removed.push(hyperconsciousness::epoch::AuthorCutoff {
                             device: *device,
                             seq: if head.empty { 0 } else { head.seq },
                             head: if head.empty { ZERO_HASH } else { head.id },
                         });
                     }
-                    let next_key = brainmesh::crypto::random_key();
+                    let next_key = hyperconsciousness::crypto::random_key();
                     let next_epoch = state
                         .epoch()
                         .checked_add(1)
                         .ok_or(Error::Malformed("key epoch overflow"))?;
-                    let transition = brainmesh::epoch::Transition::issue(
+                    let transition = hyperconsciousness::epoch::Transition::issue(
                         &authority,
                         next_epoch,
                         state.transition(),
@@ -4619,15 +4666,19 @@ fn run() -> Result<()> {
                         retained,
                         removed.clone(),
                     )?;
-                    let mut payloads = vec![brainmesh::keyring::transition_payload(&transition)?];
+                    let mut payloads = vec![hyperconsciousness::keyring::transition_payload(
+                        &transition,
+                    )?];
                     for introduction in &introductions {
-                        let enrollment = brainmesh::epoch::Enrollment::issue(
+                        let enrollment = hyperconsciousness::epoch::Enrollment::issue(
                             &authority,
                             &transition,
                             &next_key,
                             introduction,
                         )?;
-                        payloads.push(brainmesh::keyring::enrollment_payload(&enrollment)?);
+                        payloads.push(hyperconsciousness::keyring::enrollment_payload(
+                            &enrollment,
+                        )?);
                     }
                     append_many_to(&args.dir, &identity, &payloads)?;
                     let activated = runtime_keys(&args.dir, &identity)?;
@@ -4747,7 +4798,10 @@ fn run() -> Result<()> {
             );
             println!(
                 "keys      {}",
-                brainmesh::identity::secret_location(&args.dir.join("identity"), "device.key")
+                hyperconsciousness::identity::secret_location(
+                    &args.dir.join("identity"),
+                    "device.key"
+                )
             );
             println!("authority {}", identity.authority_role().description());
 
@@ -4806,7 +4860,7 @@ fn run() -> Result<()> {
             let mut text = Vec::new();
             let mut kind = "note".to_string();
             let mut tags: Vec<String> = Vec::new();
-            let mut level = brainmesh::grant::NORMAL;
+            let mut level = hyperconsciousness::grant::NORMAL;
 
             let mut rest = args.rest.iter();
             while let Some(word) = rest.next() {
@@ -4896,7 +4950,7 @@ fn run() -> Result<()> {
                             .get(2)
                             .ok_or(Error::Malformed("workspace status needs a folder"))?,
                     );
-                    let plan = brainmesh::workspace::plan_with_keys(
+                    let plan = hyperconsciousness::workspace::plan_with_keys(
                         &args.dir,
                         &workspace_keys,
                         name,
@@ -4914,7 +4968,7 @@ fn run() -> Result<()> {
                             .get(2)
                             .ok_or(Error::Malformed("workspace scan needs a folder"))?,
                     );
-                    let plan = brainmesh::workspace::plan_with_keys(
+                    let plan = hyperconsciousness::workspace::plan_with_keys(
                         &args.dir,
                         &workspace_keys,
                         name,
@@ -4924,13 +4978,13 @@ fn run() -> Result<()> {
                         &plan,
                         !args.rest.iter().any(|arg| arg == "--summary"),
                     );
-                    let applied = brainmesh::workspace::apply_with_keys(
+                    let applied = hyperconsciousness::workspace::apply_with_keys(
                         &args.dir,
                         &workspace_keys,
                         name,
                         &folder,
                         &plan,
-                        brainmesh::workspace::ApplyOptions {
+                        hyperconsciousness::workspace::ApplyOptions {
                             allow_deletes: args.rest.iter().any(|arg| arg == "--allow-deletes"),
                             allow_mass_delete: args
                                 .rest
@@ -4944,7 +4998,7 @@ fn run() -> Result<()> {
                     )?;
                     println!("appended {} workspace events", applied.appended);
                     if let Some(projection) =
-                        brainmesh::workspace::advance_projection_entries(
+                        hyperconsciousness::workspace::advance_projection_entries(
                             &args.dir,
                             name,
                             &folder,
@@ -4977,7 +5031,7 @@ fn run() -> Result<()> {
                             .ok_or(Error::Malformed("workspace restore needs a folder"))?,
                     );
                     let store = Store::open(&args.dir)?;
-                    let view = brainmesh::workspace::load(&store, &workspace_keys, name)?;
+                    let view = hyperconsciousness::workspace::load(&store, &workspace_keys, name)?;
                     let blobs = Blobs::open(&args.dir)?;
                     let mut missing: Vec<BlobRef> = view
                         .active()
@@ -5009,14 +5063,14 @@ fn run() -> Result<()> {
                         )?;
                         println!("fetched {chunks} chunks for {completed} files from {host}");
                     }
-                    let restored = brainmesh::workspace::restore_with_keys(
+                    let restored = hyperconsciousness::workspace::restore_with_keys(
                         &args.dir,
                         &workspace_keys,
                         name,
                         &folder,
                     )?;
                     println!("restored {restored} files to {}", folder.display());
-                    let projection = brainmesh::workspace::track_with_keys(
+                    let projection = hyperconsciousness::workspace::track_with_keys(
                         &args.dir,
                         &workspace_keys,
                         name,
@@ -5032,7 +5086,7 @@ fn run() -> Result<()> {
                             .get(2)
                             .ok_or(Error::Malformed("workspace verify needs a folder"))?,
                     );
-                    let verified = brainmesh::workspace::verify_with_keys(
+                    let verified = hyperconsciousness::workspace::verify_with_keys(
                         &args.dir,
                         &workspace_keys,
                         name,
@@ -5085,7 +5139,7 @@ fn run() -> Result<()> {
                             .get(2)
                             .ok_or(Error::Malformed("workspace track needs a folder"))?,
                     );
-                    let projection = brainmesh::workspace::track_with_keys(
+                    let projection = hyperconsciousness::workspace::track_with_keys(
                         &args.dir,
                         &workspace_keys,
                         name,
@@ -5107,7 +5161,7 @@ fn run() -> Result<()> {
                             .get(2)
                             .ok_or(Error::Malformed("workspace track-status needs a folder"))?,
                     );
-                    match brainmesh::workspace::projection(&args.dir, name, &folder)? {
+                    match hyperconsciousness::workspace::projection(&args.dir, name, &folder)? {
                         Some(projection) => {
                             let active = projection
                                 .entries
@@ -5156,7 +5210,7 @@ fn run() -> Result<()> {
                             .get(2)
                             .ok_or(Error::Malformed("workspace watch-status needs a folder"))?,
                     );
-                    match brainmesh::workspace::watch_status(&args.dir, name, &folder)? {
+                    match hyperconsciousness::workspace::watch_status(&args.dir, name, &folder)? {
                         Some(status) => {
                             println!(
                                 "attempt {} unix ms, last success {}, generation {}",
@@ -5203,7 +5257,7 @@ fn run() -> Result<()> {
                             .get(2)
                             .ok_or(Error::Malformed("workspace watch needs a folder"))?,
                     );
-                    if brainmesh::workspace::projection(&args.dir, name, &folder)?.is_none() {
+                    if hyperconsciousness::workspace::projection(&args.dir, name, &folder)?.is_none() {
                         return Err(Error::Denied(
                             "workspace is not tracked; verify it, then run workspace track",
                         ));
@@ -5279,9 +5333,9 @@ fn run() -> Result<()> {
 
                     let mut changed = None;
                     loop {
-                        let cycle_lock = brainmesh::workspace::lock_watch_cycle(&args.dir)?;
+                        let cycle_lock = hyperconsciousness::workspace::lock_watch_cycle(&args.dir)?;
                         let previous =
-                            brainmesh::workspace::watch_status(&args.dir, name, &folder)?;
+                            hyperconsciousness::workspace::watch_status(&args.dir, name, &folder)?;
                         let (mut update, cycle) = workspace_watch_cycle(WorkspaceWatchCycle {
                             dir: &args.dir,
                             name,
@@ -5296,7 +5350,7 @@ fn run() -> Result<()> {
                             update.error = Some(error.to_string());
                         }
                         let status =
-                            brainmesh::workspace::record_watch(&args.dir, name, &folder, update)?;
+                            hyperconsciousness::workspace::record_watch(&args.dir, name, &folder, update)?;
                         drop(cycle_lock);
                         println!(
                             "watch attempt {} ({}): {} files, checkpointed {}, materialized {}, adopted {}, pending {}, conflicts {}, unstable {}",
@@ -5327,7 +5381,7 @@ fn run() -> Result<()> {
                 }
                 "conflicts" => {
                     let store = Store::open(&args.dir)?;
-                    let view = brainmesh::workspace::load(&store, &workspace_keys, name)?;
+                    let view = hyperconsciousness::workspace::load(&store, &workspace_keys, name)?;
                     if view.conflicts.is_empty() {
                         println!("no conflicts");
                     }
@@ -5353,7 +5407,7 @@ fn run() -> Result<()> {
                         .rest
                         .get(3)
                         .ok_or(Error::Malformed("workspace resolve needs an event id"))?;
-                    let resolved = brainmesh::workspace::resolve_with_keys(
+                    let resolved = hyperconsciousness::workspace::resolve_with_keys(
                         &args.dir,
                         &workspace_keys,
                         name,
@@ -5397,24 +5451,25 @@ fn run() -> Result<()> {
             let blobs = Blobs::open(&target_dir)?;
             let (status, scrub) = match action.as_str() {
                 "pin" => {
-                    let policy = brainmesh::pin::Policy::parse(
+                    let policy = hyperconsciousness::pin::Policy::parse(
                         args.rest
                             .get(1)
                             .ok_or(Error::Malformed("blobs pin needs metadata or all"))?,
                     )?;
                     // Validate and bound the complete prospective fold before
                     // persisting a promise this device cannot even describe.
-                    let status = brainmesh::pin::status_for(&store, &blobs, &keys, policy)?;
-                    brainmesh::pin::save(&target_dir, policy)?;
+                    let status =
+                        hyperconsciousness::pin::status_for(&store, &blobs, &keys, policy)?;
+                    hyperconsciousness::pin::save(&target_dir, policy)?;
                     println!("saved local blob policy {}", policy.name());
                     (status, false)
                 }
                 "status" => (
-                    brainmesh::pin::status(&target_dir, &store, &blobs, &keys)?,
+                    hyperconsciousness::pin::status(&target_dir, &store, &blobs, &keys)?,
                     false,
                 ),
                 "verify" => (
-                    brainmesh::pin::status(&target_dir, &store, &blobs, &keys)?,
+                    hyperconsciousness::pin::status(&target_dir, &store, &blobs, &keys)?,
                     true,
                 ),
                 _ => {
@@ -5431,8 +5486,8 @@ fn run() -> Result<()> {
                 return Ok(());
             }
             if scrub {
-                let verified = brainmesh::pin::verify(&status, &blobs, &keys)?;
-                let current = brainmesh::pin::status(&target_dir, &store, &blobs, &keys)?;
+                let verified = hyperconsciousness::pin::verify(&status, &blobs, &keys)?;
+                let current = hyperconsciousness::pin::status(&target_dir, &store, &blobs, &keys)?;
                 print_blob_status(&current);
                 println!(
                     "verified {} chunks and {} manifests ({} plaintext bytes) without persisting plaintext",
@@ -5703,7 +5758,7 @@ fn run() -> Result<()> {
                     }
 
                     let picked = all.get(which.saturating_sub(1)).ok_or(Error::Malformed(
-                        "there is no version by that number, see `brainmesh history`",
+                        "there is no version by that number, see `hc history`",
                     ))?;
 
                     println!("version {which} of {} for {wanted}", all.len());
@@ -5770,7 +5825,7 @@ fn run() -> Result<()> {
             let (_, target_dir) = selected_brain(&args.dir, &args.rest)?;
             let store = Store::open(&target_dir)?;
             let blobs = Blobs::open(&target_dir)?;
-            let exported = brainmesh::bundle::export_path_authorized(
+            let exported = hyperconsciousness::bundle::export_path_authorized(
                 &target_dir,
                 &store,
                 &blobs,
@@ -5795,7 +5850,7 @@ fn run() -> Result<()> {
             let blobs = Blobs::open(&target_dir)?;
             let input = std::io::BufReader::new(std::fs::File::open(path)?);
             let imported =
-                brainmesh::bundle::import_authorized(&target_dir, &store, &blobs, input)?;
+                hyperconsciousness::bundle::import_authorized(&target_dir, &store, &blobs, input)?;
             println!(
                 "took {} new records and {} encrypted chunks; already had {} records and {} chunks",
                 imported.records.accepted,
@@ -5847,7 +5902,7 @@ fn run() -> Result<()> {
                     tags.push(format!("workspace:{workspace}"));
                 } else {
                     for path in &paths {
-                        tags.push(brainmesh::workspace::subtree_tag(workspace, path)?);
+                        tags.push(hyperconsciousness::workspace::subtree_tag(workspace, path)?);
                     }
                 }
             }
@@ -5859,14 +5914,14 @@ fn run() -> Result<()> {
                 tags,
                 max_sensitivity: match flag("--sensitivity") {
                     Some(name) => sensitivity(&name)?,
-                    None if workspace.is_some() => brainmesh::grant::PERSONAL,
-                    None => brainmesh::grant::NORMAL,
+                    None if workspace.is_some() => hyperconsciousness::grant::PERSONAL,
+                    None => hyperconsciousness::grant::NORMAL,
                 },
             };
 
             let (identity, target_dir) = selected_brain(&args.dir, &args.rest)?;
             let actions = if args.rest.iter().any(|a| a == "--write") {
-                READ | brainmesh::grant::WRITE
+                READ | hyperconsciousness::grant::WRITE
             } else {
                 READ
             };
@@ -5888,7 +5943,7 @@ fn run() -> Result<()> {
                 &target_dir,
                 &serde_json::json!({
                     "kind": "grant",
-                    "sensitivity": brainmesh::grant::PERSONAL,
+                    "sensitivity": hyperconsciousness::grant::PERSONAL,
                     "id": grant.id().hex(),
                     "blob": blob,
                     "to": to.hex(),
@@ -5934,7 +5989,7 @@ fn run() -> Result<()> {
                         let program = args.rest.get(3).ok_or(Error::Malformed(
                             "secret adapter set needs an absolute program path",
                         ))?;
-                        let adapter = brainmesh::secret::register_adapter(
+                        let adapter = hyperconsciousness::secret::register_adapter(
                             &target_dir,
                             name,
                             Path::new(program),
@@ -5946,7 +6001,7 @@ fn run() -> Result<()> {
                         Ok(())
                     }
                     Some("list") => {
-                        for adapter in brainmesh::secret::adapters(&target_dir)? {
+                        for adapter in hyperconsciousness::secret::adapters(&target_dir)? {
                             println!(
                                 "{}  {}  {}",
                                 display_field(&adapter.name, Scope::MAX_TOKEN_LEN),
@@ -5967,7 +6022,7 @@ fn run() -> Result<()> {
                         .clone();
                     let adapter = flag("--adapter")
                         .ok_or(Error::Malformed("secret register needs --adapter"))?;
-                    brainmesh::secret::adapter(&target_dir, &adapter)?;
+                    hyperconsciousness::secret::adapter(&target_dir, &adapter)?;
                     let operations = flag("--operations")
                         .ok_or(Error::Malformed("secret register needs --operations"))?
                         .split(',')
@@ -5978,7 +6033,7 @@ fn run() -> Result<()> {
                     let identity = Identity::load_for_brain(&target_dir)?;
                     let keys = runtime_keys(&target_dir, &identity)?;
                     let store = Store::open(&target_dir)?;
-                    let control = brainmesh::revocation::Index::load_or_build(
+                    let control = hyperconsciousness::revocation::Index::load_or_build(
                         &target_dir,
                         &store,
                         &keys,
@@ -5993,7 +6048,8 @@ fn run() -> Result<()> {
                             "a secret reference with that name already exists",
                         ));
                     }
-                    let descriptor = brainmesh::secret::Descriptor::new(name, adapter, operations)?;
+                    let descriptor =
+                        hyperconsciousness::secret::Descriptor::new(name, adapter, operations)?;
                     append(&target_dir, &descriptor.payload().to_string())?;
                     println!("registered {}", descriptor.name);
                     println!("reference {}", descriptor.id.short());
@@ -6007,7 +6063,7 @@ fn run() -> Result<()> {
                     let identity = Identity::load_for_brain(&target_dir)?;
                     let keys = runtime_keys(&target_dir, &identity)?;
                     let store = Store::open(&target_dir)?;
-                    let control = brainmesh::revocation::Index::load_or_build(
+                    let control = hyperconsciousness::revocation::Index::load_or_build(
                         &target_dir,
                         &store,
                         &keys,
@@ -6038,7 +6094,7 @@ fn run() -> Result<()> {
                     let identity = Identity::load_for_brain(&target_dir)?;
                     let keys = runtime_keys(&target_dir, &identity)?;
                     let store = Store::open(&target_dir)?;
-                    let control = brainmesh::revocation::Index::load_or_build(
+                    let control = hyperconsciousness::revocation::Index::load_or_build(
                         &target_dir,
                         &store,
                         &keys,
@@ -6067,7 +6123,10 @@ fn run() -> Result<()> {
                     let mut kinds = operations
                         .iter()
                         .map(|operation| {
-                            brainmesh::secret::operation_kind(&descriptor.adapter, operation)
+                            hyperconsciousness::secret::operation_kind(
+                                &descriptor.adapter,
+                                operation,
+                            )
                         })
                         .collect::<Result<Vec<_>>>()?;
                     kinds.sort();
@@ -6076,8 +6135,8 @@ fn run() -> Result<()> {
                         after: None,
                         before: None,
                         kinds,
-                        tags: vec![brainmesh::secret::reference_tag(descriptor.id)],
-                        max_sensitivity: brainmesh::grant::SECRET,
+                        tags: vec![hyperconsciousness::secret::reference_tag(descriptor.id)],
+                        max_sensitivity: hyperconsciousness::grant::SECRET,
                     };
                     let minutes = flag("--minutes")
                         .and_then(|value| value.parse::<u64>().ok())
@@ -6098,7 +6157,7 @@ fn run() -> Result<()> {
                         &target_dir,
                         &serde_json::json!({
                             "kind": "grant",
-                            "sensitivity": brainmesh::grant::PERSONAL,
+                            "sensitivity": hyperconsciousness::grant::PERSONAL,
                             "id": grant.id().hex(),
                             "blob": blob,
                             "to": to.hex(),
@@ -6155,7 +6214,7 @@ fn run() -> Result<()> {
                     let store = Store::open(&target_dir)?;
                     let chain = grant_chain(&target_dir, grant_prefix)?;
                     let now = Clock::new().now().millis;
-                    let revoked = brainmesh::revocation::Index::load_or_build(
+                    let revoked = hyperconsciousness::revocation::Index::load_or_build(
                         &target_dir,
                         &store,
                         &keys,
@@ -6163,7 +6222,7 @@ fn run() -> Result<()> {
                     )?;
                     let descriptor = revoked.resolve_secret(name)?;
                     let item = descriptor.item(operation, now)?;
-                    let effective = brainmesh::query::permit_action_indexed(
+                    let effective = hyperconsciousness::query::permit_action_indexed(
                         &store,
                         &keys,
                         &chain,
@@ -6173,12 +6232,12 @@ fn run() -> Result<()> {
                         USE,
                         &revoked,
                     )?;
-                    let use_id = Hash(*brainmesh::crypto::random_key()).hex();
+                    let use_id = Hash(*hyperconsciousness::crypto::random_key()).hex();
                     append(
                         &target_dir,
                         &serde_json::json!({
                             "kind": "secret_use_started",
-                            "sensitivity": brainmesh::grant::SECRET,
+                            "sensitivity": hyperconsciousness::grant::SECRET,
                             "use": use_id,
                             "secret": descriptor.id.hex(),
                             "adapter": &descriptor.adapter,
@@ -6188,7 +6247,7 @@ fn run() -> Result<()> {
                         })
                         .to_string(),
                     )?;
-                    let execution = match brainmesh::secret::execute(
+                    let execution = match hyperconsciousness::secret::execute(
                         &target_dir,
                         &descriptor,
                         operation,
@@ -6200,7 +6259,7 @@ fn run() -> Result<()> {
                                 &target_dir,
                                 &serde_json::json!({
                                     "kind": "secret_use_finished",
-                                    "sensitivity": brainmesh::grant::SECRET,
+                                    "sensitivity": hyperconsciousness::grant::SECRET,
                                     "use": use_id,
                                     "secret": descriptor.id.hex(),
                                     "adapter": &descriptor.adapter,
@@ -6218,7 +6277,7 @@ fn run() -> Result<()> {
                         &target_dir,
                         &serde_json::json!({
                             "kind": "secret_use_finished",
-                            "sensitivity": brainmesh::grant::SECRET,
+                            "sensitivity": hyperconsciousness::grant::SECRET,
                             "use": use_id,
                             "secret": descriptor.id.hex(),
                             "adapter": &descriptor.adapter,
@@ -6242,9 +6301,10 @@ fn run() -> Result<()> {
         // read as somebody else, under the grant you gave them. this is the
         // path an agent takes, and the only one that leaves a receipt.
         "ask" => {
-            let prefix = args.rest.first().ok_or(Error::Malformed(
-                "ask needs a grant id, see `brainmesh grants`",
-            ))?;
+            let prefix = args
+                .rest
+                .first()
+                .ok_or(Error::Malformed("ask needs a grant id, see `hc grants`"))?;
 
             let text = args.rest.get(1).filter(|t| !t.starts_with("--"));
             let limit: usize = args
@@ -6260,7 +6320,7 @@ fn run() -> Result<()> {
             let store = Store::open(&target_dir)?;
             let chain = grant_chain(&target_dir, prefix)?;
 
-            let answer = brainmesh::query::answer(
+            let answer = hyperconsciousness::query::answer(
                 &store,
                 &keys,
                 &chain,
@@ -6310,7 +6370,7 @@ fn run() -> Result<()> {
                 .position(|a| a == "--as")
                 .and_then(|i| args.rest.get(i + 1))
                 .ok_or(Error::Malformed(
-                    "mcp needs --as <grant id>. make one with `brainmesh grant`, \
+                    "mcp needs --as <grant id>. make one with `hc grant`, \
                      and the agent will see exactly that slice",
                 ))?;
 
@@ -6665,7 +6725,7 @@ fn run() -> Result<()> {
                 &target_dir,
                 &serde_json::json!({
                     "kind": "revoke",
-                    "sensitivity": brainmesh::grant::PERSONAL,
+                    "sensitivity": hyperconsciousness::grant::PERSONAL,
                     "grant": id,
                 })
                 .to_string(),
@@ -6761,12 +6821,12 @@ fn run() -> Result<()> {
                         return Err(Error::Malformed("an organization already has that name"));
                     }
 
-                    let (id, authority) = brainmesh::org::create_authority(&args.dir)?;
+                    let (id, authority) = hyperconsciousness::org::create_authority(&args.dir)?;
                     append(
                         &args.dir,
                         &serde_json::json!({
                             "kind": "org",
-                            "sensitivity": brainmesh::grant::PERSONAL,
+                            "sensitivity": hyperconsciousness::grant::PERSONAL,
                             "id": id.hex(),
                             "name": name,
                             "authority": authority.hex(),
@@ -6796,7 +6856,7 @@ fn run() -> Result<()> {
                     }
 
                     let org = org_id(&args.dir, org_name)?;
-                    let authority = brainmesh::org::owner_authority(&args.dir, org)?;
+                    let authority = hyperconsciousness::org::owner_authority(&args.dir, org)?;
                     if org_roles(&args.dir, org)?
                         .iter()
                         .any(|known| known.0 == *role)
@@ -6805,7 +6865,7 @@ fn run() -> Result<()> {
                     }
 
                     let personal = Identity::load_or_create(&args.dir)?;
-                    let key = brainmesh::crypto::random_key();
+                    let key = hyperconsciousness::crypto::random_key();
                     let space_id = space::id_of(&key);
                     let space_dir = space::dir_of(&args.dir, &space_id);
                     let mut identity = personal.for_space(&space_dir)?;
@@ -6813,7 +6873,7 @@ fn run() -> Result<()> {
                     Store::open(&space_dir)?;
 
                     let space_name = role_space_name(org_name, role, org, 1);
-                    let state = brainmesh::org::RoleState::issue(
+                    let state = hyperconsciousness::org::RoleState::issue(
                         org,
                         &authority,
                         role.clone(),
@@ -6825,7 +6885,7 @@ fn run() -> Result<()> {
                         &args.dir,
                         &serde_json::json!({
                             "kind": "space",
-                            "sensitivity": brainmesh::grant::PERSONAL,
+                            "sensitivity": hyperconsciousness::grant::PERSONAL,
                             "id": space_id.hex(),
                             "name": space_name,
                         })
@@ -6835,7 +6895,7 @@ fn run() -> Result<()> {
                         &args.dir,
                         &serde_json::json!({
                             "kind": "org_role",
-                            "sensitivity": brainmesh::grant::PERSONAL,
+                            "sensitivity": hyperconsciousness::grant::PERSONAL,
                             "org": org.hex(),
                             "org_name": org_name,
                             "role": role,
@@ -6927,7 +6987,7 @@ fn run() -> Result<()> {
                     }
                     let days = days_option(&args.rest, 4, 7)?;
                     let org = org_id(&args.dir, org_name)?;
-                    let authority = brainmesh::org::owner_authority(&args.dir, org)?;
+                    let authority = hyperconsciousness::org::owner_authority(&args.dir, org)?;
                     let known = org_roles(&args.dir, org)?;
                     let personal = Identity::load_or_create(&args.dir)?;
                     let mut roles = Vec::new();
@@ -6939,14 +6999,14 @@ fn run() -> Result<()> {
                         let role_dir = space::dir_of(&args.dir, role_space);
                         let identity = personal.for_space(&role_dir)?;
                         if identity.authority_role()
-                            != brainmesh::identity::AuthorityRole::Owner
+                            != hyperconsciousness::identity::AuthorityRole::Owner
                         {
                             return Err(Error::Denied(
                                 "this machine must own every delegated role compartment",
                             ));
                         }
                         let invite = identity.invite_role_owner(&joiner)?;
-                        roles.push(brainmesh::org::RoleOwnerInvitation {
+                        roles.push(hyperconsciousness::org::RoleOwnerInvitation {
                             role: wanted.clone(),
                             generation: *generation,
                             space: *role_space,
@@ -6963,7 +7023,7 @@ fn run() -> Result<()> {
                         .ok_or(Error::Malformed(
                             "role-owner enrollment expiry is too large",
                         ))?;
-                    let bundle = brainmesh::org::RoleOwnerBundle::issue(
+                    let bundle = hyperconsciousness::org::RoleOwnerBundle::issue(
                         org,
                         &authority,
                         org_name.clone(),
@@ -6983,7 +7043,7 @@ fn run() -> Result<()> {
                         &args.dir,
                         &serde_json::json!({
                             "kind": "org_role_owner",
-                            "sensitivity": brainmesh::grant::PERSONAL,
+                            "sensitivity": hyperconsciousness::grant::PERSONAL,
                             "org": org.hex(),
                             "org_name": org_name,
                             "device": joiner.device.hex(),
@@ -7023,7 +7083,7 @@ fn run() -> Result<()> {
                         let Some(encoded) = value["bundle"].as_str() else {
                             continue;
                         };
-                        let Ok(bundle) = brainmesh::org::RoleOwnerBundle::decode(encoded) else {
+                        let Ok(bundle) = hyperconsciousness::org::RoleOwnerBundle::decode(encoded) else {
                             continue;
                         };
                         if bundle.org != org {
@@ -7090,7 +7150,7 @@ fn run() -> Result<()> {
                     }
                     let days = days_option(&args.rest, 4, 30)?;
                     let org = org_id(&args.dir, org_name)?;
-                    let authority = brainmesh::org::owner_authority(&args.dir, org)?;
+                    let authority = hyperconsciousness::org::owner_authority(&args.dir, org)?;
                     let known = org_roles(&args.dir, org)?;
                     let roles = requested
                         .iter()
@@ -7099,7 +7159,7 @@ fn run() -> Result<()> {
                                 .iter()
                                 .find(|known| &known.0 == wanted)
                                 .ok_or(Error::Malformed("one requested role does not exist"))?;
-                            Ok(brainmesh::org::AdminRole {
+                            Ok(hyperconsciousness::org::AdminRole {
                                 role: wanted.clone(),
                                 generation: *generation,
                                 space: *space,
@@ -7113,7 +7173,7 @@ fn run() -> Result<()> {
                             "administrator duration is too large",
                         ))?)
                         .ok_or(Error::Malformed("administrator deadline is too large"))?;
-                    let bundle = brainmesh::org::AdminBundle::issue(
+                    let bundle = hyperconsciousness::org::AdminBundle::issue(
                         org,
                         &authority,
                         org_name.clone(),
@@ -7125,7 +7185,7 @@ fn run() -> Result<()> {
                         &args.dir,
                         &serde_json::json!({
                             "kind": "org_admin",
-                            "sensitivity": brainmesh::grant::PERSONAL,
+                            "sensitivity": hyperconsciousness::grant::PERSONAL,
                             "org": org.hex(),
                             "org_name": org_name,
                             "device": admin.device.hex(),
@@ -7158,14 +7218,14 @@ fn run() -> Result<()> {
                         ));
                     }
                     let org = org_id(&args.dir, org_name)?;
-                    let authority = brainmesh::org::owner_authority(&args.dir, org)?;
+                    let authority = hyperconsciousness::org::owner_authority(&args.dir, org)?;
                     let mut matches = Vec::new();
                     let mut devices = std::collections::BTreeSet::new();
                     for value in payloads(&args.dir, "org_admin")? {
                         let encoded = value["bundle"].as_str().ok_or(Error::Malformed(
                             "administrator record is missing its root-signed bundle",
                         ))?;
-                        let bundle = brainmesh::org::AdminBundle::decode(encoded)?;
+                        let bundle = hyperconsciousness::org::AdminBundle::decode(encoded)?;
                         if bundle.org != org {
                             continue;
                         }
@@ -7201,7 +7261,7 @@ fn run() -> Result<()> {
                             );
                             continue;
                         }
-                        let revocation = brainmesh::org::AdminRevocation::issue(
+                        let revocation = hyperconsciousness::org::AdminRevocation::issue(
                             &bundle,
                             &authority,
                             revoked_at,
@@ -7210,7 +7270,7 @@ fn run() -> Result<()> {
                             &args.dir,
                             &serde_json::json!({
                                 "kind": "org_admin_revocation",
-                                "sensitivity": brainmesh::grant::PERSONAL,
+                                "sensitivity": hyperconsciousness::grant::PERSONAL,
                                 "org": org.hex(),
                                 "device": bundle.for_device.hex(),
                                 "certificate": certificate.hex(),
@@ -7251,7 +7311,7 @@ fn run() -> Result<()> {
                         let Some(encoded) = value["bundle"].as_str() else {
                             continue;
                         };
-                        let Ok(bundle) = brainmesh::org::AdminBundle::decode(encoded) else {
+                        let Ok(bundle) = hyperconsciousness::org::AdminBundle::decode(encoded) else {
                             continue;
                         };
                         if bundle.org != org {
@@ -7349,7 +7409,7 @@ fn run() -> Result<()> {
                                 ))
                         })
                         .collect::<Result<Vec<_>>>()?;
-                    let proposal = brainmesh::org::AccessProposal::issue(
+                    let proposal = hyperconsciousness::org::AccessProposal::issue(
                         admin,
                         &personal.signing,
                         employee,
@@ -7360,7 +7420,7 @@ fn run() -> Result<()> {
                         &args.dir,
                         &serde_json::json!({
                             "kind": "org_access_proposal",
-                            "sensitivity": brainmesh::grant::PERSONAL,
+                            "sensitivity": hyperconsciousness::grant::PERSONAL,
                             "org": org.hex(),
                             "manager": personal.device().hex(),
                             "device": proposal.for_device.hex(),
@@ -7387,7 +7447,7 @@ fn run() -> Result<()> {
                             ));
                         }
                     };
-                    let proposal = brainmesh::org::AccessProposal::decode(
+                    let proposal = hyperconsciousness::org::AccessProposal::decode(
                         args.rest
                             .get(1)
                             .ok_or(Error::Malformed("org request needs an access proposal"))?,
@@ -7400,21 +7460,21 @@ fn run() -> Result<()> {
                     }
                     let requested_at = Clock::new().now().millis;
                     proposal.verify_at(requested_at)?;
-                    brainmesh::org::trust_authority(
+                    hyperconsciousness::org::trust_authority(
                         &args.dir,
                         proposal.org,
                         proposal.authority,
                     )?;
-                    let request = brainmesh::org::AccessRequest::issue(
+                    let request = hyperconsciousness::org::AccessRequest::issue(
                         proposal,
                         &personal.signing,
                         requested_at,
                     )?;
-                    let envelope = brainmesh::org::AccessEnvelope::seal(&request)?;
+                    let envelope = hyperconsciousness::org::AccessEnvelope::seal(&request)?;
                     let records = vec![
                         serde_json::json!({
                             "kind": "org",
-                            "sensitivity": brainmesh::grant::PERSONAL,
+                            "sensitivity": hyperconsciousness::grant::PERSONAL,
                             "id": request.org.hex(),
                             "name": request.proposal.name,
                             "authority": request.proposal.authority.hex(),
@@ -7422,7 +7482,7 @@ fn run() -> Result<()> {
                         .to_string(),
                         serde_json::json!({
                             "kind": "org_access_request",
-                            "sensitivity": brainmesh::grant::PERSONAL,
+                            "sensitivity": hyperconsciousness::grant::PERSONAL,
                             "org": request.org.hex(),
                             "proposal": request.proposal.id()?.hex(),
                             "request": request.id()?.hex(),
@@ -7475,7 +7535,7 @@ fn run() -> Result<()> {
                     } else {
                         supplied.as_str()
                     };
-                    let envelope = brainmesh::org::AccessEnvelope::decode(encoded)?;
+                    let envelope = hyperconsciousness::org::AccessEnvelope::decode(encoded)?;
                     let url = args.rest.get(2).ok_or(Error::Malformed(
                         "org submit needs an http(s) organization inbox URL",
                     ))?;
@@ -7521,7 +7581,7 @@ fn run() -> Result<()> {
                         .get(1)
                         .ok_or(Error::Malformed("org inbox needs an organization"))?;
                     let org = org_id(&args.dir, org_name)?;
-                    let authority = brainmesh::org::owner_authority(&args.dir, org)?;
+                    let authority = hyperconsciousness::org::owner_authority(&args.dir, org)?;
                     let current = org_roles(&args.dir, org)?;
                     let revoked = revoked_admin_certificates(&args.dir, org)?;
                     let denied = access_denials(&args.dir, org)?;
@@ -7533,7 +7593,7 @@ fn run() -> Result<()> {
                         let encoded = value["envelope"].as_str().ok_or(Error::Malformed(
                             "queued access record is missing its encrypted envelope",
                         ))?;
-                        let envelope = brainmesh::org::AccessEnvelope::decode(encoded)?;
+                        let envelope = hyperconsciousness::org::AccessEnvelope::decode(encoded)?;
                         if envelope.org != org || !seen.insert(envelope.request) {
                             continue;
                         }
@@ -7585,7 +7645,7 @@ fn run() -> Result<()> {
                         "org listen-inbox needs an organization",
                     ))?;
                     let org = org_id(&args.dir, org_name)?;
-                    brainmesh::org::owner_authority(&args.dir, org)?;
+                    hyperconsciousness::org::owner_authority(&args.dir, org)?;
                     let bind = args
                         .rest
                         .get(2)
@@ -7662,21 +7722,21 @@ fn run() -> Result<()> {
                     };
                     let (request, authority) =
                         if encoded.starts_with("brainmesh-org-access-envelope-v1:") {
-                            let envelope = brainmesh::org::AccessEnvelope::decode(encoded)?;
+                            let envelope = hyperconsciousness::org::AccessEnvelope::decode(encoded)?;
                             let authority =
-                                brainmesh::org::owner_authority(&args.dir, envelope.org)?;
+                                hyperconsciousness::org::owner_authority(&args.dir, envelope.org)?;
                             let request = envelope.open(&authority)?;
                             (request, authority)
                         } else {
-                            let request = brainmesh::org::AccessRequest::decode(encoded)?;
+                            let request = hyperconsciousness::org::AccessRequest::decode(encoded)?;
                             let authority =
-                                brainmesh::org::owner_authority(&args.dir, request.org)?;
+                                hyperconsciousness::org::owner_authority(&args.dir, request.org)?;
                             (request, authority)
                         };
                     let days = days_option(&args.rest, 2, 7)?;
                     let approved_at = Clock::new().now().millis;
                     request.verify()?;
-                    if brainmesh::id::DeviceId(authority.verifying_key().to_bytes())
+                    if hyperconsciousness::id::DeviceId(authority.verifying_key().to_bytes())
                         != request.proposal.authority
                     {
                         return Err(Error::Denied(
@@ -7727,7 +7787,7 @@ fn run() -> Result<()> {
                             ))?;
                         let identity =
                             personal.for_space(&space::dir_of(&args.dir, space_id))?;
-                        roles.push(brainmesh::org::RoleInvitation {
+                        roles.push(hyperconsciousness::org::RoleInvitation {
                             role: proposed.role.clone(),
                             generation: *generation,
                             space: *space_id,
@@ -7741,7 +7801,7 @@ fn run() -> Result<()> {
                         .ok_or(Error::Malformed(
                             "approved invitation deadline is too large",
                         ))?;
-                    let invitation = brainmesh::org::InvitationBundle::issue(
+                    let invitation = hyperconsciousness::org::InvitationBundle::issue(
                         request.org,
                         &authority,
                         request.proposal.name.clone(),
@@ -7749,7 +7809,7 @@ fn run() -> Result<()> {
                         not_after,
                         roles,
                     )?;
-                    let approved = brainmesh::org::ApprovedInvitation::issue(
+                    let approved = hyperconsciousness::org::ApprovedInvitation::issue(
                         request,
                         invitation,
                         &authority,
@@ -7785,19 +7845,19 @@ fn run() -> Result<()> {
                     };
                     let (request, authority) =
                         if encoded.starts_with("brainmesh-org-access-envelope-v1:") {
-                            let envelope = brainmesh::org::AccessEnvelope::decode(encoded)?;
+                            let envelope = hyperconsciousness::org::AccessEnvelope::decode(encoded)?;
                             let authority =
-                                brainmesh::org::owner_authority(&args.dir, envelope.org)?;
+                                hyperconsciousness::org::owner_authority(&args.dir, envelope.org)?;
                             let request = envelope.open(&authority)?;
                             (request, authority)
                         } else {
-                            let request = brainmesh::org::AccessRequest::decode(encoded)?;
+                            let request = hyperconsciousness::org::AccessRequest::decode(encoded)?;
                             let authority =
-                                brainmesh::org::owner_authority(&args.dir, request.org)?;
+                                hyperconsciousness::org::owner_authority(&args.dir, request.org)?;
                             (request, authority)
                         };
                     request.verify()?;
-                    if brainmesh::id::DeviceId(authority.verifying_key().to_bytes())
+                    if hyperconsciousness::id::DeviceId(authority.verifying_key().to_bytes())
                         != request.proposal.authority
                     {
                         return Err(Error::Denied(
@@ -7821,14 +7881,14 @@ fn run() -> Result<()> {
                     }
                     let denied_at = Clock::new().now().millis;
                     let denial =
-                        brainmesh::org::AccessDenial::issue(request, &authority, denied_at)?;
+                        hyperconsciousness::org::AccessDenial::issue(request, &authority, denied_at)?;
                     let decision =
-                        brainmesh::org::AccessDecisionEnvelope::seal_denied(&denial)?;
+                        hyperconsciousness::org::AccessDecisionEnvelope::seal_denied(&denial)?;
                     append(
                         &args.dir,
                         &serde_json::json!({
                             "kind": "org_access_denial",
-                            "sensitivity": brainmesh::grant::PERSONAL,
+                            "sensitivity": hyperconsciousness::grant::PERSONAL,
                             "org": denial.org.hex(),
                             "request": request_hex,
                             "device": denial.request.device.hex(),
@@ -7851,7 +7911,7 @@ fn run() -> Result<()> {
                     let encoded = args.rest.get(1).ok_or(Error::Malformed(
                         "org inspect-denial needs a signed denial receipt",
                     ))?;
-                    let denial = brainmesh::org::AccessDenial::decode(encoded)?;
+                    let denial = hyperconsciousness::org::AccessDenial::decode(encoded)?;
                     println!(
                         "request {} denied {} by organization {}",
                         denial.request.id()?.short(),
@@ -7888,7 +7948,7 @@ fn run() -> Result<()> {
                         .get(2)
                         .ok_or(Error::Malformed("org rotate needs a role"))?;
                     let org = org_id(&args.dir, org_name)?;
-                    let authority = brainmesh::org::owner_authority(&args.dir, org)?;
+                    let authority = hyperconsciousness::org::owner_authority(&args.dir, org)?;
                     let current = org_roles(&args.dir, org)?
                         .into_iter()
                         .find(|role| role.0 == *role_name)
@@ -7922,14 +7982,14 @@ fn run() -> Result<()> {
                         .checked_add(1)
                         .ok_or(Error::Malformed("role generation overflow"))?;
                     let personal = Identity::load_or_create(&args.dir)?;
-                    let key = brainmesh::crypto::random_key();
+                    let key = hyperconsciousness::crypto::random_key();
                     let new_space = space::id_of(&key);
                     let space_dir = space::dir_of(&args.dir, &new_space);
                     let mut identity = personal.for_space(&space_dir)?;
                     identity.adopt_brain(key)?;
                     Store::open(&space_dir)?;
                     let space_name = role_space_name(org_name, role_name, org, generation);
-                    let state = brainmesh::org::RoleState::issue(
+                    let state = hyperconsciousness::org::RoleState::issue(
                         org,
                         &authority,
                         role_name.clone(),
@@ -7942,7 +8002,7 @@ fn run() -> Result<()> {
                         &args.dir,
                         &serde_json::json!({
                             "kind": "space",
-                            "sensitivity": brainmesh::grant::PERSONAL,
+                            "sensitivity": hyperconsciousness::grant::PERSONAL,
                             "id": new_space.hex(),
                             "name": space_name,
                         })
@@ -7952,7 +8012,7 @@ fn run() -> Result<()> {
                         &args.dir,
                         &serde_json::json!({
                             "kind": "org_role",
-                            "sensitivity": brainmesh::grant::PERSONAL,
+                            "sensitivity": hyperconsciousness::grant::PERSONAL,
                             "org": org.hex(),
                             "org_name": org_name,
                             "role": role_name,
@@ -7984,13 +8044,13 @@ fn run() -> Result<()> {
                     let mut bundles = Vec::new();
                     for joiner in &kept {
                         let invite = identity.invite_member(joiner)?;
-                        let bundle = brainmesh::org::InvitationBundle::issue(
+                        let bundle = hyperconsciousness::org::InvitationBundle::issue(
                             org,
                             &authority,
                             org_name.clone(),
                             joiner.device,
                             not_after,
-                            vec![brainmesh::org::RoleInvitation {
+                            vec![hyperconsciousness::org::RoleInvitation {
                                 role: role_name.clone(),
                                 generation,
                                 space: new_space,
@@ -8019,7 +8079,7 @@ fn run() -> Result<()> {
                             &args.dir,
                             &serde_json::json!({
                                 "kind": "org_member",
-                                "sensitivity": brainmesh::grant::PERSONAL,
+                                "sensitivity": hyperconsciousness::grant::PERSONAL,
                                 "org": org.hex(),
                                 "device": joiner.device.hex(),
                                 "roles": [role_name],
@@ -8037,7 +8097,7 @@ fn run() -> Result<()> {
                         &args.dir,
                         &serde_json::json!({
                             "kind": "org_rotation",
-                            "sensitivity": brainmesh::grant::PERSONAL,
+                            "sensitivity": hyperconsciousness::grant::PERSONAL,
                             "org": org.hex(),
                             "role": role_name,
                             "generation": generation,
@@ -8111,7 +8171,7 @@ fn run() -> Result<()> {
                             .ok_or(Error::Malformed("one requested role does not exist"))?;
                         let space_dir = space::dir_of(&args.dir, space_id);
                         let identity = personal.for_space(&space_dir)?;
-                        roles.push(brainmesh::org::RoleInvitation {
+                        roles.push(hyperconsciousness::org::RoleInvitation {
                             role: wanted.clone(),
                             generation: *generation,
                             space: *space_id,
@@ -8133,9 +8193,9 @@ fn run() -> Result<()> {
                         .join(org.hex())
                         .join("authority.key");
                     let invitation = if root_key.is_file() {
-                        let authority = brainmesh::org::owner_authority(&args.dir, org)?;
+                        let authority = hyperconsciousness::org::owner_authority(&args.dir, org)?;
                         OrgMemberInvitation::Root(Box::new(
-                            brainmesh::org::InvitationBundle::issue(
+                            hyperconsciousness::org::InvitationBundle::issue(
                                 org,
                                 &authority,
                                 org_name.clone(),
@@ -8152,7 +8212,7 @@ fn run() -> Result<()> {
                             &requested,
                         )?;
                         OrgMemberInvitation::Delegated(Box::new(
-                            brainmesh::org::DelegatedInvitation::issue(
+                            hyperconsciousness::org::DelegatedInvitation::issue(
                                 owner,
                                 &personal.signing,
                                 joiner.device,
@@ -8187,13 +8247,13 @@ fn run() -> Result<()> {
                 }
 
                 "accept" => {
-                    let acceptance = brainmesh::org::Acceptance::decode(
+                    let acceptance = hyperconsciousness::org::Acceptance::decode(
                         args.rest
                             .get(1)
                             .ok_or(Error::Malformed("org accept needs a signed receipt"))?,
                     )?;
                     acceptance.verify()?;
-                    let authority = brainmesh::org::owner_authority(&args.dir, acceptance.org)?;
+                    let authority = hyperconsciousness::org::owner_authority(&args.dir, acceptance.org)?;
                     let invitations = payloads(&args.dir, "org_member")?;
                     let mut issued = None;
                     for value in &invitations {
@@ -8232,7 +8292,7 @@ fn run() -> Result<()> {
                     let issued = issued.ok_or(Error::Denied(
                         "this owner needs its invitation record, or the delegated invitation after the receipt",
                     ))?;
-                    if brainmesh::id::DeviceId(authority.verifying_key().to_bytes())
+                    if hyperconsciousness::id::DeviceId(authority.verifying_key().to_bytes())
                         != issued.authority()
                     {
                         return Err(Error::Denied(
@@ -8254,7 +8314,7 @@ fn run() -> Result<()> {
                             value["membership"]
                                 .as_str()
                                 .and_then(|encoded| {
-                                    brainmesh::org::Membership::decode(encoded).ok()
+                                    hyperconsciousness::org::Membership::decode(encoded).ok()
                                 })
                                 .is_some_and(|recorded| {
                                     recorded.org == acceptance.org
@@ -8281,7 +8341,7 @@ fn run() -> Result<()> {
                     let encoded_membership = membership.encode()?;
                     let acceptance_record = serde_json::json!({
                         "kind": "org_member_acceptance",
-                        "sensitivity": brainmesh::grant::PERSONAL,
+                        "sensitivity": hyperconsciousness::grant::PERSONAL,
                         "org": acceptance.org.hex(),
                         "invitation": acceptance.invitation.hex(),
                         "receipt": acceptance.id()?.hex(),
@@ -8323,10 +8383,10 @@ fn run() -> Result<()> {
                         .into_iter()
                         .filter_map(|value| {
                             let acceptance =
-                                brainmesh::org::Acceptance::decode(value["acceptance"].as_str()?)
+                                hyperconsciousness::org::Acceptance::decode(value["acceptance"].as_str()?)
                                     .ok()?;
                             let membership =
-                                brainmesh::org::Membership::decode(value["membership"].as_str()?)
+                                hyperconsciousness::org::Membership::decode(value["membership"].as_str()?)
                                     .ok()?;
                             let accepted_roles = acceptance
                                 .roles
@@ -8443,14 +8503,14 @@ fn run() -> Result<()> {
                     let accepted_at = Clock::new().now().millis;
 
                     if encoded.trim().starts_with("brainmesh-org-admin-v1:") {
-                        let bundle = brainmesh::org::AdminBundle::decode(encoded)?;
+                        let bundle = hyperconsciousness::org::AdminBundle::decode(encoded)?;
                         if bundle.for_device != personal.device() {
                             return Err(Error::Malformed(
                                 "this administrator certificate is addressed to another device",
                             ));
                         }
                         bundle.verify_at(accepted_at)?;
-                        brainmesh::org::trust_authority(
+                        hyperconsciousness::org::trust_authority(
                             &args.dir,
                             bundle.org,
                             bundle.authority,
@@ -8460,7 +8520,7 @@ fn run() -> Result<()> {
                             value["bundle"]
                                 .as_str()
                                 .and_then(|encoded| {
-                                    brainmesh::org::AdminBundle::decode(encoded).ok()
+                                    hyperconsciousness::org::AdminBundle::decode(encoded).ok()
                                 })
                                 .and_then(|known| known.id().ok())
                                 == Some(bundle_id)
@@ -8471,7 +8531,7 @@ fn run() -> Result<()> {
                         let records = vec![
                             serde_json::json!({
                                 "kind": "org",
-                                "sensitivity": brainmesh::grant::PERSONAL,
+                                "sensitivity": hyperconsciousness::grant::PERSONAL,
                                 "id": bundle.org.hex(),
                                 "name": bundle.name,
                                 "authority": bundle.authority.hex(),
@@ -8479,7 +8539,7 @@ fn run() -> Result<()> {
                             .to_string(),
                             serde_json::json!({
                                 "kind": "org_admin",
-                                "sensitivity": brainmesh::grant::PERSONAL,
+                                "sensitivity": hyperconsciousness::grant::PERSONAL,
                                 "org": bundle.org.hex(),
                                 "org_name": bundle.name,
                                 "device": bundle.for_device.hex(),
@@ -8505,14 +8565,14 @@ fn run() -> Result<()> {
                         .trim()
                         .starts_with("brainmesh-org-role-owner-v1:")
                     {
-                        let bundle = brainmesh::org::RoleOwnerBundle::decode(encoded)?;
+                        let bundle = hyperconsciousness::org::RoleOwnerBundle::decode(encoded)?;
                         if bundle.for_device != personal.device() {
                             return Err(Error::Malformed(
                                 "this role-owner handoff is addressed to another device",
                             ));
                         }
                         bundle.verify_at(accepted_at)?;
-                        brainmesh::org::trust_authority(
+                        hyperconsciousness::org::trust_authority(
                             &args.dir,
                             bundle.org,
                             bundle.authority,
@@ -8539,7 +8599,7 @@ fn run() -> Result<()> {
 
                         let mut records = vec![serde_json::json!({
                             "kind": "org",
-                            "sensitivity": brainmesh::grant::PERSONAL,
+                            "sensitivity": hyperconsciousness::grant::PERSONAL,
                             "id": bundle.org.hex(),
                             "name": bundle.name,
                             "authority": bundle.authority.hex(),
@@ -8556,7 +8616,7 @@ fn run() -> Result<()> {
                             records.push(
                                 serde_json::json!({
                                     "kind": "space",
-                                    "sensitivity": brainmesh::grant::PERSONAL,
+                                    "sensitivity": hyperconsciousness::grant::PERSONAL,
                                     "id": role.space.hex(),
                                     "name": space_name,
                                 })
@@ -8565,7 +8625,7 @@ fn run() -> Result<()> {
                             records.push(
                                 serde_json::json!({
                                     "kind": "org_role",
-                                    "sensitivity": brainmesh::grant::PERSONAL,
+                                    "sensitivity": hyperconsciousness::grant::PERSONAL,
                                     "org": bundle.org.hex(),
                                     "org_name": bundle.name,
                                     "role": role.role,
@@ -8580,7 +8640,7 @@ fn run() -> Result<()> {
                         records.push(
                             serde_json::json!({
                                 "kind": "org_role_owner",
-                                "sensitivity": brainmesh::grant::PERSONAL,
+                                "sensitivity": hyperconsciousness::grant::PERSONAL,
                                 "org": bundle.org.hex(),
                                 "org_name": bundle.name,
                                 "device": bundle.for_device.hex(),
@@ -8610,7 +8670,7 @@ fn run() -> Result<()> {
                         ));
                     }
                     invitation.verify_at(accepted_at)?;
-                    brainmesh::org::trust_authority(
+                    hyperconsciousness::org::trust_authority(
                         &args.dir,
                         invitation.org(),
                         invitation.authority(),
@@ -8643,7 +8703,7 @@ fn run() -> Result<()> {
 
                     let mut records = vec![serde_json::json!({
                             "kind": "org",
-                            "sensitivity": brainmesh::grant::PERSONAL,
+                            "sensitivity": hyperconsciousness::grant::PERSONAL,
                             "id": invitation.org().hex(),
                             "name": invitation.name(),
                             "authority": invitation.authority().hex(),
@@ -8660,7 +8720,7 @@ fn run() -> Result<()> {
                         records.push(
                             serde_json::json!({
                                 "kind": "space",
-                                "sensitivity": brainmesh::grant::PERSONAL,
+                                "sensitivity": hyperconsciousness::grant::PERSONAL,
                                 "id": role.space.hex(),
                                 "name": space_name,
                             })
@@ -8668,7 +8728,7 @@ fn run() -> Result<()> {
                         );
                         let mut role_record = serde_json::json!({
                                 "kind": "org_role",
-                                "sensitivity": brainmesh::grant::PERSONAL,
+                                "sensitivity": hyperconsciousness::grant::PERSONAL,
                                 "org": invitation.org().hex(),
                                 "org_name": invitation.name(),
                                 "role": role.role,
@@ -8716,7 +8776,7 @@ fn run() -> Result<()> {
                     }
                     let accepted_at = Clock::new().now().millis;
                     invitation.verify_at(accepted_at)?;
-                    brainmesh::org::trust_authority(
+                    hyperconsciousness::org::trust_authority(
                         &args.dir,
                         invitation.org(),
                         invitation.authority(),
@@ -8763,7 +8823,7 @@ fn run() -> Result<()> {
                     }
 
                     let personal = Identity::load_or_create(&args.dir)?;
-                    let key = brainmesh::crypto::random_key();
+                    let key = hyperconsciousness::crypto::random_key();
                     let id = space::id_of(&key);
                     let space_dir = space::dir_of(&args.dir, &id);
 
@@ -8777,7 +8837,7 @@ fn run() -> Result<()> {
                         &args.dir,
                         &serde_json::json!({
                             "kind": "space",
-                            "sensitivity": brainmesh::grant::PERSONAL,
+                            "sensitivity": hyperconsciousness::grant::PERSONAL,
                             "id": identity_space_id(&identity)?.hex(),
                             "name": name,
                             "generation": 1,
@@ -8825,14 +8885,14 @@ fn run() -> Result<()> {
                         .ok_or(Error::Malformed("space generation overflow"))?;
                     let personal = Identity::load_or_create(&args.dir)?;
                     let old = personal.for_space(&space::dir_of(&args.dir, &previous))?;
-                    if old.authority_role() != brainmesh::identity::AuthorityRole::Owner {
+                    if old.authority_role() != hyperconsciousness::identity::AuthorityRole::Owner {
                         return Err(Error::Denied(
                             "only the space owner can rotate; harden a legacy space first",
                         ));
                     }
                     let old_signing = old.grant_authority_signing()?;
 
-                    let key = brainmesh::crypto::random_key();
+                    let key = hyperconsciousness::crypto::random_key();
                     let next = space::id_of(&key);
                     let next_dir = space::dir_of(&args.dir, &next);
                     let mut next_identity = personal.for_space(&next_dir)?;
@@ -8857,7 +8917,7 @@ fn run() -> Result<()> {
                         ))?;
                     let mut bundles = Vec::new();
                     for joiner in &kept {
-                        bundles.push(brainmesh::space::RotationBundle::issue(
+                        bundles.push(hyperconsciousness::space::RotationBundle::issue(
                             previous,
                             name.clone(),
                             generation,
@@ -8877,7 +8937,7 @@ fn run() -> Result<()> {
                         &args.dir,
                         &serde_json::json!({
                             "kind": "space",
-                            "sensitivity": brainmesh::grant::PERSONAL,
+                            "sensitivity": hyperconsciousness::grant::PERSONAL,
                             "id": next.hex(),
                             "name": name,
                             "generation": generation,
@@ -8927,7 +8987,7 @@ fn run() -> Result<()> {
                         .get(1)
                         .ok_or(Error::Malformed("space join needs an invite"))?;
                     if blob.starts_with("brainmesh-space-rotation-v1:") {
-                        let bundle = brainmesh::space::RotationBundle::decode(blob)?;
+                        let bundle = hyperconsciousness::space::RotationBundle::decode(blob)?;
                         let accepted_at = Clock::new().now().millis;
                         bundle.verify_at(accepted_at)?;
                         let personal = Identity::load_or_create(&args.dir)?;
@@ -8975,7 +9035,7 @@ fn run() -> Result<()> {
                             &args.dir,
                             &serde_json::json!({
                                 "kind": "space",
-                                "sensitivity": brainmesh::grant::PERSONAL,
+                                "sensitivity": hyperconsciousness::grant::PERSONAL,
                                 "id": bundle.next.hex(),
                                 "name": bundle.name,
                                 "generation": bundle.generation,
@@ -8996,7 +9056,7 @@ fn run() -> Result<()> {
                         return Err(Error::Malformed("that is not a space invite"));
                     }
 
-                    let id = brainmesh::id::Hash::from_hex(parts[1])
+                    let id = hyperconsciousness::id::Hash::from_hex(parts[1])
                         .ok_or(Error::Malformed("bad space id"))?;
                     let space_dir = space::dir_of(&args.dir, &id);
 
@@ -9009,7 +9069,7 @@ fn run() -> Result<()> {
                         &args.dir,
                         &serde_json::json!({
                             "kind": "space",
-                            "sensitivity": brainmesh::grant::PERSONAL,
+                            "sensitivity": hyperconsciousness::grant::PERSONAL,
                             "id": id.hex(),
                             "name": parts[2],
                             "generation": 1,
@@ -9090,12 +9150,12 @@ fn run() -> Result<()> {
 
             for value in payloads(&args.dir, "space")? {
                 let id = value["id"].as_str().unwrap_or("");
-                let here = brainmesh::id::Hash::from_hex(id)
+                let here = hyperconsciousness::id::Hash::from_hex(id)
                     .map(|h| held.contains(&h))
                     .unwrap_or(false);
                 let name = value["name"].as_str().unwrap_or("?");
                 let generation = value["generation"].as_u64().unwrap_or(1);
-                let state = brainmesh::id::Hash::from_hex(id)
+                let state = hyperconsciousness::id::Hash::from_hex(id)
                     .and_then(|id| {
                         current_space(&args.dir, name)
                             .ok()
@@ -9162,7 +9222,7 @@ fn run() -> Result<()> {
                     &args.dir,
                     &serde_json::json!({
                         "kind": "peer",
-                        "sensitivity": brainmesh::grant::PERSONAL,
+                        "sensitivity": hyperconsciousness::grant::PERSONAL,
                         "device": identity.device().hex(),
                         "address": address,
                         "command": command,
@@ -9638,7 +9698,7 @@ fn run() -> Result<()> {
 
 fn main() {
     // rust ignores SIGPIPE, so writing to a closed pipe raises an io error
-    // that println! turns into a panic. `brainmesh read | head` is a normal
+    // that println! turns into a panic. `hc read | head` is a normal
     // thing to type and it should not produce a stack trace. restoring the
     // default handler makes it stop quietly, like every other unix tool.
     #[cfg(unix)]
@@ -9668,12 +9728,12 @@ fn main() {
 #[cfg(test)]
 mod cli_brand_tests {
     #[test]
-    fn help_uses_the_short_command_without_erasing_the_compatibility_name() {
+    fn help_uses_only_the_current_product_name() {
         let help = super::usage();
         assert!(help.starts_with("hyperconsciousness (hc),"));
-        assert!(help.contains("short command: hc. brainmesh remains supported."));
+        assert!(help.contains("short command: hc."));
         assert!(help.contains("\n  hc start"));
-        assert!(!help.contains("\n  brainmesh start"));
+        assert!(!help.to_lowercase().contains("brainmesh"));
     }
 }
 
@@ -9684,10 +9744,10 @@ mod screenpipe_archive_tests {
         prepare_screenpipe_staging, remove_screenpipe_snapshot, request_screenpipe_backup,
         validate_screenpipe_snapshot,
     };
-    use brainmesh::blob::Blobs;
-    use brainmesh::identity::Identity;
-    use brainmesh::keyring::{DataKeys, RuntimeKeys};
-    use brainmesh::log::Store;
+    use hyperconsciousness::blob::Blobs;
+    use hyperconsciousness::identity::Identity;
+    use hyperconsciousness::keyring::{DataKeys, RuntimeKeys};
+    use hyperconsciousness::log::Store;
     use std::io::{Read, Write};
     use std::net::TcpListener;
     use std::thread;
@@ -9773,7 +9833,7 @@ mod screenpipe_archive_tests {
         let archive_dir = archive_temp.path().to_path_buf();
         Identity::load_or_create(&source_dir).unwrap();
         let legacy_key = source_dir.join("identity").join("brain.key");
-        std::fs::write(&legacy_key, brainmesh::crypto::random_key()).unwrap();
+        std::fs::write(&legacy_key, hyperconsciousness::crypto::random_key()).unwrap();
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -9786,7 +9846,7 @@ mod screenpipe_archive_tests {
         Store::open(&archive_dir).unwrap();
         let invite = source.invite(&archive.introduction()).unwrap();
         archive.accept(&invite).unwrap();
-        brainmesh::pin::save(&archive_dir, brainmesh::pin::Policy::All).unwrap();
+        hyperconsciousness::pin::save(&archive_dir, hyperconsciousness::pin::Policy::All).unwrap();
 
         let key = *source.brain_key().unwrap();
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -9833,10 +9893,10 @@ mod screenpipe_archive_tests {
 #[cfg(test)]
 mod audit_output_tests {
     use super::{append, count_field, display_field, short_field, stored_grants};
-    use brainmesh::grant::{Grant, Scope, READ};
-    use brainmesh::id::DeviceId;
-    use brainmesh::identity::{Identity, NO_KEYSTORE_ENV};
     use ed25519_dalek::SigningKey;
+    use hyperconsciousness::grant::{Grant, Scope, READ};
+    use hyperconsciousness::id::DeviceId;
+    use hyperconsciousness::identity::{Identity, NO_KEYSTORE_ENV};
     use rand_core::OsRng;
 
     #[test]
@@ -9899,14 +9959,14 @@ mod offload_plan_tests {
         let blobs = Blobs::open(root.path()).unwrap();
         let reference = blobs.put(&b"resume after a crash"[..], &[7u8; 32]).unwrap();
         let preview = blobs.preview_evict_loose(&reference.chunks).unwrap();
-        let request = brainmesh::offload::PlanRequest {
+        let request = hyperconsciousness::offload::PlanRequest {
             name: "memory.bin",
             peer: "archive",
-            target_kind: brainmesh::offload::TargetKind::KeyHoldingPeer,
+            target_kind: hyperconsciousness::offload::TargetKind::KeyHoldingPeer,
             space: None,
             json: true,
         };
-        let plan = brainmesh::offload::make_plan(
+        let plan = hyperconsciousness::offload::make_plan(
             root.path(),
             &request,
             "brainmesh",
@@ -9914,22 +9974,22 @@ mod offload_plan_tests {
             1,
             42,
             &reference,
-            brainmesh::pin::Policy::Metadata,
+            hyperconsciousness::pin::Policy::Metadata,
             preview,
         )
         .unwrap();
-        let mut journal = brainmesh::offload::Journal::started(&plan);
-        journal.progress = brainmesh::offload::Progress::Evicting {
+        let mut journal = hyperconsciousness::offload::Journal::started(&plan);
+        journal.progress = hyperconsciousness::offload::Progress::Evicting {
             newly_stored_chunks: 1,
         };
         journal.save(root.path()).unwrap();
 
         finish_offload(root.path(), &blobs, &reference, journal, 1, true).unwrap();
         assert!(!blobs.is_complete(&reference));
-        let completed = brainmesh::offload::Journal::load(root.path(), &plan.plan_id)
+        let completed = hyperconsciousness::offload::Journal::load(root.path(), &plan.plan_id)
             .unwrap()
             .unwrap();
-        let brainmesh::offload::Progress::Complete { receipt } = completed.progress else {
+        let hyperconsciousness::offload::Progress::Complete { receipt } = completed.progress else {
             panic!("resume did not publish a completion receipt");
         };
         assert_eq!(receipt.plan_id, plan.plan_id);
@@ -9967,13 +10027,13 @@ mod offload_plan_tests {
 #[cfg(test)]
 mod pin_hydration_tests {
     use super::*;
-    use brainmesh::blob::CHUNK;
-    use brainmesh::crypto::random_key;
-    use brainmesh::hlc::Clock;
-    use brainmesh::id::{DeviceId, ZERO_HASH};
-    use brainmesh::record::Record;
-    use brainmesh::wire::{read_frame, write_frame, V_BLOB, V_GET_BLOB, V_HAS_BLOB};
     use ed25519_dalek::SigningKey;
+    use hyperconsciousness::blob::CHUNK;
+    use hyperconsciousness::crypto::random_key;
+    use hyperconsciousness::hlc::Clock;
+    use hyperconsciousness::id::{DeviceId, ZERO_HASH};
+    use hyperconsciousness::record::Record;
+    use hyperconsciousness::wire::{read_frame, write_frame, V_BLOB, V_GET_BLOB, V_HAS_BLOB};
     use rand_core::OsRng;
 
     #[test]
@@ -10006,10 +10066,11 @@ mod pin_hydration_tests {
             .unwrap()
             .append(&record)
             .unwrap();
-        brainmesh::pin::save(target.path(), brainmesh::pin::Policy::All).unwrap();
+        hyperconsciousness::pin::save(target.path(), hyperconsciousness::pin::Policy::All).unwrap();
 
         let before =
-            brainmesh::pin::status(target.path(), &target_store, &target_blobs, &key).unwrap();
+            hyperconsciousness::pin::status(target.path(), &target_store, &target_blobs, &key)
+                .unwrap();
         assert_eq!(before.missing_chunks.len(), 2);
         let available = before.missing_chunks[0];
         let stored = source_blobs.get_chunk(&available).unwrap().unwrap();
@@ -10026,7 +10087,8 @@ mod pin_hydration_tests {
             1
         );
         let after =
-            brainmesh::pin::status(target.path(), &target_store, &target_blobs, &key).unwrap();
+            hyperconsciousness::pin::status(target.path(), &target_store, &target_blobs, &key)
+                .unwrap();
         assert_eq!(after.held_chunks(), 1);
         assert_eq!(after.missing_chunks.len(), 1);
         assert!(!after.satisfied());
@@ -10071,7 +10133,7 @@ mod pin_hydration_tests {
             .unwrap()
             .append(&record)
             .unwrap();
-        brainmesh::pin::save(target.path(), brainmesh::pin::Policy::All).unwrap();
+        hyperconsciousness::pin::save(target.path(), hyperconsciousness::pin::Policy::All).unwrap();
 
         let hex = chunk.hex();
         std::fs::write(
@@ -10080,12 +10142,14 @@ mod pin_hydration_tests {
         )
         .unwrap();
         let present =
-            brainmesh::pin::status(target.path(), &target_store, &target_blobs, &key).unwrap();
+            hyperconsciousness::pin::status(target.path(), &target_store, &target_blobs, &key)
+                .unwrap();
         assert!(present.satisfied());
-        let damaged = brainmesh::pin::verify(&present, &target_blobs, &key).unwrap();
+        let damaged = hyperconsciousness::pin::verify(&present, &target_blobs, &key).unwrap();
         assert_eq!(damaged.damaged_chunks, vec![chunk]);
         let repairable =
-            brainmesh::pin::status(target.path(), &target_store, &target_blobs, &key).unwrap();
+            hyperconsciousness::pin::status(target.path(), &target_store, &target_blobs, &key)
+                .unwrap();
         assert_eq!(repairable.missing_chunks, vec![chunk]);
 
         let mut replies = Vec::new();
@@ -10100,9 +10164,10 @@ mod pin_hydration_tests {
             1
         );
         let repaired =
-            brainmesh::pin::status(target.path(), &target_store, &target_blobs, &key).unwrap();
+            hyperconsciousness::pin::status(target.path(), &target_store, &target_blobs, &key)
+                .unwrap();
         assert!(repaired.satisfied());
-        let verified = brainmesh::pin::verify(&repaired, &target_blobs, &key).unwrap();
+        let verified = hyperconsciousness::pin::verify(&repaired, &target_blobs, &key).unwrap();
         assert_eq!(verified.verified_chunks, 1);
         assert_eq!(verified.verified_manifests, 1);
         assert!(verified.damaged_chunks.is_empty());
@@ -10113,7 +10178,7 @@ mod pin_hydration_tests {
 #[cfg(test)]
 mod sync_target_tests {
     use super::{read_peers, remote_for, write_peers, MAX_PEERS_FILE};
-    use brainmesh::error::Error;
+    use hyperconsciousness::error::Error;
 
     fn peers() -> Vec<(String, String)> {
         vec![
@@ -10298,7 +10363,7 @@ mod mesh_tests {
 
 #[cfg(test)]
 mod version_tests {
-    use brainmesh::catalog::entity_of;
+    use hyperconsciousness::catalog::entity_of;
     use serde_json::json;
 
     #[test]
@@ -10317,7 +10382,7 @@ mod version_tests {
         // history as the versions written after, or upgrading splits a file.
         let old = entity_of(&json!({"kind": "file", "name": "plan.txt"}), "plan.txt");
         let new = entity_of(
-            &json!({"kind": "file", "name": "plan.txt", "of": brainmesh::id::Hash::of(b"plan.txt").hex()}),
+            &json!({"kind": "file", "name": "plan.txt", "of": hyperconsciousness::id::Hash::of(b"plan.txt").hex()}),
             "plan.txt",
         );
         assert_eq!(old, new, "an upgrade must not split a file in two");
@@ -10338,16 +10403,16 @@ mod org_role_tests {
         delegated_admin_bundle, legacy_role_migrations_from, migrate_org_roles, org_roles_from,
         payloads,
     };
-    use brainmesh::crypto;
-    use brainmesh::id::{DeviceId, Hash};
-    use brainmesh::identity::Identity;
-    use brainmesh::log::Store;
-    use brainmesh::org::{
+    use ed25519_dalek::SigningKey;
+    use hyperconsciousness::crypto;
+    use hyperconsciousness::id::{DeviceId, Hash};
+    use hyperconsciousness::identity::Identity;
+    use hyperconsciousness::log::Store;
+    use hyperconsciousness::org::{
         create_authority, id_of, AcceptedRole, AdminBundle, AdminRole, RoleOwnerBundle,
         RoleOwnerInvitation, RoleState,
     };
-    use brainmesh::space;
-    use ed25519_dalek::SigningKey;
+    use hyperconsciousness::space;
     use rand_core::OsRng;
     use serde_json::json;
 

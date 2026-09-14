@@ -12,8 +12,7 @@ and agent orchestration are maintained separately.
 
 **Developer alpha.** APIs and commands may change. No independent security audit
 is claimed. Read the [security limits](docs/CONSTRAINTS.md) before entrusting
-important data to it. The former name, `brainmesh`, remains the Cargo package,
-binary name, and compatibility CLI alias.
+important data to it. The package is `hyperconsciousness`; its executable is `hc`.
 
 ## Install from source
 
@@ -31,13 +30,13 @@ git clone https://github.com/louis030195/hyperconsciousness.git
 cd hyperconsciousness
 cargo build --release --locked
 mkdir -p "$HOME/.local/bin"
-install -m 755 target/release/brainmesh "$HOME/.local/bin/hc"
+install -m 755 target/release/hc "$HOME/.local/bin/hc"
 export PATH="$HOME/.local/bin:$PATH"
 hc --help
 ```
 
 On Windows, use `cargo build --release --locked` and run
-`target\release\brainmesh.exe`. Add the binary's directory to your PATH if needed.
+`target\release\hc.exe`. Add the binary's directory to your PATH if needed.
 
 The npm packaging scripts are retained for compatibility and tested in CI.
 The registry package is not the source of this alpha; use this checkout.
@@ -119,7 +118,7 @@ HC stores opaque capability references and grants specific operations.
 
 ## Documentation
 
-- [Operator skill](skills/brainmesh/SKILL.md): sync, workspaces, grants, secrets,
+- [Operator skill](skills/hyperconsciousness-ops/SKILL.md): sync, workspaces, grants, secrets,
   remote storage, services, and recovery commands.
 - [Agent skill](skills/hyperconsciousness/SKILL.md): scoped knowledge discovery.
 - [Architecture](docs/ARCHITECTURE.md) and [format specification](docs/SPEC.md).

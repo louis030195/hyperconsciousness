@@ -7,8 +7,8 @@
 use std::fs::File;
 use std::io::{BufWriter, Write};
 
-use brainmesh::blob::Blobs;
-use brainmesh::crypto::random_key;
+use hyperconsciousness::blob::Blobs;
+use hyperconsciousness::crypto::random_key;
 
 const SIZE: usize = 256 * 1024 * 1024;
 

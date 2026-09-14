@@ -13,7 +13,7 @@ fn recovery_test_lock() -> std::sync::MutexGuard<'static, ()> {
 
 fn brainmesh(args: &[String], store: &Path) -> Output {
     let temporary_root = store.parent().unwrap_or(store);
-    Command::new(env!("CARGO_BIN_EXE_brainmesh"))
+    Command::new(env!("CARGO_BIN_EXE_hc"))
         .args(args)
         .arg("--dir")
         .arg(store)

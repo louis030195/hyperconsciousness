@@ -6,7 +6,7 @@ use std::fs;
 use std::process::Command;
 
 fn binary() -> &'static str {
-    env!("CARGO_BIN_EXE_brainmesh")
+    env!("CARGO_BIN_EXE_hc")
 }
 
 #[test]

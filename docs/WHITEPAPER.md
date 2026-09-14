@@ -10,9 +10,8 @@ Hyperconsciousness is an open system for keeping one encrypted history across a
 person's or company's devices. It gives agents narrowly scoped access without
 giving storage providers, relay operators, or every agent the whole brain.
 
-The stable package, protocol, and compatibility name is `brainmesh`. The product
-name is Hyperconsciousness and the short command is `hc`. Existing stores, keys,
-devices, scripts, and history do not move during the rename.
+The package is `hyperconsciousness` and the command is `hc`. Existing stores,
+keys, and signed data formats remain unchanged.
 
 It is not a notes app, a cloud drive, or a new filesystem. It is the durable
 knowledge layer below those interfaces.
@@ -90,7 +89,7 @@ only the affected bounded author-log segment.
 
 There is no shared log to lock and no leader to elect. Two offline devices can
 write independently. If an old backup creates two histories for one author,
-that author is frozen and the fork is exposed. Brainmesh does not silently pick
+that author is frozen and the fork is exposed. HC does not silently pick
 a winner.
 
 Networking is outside the core format. Devices may sync directly, over SSH,
@@ -159,7 +158,7 @@ that limit directly.
 
 ## agents and secrets
 
-Agents connect to a trusted Brainmesh node through a CLI, MCP, or a scoped HTTP
+Agents connect to a trusted HC node through a CLI, MCP, or a scoped HTTP
 interface. The node applies the grant before returning plaintext. An agent does
 not need the brain key.
 
@@ -168,14 +167,14 @@ Claude necessarily receives the permitted plaintext returned to it. End to end
 encryption protects the rest of the brain, not the text deliberately sent to
 the model provider.
 
-Secrets follow a stricter rule. Secret values never enter the log. Brainmesh
+Secrets follow a stricter rule. Secret values never enter the log. HC
 stores an opaque reference and may authorize a trusted adapter to use the
 secret for one operation. The agent receives the result, not the credential.
 
 ## phones
 
 An external mobile client can use the HTTP API without becoming a full replica. A phone holds a
-non-exportable device credential and asks a trusted Brainmesh node for
+non-exportable device credential and asks a trusted HC node for
 grant-scoped search, capture, and approvals. It does not hold the brain key or
 a local memory database. This limits damage from backups, app snapshots, and a
 lost phone.
@@ -185,7 +184,7 @@ A PWA cannot provide the same key boundary.
 
 ## security boundary
 
-Brainmesh is designed to protect against:
+HC is designed to protect against:
 
 - an untrusted relay, bucket, network, or storage operator
 - forged, reordered, truncated, or rewritten author history
@@ -221,9 +220,9 @@ There is no backdoor recovery key.
 | cloud drive | provider database | provider feature | depends on provider design | account and sharing controls | yes |
 | object storage | objects and provider metadata | optional versions | depends on client-side encryption | bucket and object policies | yes |
 | secrets manager | secret versions | usually audited | depends on service design | strong for credentials | yes |
-| Brainmesh | signed author logs and hashed blobs | append only and verifiable | ciphertext peers cannot | signed data and action grants | yes, with proof before eviction |
+| HC | signed author logs and hashed blobs | append only and verifiable | ciphertext peers cannot | signed data and action grants | yes, with proof before eviction |
 
-Brainmesh can use filesystems, object storage, relays, and cloud drives as
+HC can use filesystems, object storage, relays, and cloud drives as
 transport or storage. None of them becomes the authority for meaning,
 permissions, or history.
 
@@ -255,7 +254,7 @@ authors. That order is not a license to overwrite a conflict.
 
 ## scope
 
-Brainmesh deliberately does not try to be:
+HC deliberately does not try to be:
 
 - a POSIX filesystem
 - a general database
@@ -266,7 +265,7 @@ Brainmesh deliberately does not try to be:
 - a secrets manager
 
 screenpipe can keep high-volume raw capture local and publish curated records
-or derived context into Brainmesh. The original database remains usable. Large
+or derived context into HC. The original database remains usable. Large
 media can be referenced, deduplicated within a compartment, and fetched only
 when needed.
 

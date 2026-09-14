@@ -23,8 +23,8 @@ function platformBinary() {
   if (!["arm64", "x64"].includes(process.arch)) {
     throw new Error(`Hyperconsciousness (hc) does not support ${process.platform}/${process.arch} yet.`);
   }
-  const executable = process.platform === "win32" ? "brainmesh.exe" : "brainmesh";
-  return path.resolve(__dirname, "../..", ".brainmesh-bin", `${process.platform}-${process.arch}`, executable);
+  const executable = process.platform === "win32" ? "hc.exe" : "hc";
+  return path.resolve(__dirname, "../..", ".hc-bin", `${process.platform}-${process.arch}`, executable);
 }
 
 let binary;
@@ -36,7 +36,7 @@ try {
 }
 
 if (!fs.existsSync(binary)) {
-  console.error("Hyperconsciousness (hc) was not built during installation. Run `npm rebuild brainmesh` and check that Rust is installed.");
+  console.error("Hyperconsciousness (hc) was not built during installation. Run `npm rebuild hyperconsciousness` and check that Rust is installed.");
   process.exit(1);
 }
 

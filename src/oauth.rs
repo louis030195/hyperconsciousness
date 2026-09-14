@@ -25,7 +25,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::{json, Value};
 
-use brainmesh::error::{Error, Result};
+use hyperconsciousness::error::{Error, Result};
 
 /// an authorization code is exchanged within a minute or not at all. it exists
 /// only to cross the gap between a browser redirect and a back channel call.

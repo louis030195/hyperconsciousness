@@ -27,14 +27,14 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use brainmesh::blob::{Blobs, MAX_PACK_BYTES, MAX_STORED_CHUNK};
-use brainmesh::durable;
-use brainmesh::error::{Error, Result};
-use brainmesh::guard;
-use brainmesh::id::{DeviceId, Hash};
-use brainmesh::log::Store;
-use brainmesh::record::Record;
 use fs4::fs_std::FileExt;
+use hyperconsciousness::blob::{Blobs, MAX_PACK_BYTES, MAX_STORED_CHUNK};
+use hyperconsciousness::durable;
+use hyperconsciousness::error::{Error, Result};
+use hyperconsciousness::guard;
+use hyperconsciousness::id::{DeviceId, Hash};
+use hyperconsciousness::log::Store;
+use hyperconsciousness::record::Record;
 
 use crate::sigv4::Signer;
 
@@ -142,7 +142,7 @@ impl TempDownload {
         }
         if metadata.len() > expected as u64 {
             file.set_len(0)?;
-            brainmesh::fsync::durable(&file)?;
+            hyperconsciousness::fsync::durable(&file)?;
         }
         drop(file);
 
@@ -166,7 +166,7 @@ impl TempDownload {
         let file = OpenOptions::new().read(true).write(true).open(&self.path)?;
         let len = file.metadata()?.len();
         if len > 0 && len <= expected as u64 {
-            brainmesh::fsync::durable(&file)?;
+            hyperconsciousness::fsync::durable(&file)?;
             self.cleanup = false;
         }
         Ok(())
@@ -542,11 +542,11 @@ impl Remote {
             let mut have = file.metadata()?.len();
             if have > expected_size as u64 {
                 file.set_len(0)?;
-                brainmesh::fsync::durable(&file)?;
+                hyperconsciousness::fsync::durable(&file)?;
                 have = 0;
             }
             if have == expected_size as u64 {
-                brainmesh::fsync::durable(&file)?;
+                hyperconsciousness::fsync::durable(&file)?;
                 return Ok(());
             }
             drop(file);
@@ -592,7 +592,7 @@ impl Remote {
                 });
             }
             if output.status.success() && len == expected_size as u64 {
-                brainmesh::fsync::durable(&file)?;
+                hyperconsciousness::fsync::durable(&file)?;
                 return Ok(());
             }
 
@@ -601,7 +601,7 @@ impl Remote {
             // install still decides whether the bytes are the named object.
             if have > 0 && output.status.code() == Some(33) {
                 file.set_len(0)?;
-                brainmesh::fsync::durable(&file)?;
+                hyperconsciousness::fsync::durable(&file)?;
                 continue;
             }
             // HTTP 4xx/5xx (CURLE_HTTP_RETURNED_ERROR) is not repaired by
@@ -888,7 +888,7 @@ pub fn archive_reference(
     dir: &Path,
     remote: &Remote,
     blobs: &Blobs,
-    reference: &brainmesh::blob::BlobRef,
+    reference: &hyperconsciousness::blob::BlobRef,
 ) -> Result<ArchiveProof> {
     // Preserve the signed record naming this manifest as well as its bytes.
     // Signed history remains local after offload, but uploading it makes the
@@ -1026,7 +1026,7 @@ where
             ObjectKind::Log(author) => {
                 let bytes = fetched.read()?;
                 let records = decode_log_object(&bytes, author)?;
-                let applied = brainmesh::sync::apply(store, &records)?;
+                let applied = hyperconsciousness::sync::apply(store, &records)?;
                 accepted = accepted
                     .checked_add(
                         usize::try_from(applied.accepted)
@@ -1067,10 +1067,10 @@ pub fn pull(dir: &Path, remote: &Remote, store: &Store) -> Result<(usize, usize)
 #[cfg(test)]
 mod tests {
     use super::*;
-    use brainmesh::crypto::random_key;
-    use brainmesh::hlc::Clock;
-    use brainmesh::id::ZERO_HASH;
     use ed25519_dalek::SigningKey;
+    use hyperconsciousness::crypto::random_key;
+    use hyperconsciousness::hlc::Clock;
+    use hyperconsciousness::id::ZERO_HASH;
     use rand_core::OsRng;
 
     #[test]
@@ -1286,7 +1286,7 @@ mod tests {
         let bytes = b"sealed ciphertext for a keyless archive".to_vec();
         let hash = Hash::of(&bytes);
         blobs.put_chunk(&hash, &bytes).unwrap();
-        let reference = brainmesh::blob::BlobRef {
+        let reference = hyperconsciousness::blob::BlobRef {
             id: Hash::of(b"plaintext identity"),
             len: 18,
             epoch: 1,
@@ -1312,7 +1312,7 @@ mod tests {
         let bytes = b"ciphertext that must survive a false provider claim".to_vec();
         let hash = Hash::of(&bytes);
         blobs.put_chunk(&hash, &bytes).unwrap();
-        let reference = brainmesh::blob::BlobRef {
+        let reference = hyperconsciousness::blob::BlobRef {
             id: Hash::of(b"second plaintext identity"),
             len: 25,
             epoch: 1,

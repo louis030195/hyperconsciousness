@@ -13,7 +13,7 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
-use brainmesh::error::{Error, Result};
+use hyperconsciousness::error::{Error, Result};
 use serde::{Deserialize, Serialize};
 
 const MANIFEST_VERSION: u8 = 3;
@@ -97,7 +97,7 @@ fn manifest_path(store: &Path) -> PathBuf {
 }
 
 fn file_blake3(path: &Path) -> Result<String> {
-    brainmesh::guard::no_symlink(path)?;
+    hyperconsciousness::guard::no_symlink(path)?;
     let mut file = File::open(path)?;
     if !file.metadata()?.is_file() {
         return Err(Error::Malformed("service executable is not a regular file"));
@@ -130,12 +130,12 @@ fn private_file(path: &Path, bytes: &[u8]) -> Result<()> {
             max: MAX_MANIFEST_BYTES,
         });
     }
-    brainmesh::guard::no_symlink(path)?;
+    hyperconsciousness::guard::no_symlink(path)?;
     let parent = path
         .parent()
         .ok_or(Error::Malformed("service file has no parent"))?;
     std::fs::create_dir_all(parent)?;
-    brainmesh::guard::no_symlink(parent)?;
+    hyperconsciousness::guard::no_symlink(parent)?;
 
     let name = path
         .file_name()
@@ -147,7 +147,7 @@ fn private_file(path: &Path, bytes: &[u8]) -> Result<()> {
             ".{name}.brainmesh-part-{}-{attempt}",
             std::process::id()
         ));
-        brainmesh::guard::no_symlink(&temporary)?;
+        hyperconsciousness::guard::no_symlink(&temporary)?;
         let mut options = OpenOptions::new();
         options.create_new(true).write(true);
         #[cfg(unix)]
@@ -168,7 +168,7 @@ fn private_file(path: &Path, bytes: &[u8]) -> Result<()> {
     let written = (|| -> Result<()> {
         file.write_all(bytes)?;
         file.flush()?;
-        brainmesh::fsync::durable(&file)?;
+        hyperconsciousness::fsync::durable(&file)?;
         drop(file);
         #[cfg(target_os = "windows")]
         if path.exists() {
@@ -178,7 +178,7 @@ fn private_file(path: &Path, bytes: &[u8]) -> Result<()> {
         #[cfg(unix)]
         {
             let directory = File::open(parent)?;
-            brainmesh::fsync::durable(&directory)?;
+            hyperconsciousness::fsync::durable(&directory)?;
         }
         Ok(())
     })();
@@ -190,7 +190,7 @@ fn private_file(path: &Path, bytes: &[u8]) -> Result<()> {
 
 #[cfg(target_os = "macos")]
 fn ensure_private_log(path: &Path) -> Result<()> {
-    brainmesh::guard::no_symlink(path)?;
+    hyperconsciousness::guard::no_symlink(path)?;
     let mut options = OpenOptions::new();
     options.create(true).append(true);
     use std::os::unix::fs::OpenOptionsExt;
@@ -205,7 +205,7 @@ fn ensure_private_log(path: &Path) -> Result<()> {
 }
 
 fn read_bounded(path: &Path) -> Result<Vec<u8>> {
-    brainmesh::guard::no_symlink(path)?;
+    hyperconsciousness::guard::no_symlink(path)?;
     let file = File::open(path)?;
     let metadata = file.metadata()?;
     if !metadata.is_file() {
@@ -515,10 +515,10 @@ fn build_manifest(
             "service executable must be a regular file",
         ));
     }
-    brainmesh::guard::check(&store)?;
+    hyperconsciousness::guard::check(&store)?;
     let witness = witness
         .map(|path| -> Result<PathBuf> {
-            brainmesh::guard::no_symlink(path)?;
+            hyperconsciousness::guard::no_symlink(path)?;
             let path = path.canonicalize()?;
             if !path.is_file() {
                 return Err(Error::Malformed("service witness must be a regular file"));

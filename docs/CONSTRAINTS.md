@@ -125,11 +125,11 @@ withholds later epoch keys. Revoking an agent grant is not the same operation
 as removing a device. None of these recalls old keys or plaintext already
 copied; re-encrypting history would still be theatre.
 
-**A credential adapter is trusted code, not a sandbox.** Brainmesh pins its
+**A credential adapter is trusted code, not a sandbox.** HC pins its
 exact executable and grants only named operations, but the adapter owns vault
 access and sees the bounded request and provider response. Code already running
 as the same OS user may still attack that process or its platform vault unless
-the adapter is independently sandboxed or hardware-backed. Brainmesh never
+the adapter is independently sandboxed or hardware-backed. HC never
 claims a 0600 file or an in-process broker defeats a compromised user session.
 
 Offline invitation deadlines are enforced by conforming clients and by whether
@@ -300,7 +300,7 @@ recovered key.
   durability plan and a tested restore.
 - Blobs never travel over a git transport. GitHub caps a file at 100 MB, and
   ciphertext does not gain useful delta compression from Git packfiles.
-  Brainmesh's own immutable packs are only containers: they preserve every
+  HC's own immutable packs are only containers: they preserve every
   ciphertext chunk hash while reducing inode and durability-flush overhead.
 - Any tunnel exposing a query endpoint must pass TLS through, not terminate it,
   or the tunnel provider becomes a third party that reads everything.

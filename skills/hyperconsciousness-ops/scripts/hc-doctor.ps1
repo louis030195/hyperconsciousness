@@ -7,31 +7,31 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$command = Get-Command brainmesh -ErrorAction SilentlyContinue
+$command = Get-Command hc -ErrorAction SilentlyContinue
 if ($command) {
-  $Brainmesh = $command.Source
+  $Hc = $command.Source
 } else {
   $candidates = @(
-    (Join-Path $env:USERPROFILE ".local\bin\brainmesh.exe"),
-    (Join-Path $env:USERPROFILE "brainmesh\target\release\brainmesh.exe")
+    (Join-Path $env:USERPROFILE ".local\bin\hc.exe"),
+    (Join-Path $env:USERPROFILE "hyperconsciousness\target\release\hc.exe")
   )
-  $Brainmesh = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+  $Hc = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
 }
-if (-not $Brainmesh) {
-  Write-Error "brainmesh binary: missing"
+if (-not $Hc) {
+  Write-Error "hc binary: missing"
   exit 1
 }
 
 Write-Output "host: $env:COMPUTERNAME"
 Write-Output "os: $([System.Environment]::OSVersion.VersionString)"
-Write-Output "binary: $Brainmesh"
-Get-FileHash -Algorithm SHA256 $Brainmesh | Format-List
+Write-Output "binary: $Hc"
+Get-FileHash -Algorithm SHA256 $Hc | Format-List
 Write-Output "store: $Store"
 Write-Output "processes:"
-Get-CimInstance Win32_Process -Filter "Name = 'brainmesh.exe'" |
+Get-CimInstance Win32_Process -Filter "Name = 'hc.exe'" |
   Select-Object ProcessId, CommandLine |
   Format-List
 Write-Output "status:"
-& $Brainmesh status --dir $Store
+& $Hc status --dir $Store
 Write-Output "peers:"
-& $Brainmesh peers --dir $Store
+& $Hc peers --dir $Store

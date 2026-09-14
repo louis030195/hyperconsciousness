@@ -30,7 +30,7 @@ use base64ct::{Base64, Encoding};
 use fs4::fs_std::FileExt;
 use serde_json::{json, Value};
 
-use brainmesh::error::{Error, Result};
+use hyperconsciousness::error::{Error, Result};
 
 use crate::dpop;
 use crate::mcp;
@@ -373,7 +373,7 @@ impl InboxRateLimits {
     }
 }
 
-pub fn serve_org_inbox(bind: &str, dir: PathBuf, org: brainmesh::id::Hash) -> Result<()> {
+pub fn serve_org_inbox(bind: &str, dir: PathBuf, org: hyperconsciousness::id::Hash) -> Result<()> {
     let listener = TcpListener::bind(bind)?;
     let address = listener.local_addr()?;
     let gate = Arc::new(Mutex::new(()));
@@ -416,7 +416,7 @@ pub fn serve_org_inbox(bind: &str, dir: PathBuf, org: brainmesh::id::Hash) -> Re
 fn handle_org_inbox(
     mut stream: TcpStream,
     dir: &PathBuf,
-    org: brainmesh::id::Hash,
+    org: hyperconsciousness::id::Hash,
     gate: &Mutex<()>,
     rates: &Mutex<InboxRateLimits>,
 ) -> Result<()> {
@@ -462,7 +462,7 @@ fn handle_org_inbox(
     }
     if request.method == "GET" && request.query.is_empty() {
         if let Some(encoded_id) = request.path.strip_prefix("/v1/org/decision/") {
-            let Some(request_id) = brainmesh::id::Hash::from_hex(encoded_id) else {
+            let Some(request_id) = hyperconsciousness::id::Hash::from_hex(encoded_id) else {
                 return respond(
                     &mut stream,
                     404,
@@ -1316,7 +1316,7 @@ fn receive_mobile_audio(
     let receipts = endpoint.dir.join("mobile-audio-receipts");
     secure_dir(&receipts)?;
     let receipt = receipts.join(chunk_id);
-    brainmesh::guard::no_symlink(&receipt)?;
+    hyperconsciousness::guard::no_symlink(&receipt)?;
 
     if receipt.exists() {
         let value = read_mobile_audio_receipt(&receipt)?;
@@ -1486,7 +1486,7 @@ fn receive_mobile_audio_batch(
     // Validate every existing receipt before changing anything in this batch.
     for upload in &uploads {
         let receipt = receipts.join(&upload.chunk_id);
-        brainmesh::guard::no_symlink(&receipt)?;
+        hyperconsciousness::guard::no_symlink(&receipt)?;
         if !receipt.exists() {
             missing.insert(upload.chunk_id.clone());
             continue;
@@ -1719,7 +1719,7 @@ fn receive_mobile_context_batch(
 
     for upload in &uploads {
         let receipt = receipts.join(&upload.event_id);
-        brainmesh::guard::no_symlink(&receipt)?;
+        hyperconsciousness::guard::no_symlink(&receipt)?;
         if !receipt.exists() {
             missing.insert(upload.event_id.clone());
             continue;
@@ -1920,7 +1920,7 @@ fn mobile_context_fingerprint(
 }
 
 fn read_mobile_context_receipt(path: &Path) -> Result<Value> {
-    brainmesh::guard::no_symlink(path)?;
+    hyperconsciousness::guard::no_symlink(path)?;
     let metadata = std::fs::metadata(path)?;
     if !metadata.is_file() || metadata.len() > 4 * 1024 {
         return Err(Error::Malformed(
@@ -1969,7 +1969,7 @@ fn mobile_audio_fingerprint(content_type: &str, recorded_at_ms: u64, body: &[u8]
 }
 
 fn read_mobile_audio_receipt(path: &Path) -> Result<Value> {
-    brainmesh::guard::no_symlink(path)?;
+    hyperconsciousness::guard::no_symlink(path)?;
     let metadata = std::fs::metadata(path)?;
     if !metadata.is_file() || metadata.len() > 4 * 1024 {
         return Err(Error::Malformed(
@@ -2434,7 +2434,7 @@ struct Loaded<T> {
 }
 
 fn canonical_fingerprint(value: &str) -> bool {
-    brainmesh::id::Hash::from_hex(value).is_some_and(|hash| hash.hex() == value)
+    hyperconsciousness::id::Hash::from_hex(value).is_some_and(|hash| hash.hex() == value)
 }
 
 fn stored_dpop_jkt(value: &Value) -> Result<Option<String>> {
@@ -2468,7 +2468,7 @@ fn stored_credential(value: &Value, fingerprint: fn(&str) -> String) -> Result<(
 }
 
 fn read_auth_log(path: &Path) -> Result<Option<String>> {
-    brainmesh::guard::no_symlink(path)?;
+    hyperconsciousness::guard::no_symlink(path)?;
     let mut options = private_options();
     let mut file = match options.read(true).open(path) {
         Ok(file) => file,
@@ -2666,7 +2666,7 @@ fn append_private_log(path: &Path, value: &Value) -> Result<()> {
             max: MAX_AUTH_LOG_BYTES,
         });
     }
-    brainmesh::guard::no_symlink(path)?;
+    hyperconsciousness::guard::no_symlink(path)?;
     let mut options = private_options();
     let mut file = options.create(true).append(true).open(path)?;
     let metadata = file.metadata()?;
@@ -2692,7 +2692,7 @@ fn append_private_log(path: &Path, value: &Value) -> Result<()> {
     }
     file.write_all(&line)?;
     file.flush()?;
-    brainmesh::fsync::durable(&file)?;
+    hyperconsciousness::fsync::durable(&file)?;
     Ok(())
 }
 
@@ -2735,7 +2735,7 @@ fn replace_private_log(path: &Path, bytes: &[u8]) -> Result<()> {
             max: MAX_AUTH_LOG_BYTES,
         });
     }
-    brainmesh::guard::no_symlink(path)?;
+    hyperconsciousness::guard::no_symlink(path)?;
     let parent = path
         .parent()
         .ok_or(Error::Malformed("OAuth credential log has no parent"))?;
@@ -2749,7 +2749,7 @@ fn replace_private_log(path: &Path, bytes: &[u8]) -> Result<()> {
             ".{name}.brainmesh-migrate-{}-{attempt}",
             std::process::id()
         ));
-        brainmesh::guard::no_symlink(&temporary)?;
+        hyperconsciousness::guard::no_symlink(&temporary)?;
         let mut options = private_options();
         match options.create_new(true).write(true).open(&temporary) {
             Ok(file) => break (temporary, file),
@@ -2764,11 +2764,11 @@ fn replace_private_log(path: &Path, bytes: &[u8]) -> Result<()> {
     let result = (|| -> Result<()> {
         file.write_all(bytes)?;
         file.flush()?;
-        brainmesh::fsync::durable(&file)?;
+        hyperconsciousness::fsync::durable(&file)?;
         drop(file);
         replace_file(&temporary, path)?;
         #[cfg(unix)]
-        brainmesh::fsync::durable(&File::open(parent)?)?;
+        hyperconsciousness::fsync::durable(&File::open(parent)?)?;
         Ok(())
     })();
     if result.is_err() {
@@ -2818,7 +2818,7 @@ fn refresh_snapshot(active: &[RefreshVerifier]) -> Result<Vec<u8>> {
 pub fn load_auth_state(dir: &Path) -> Result<AuthState> {
     secure_dir(dir)?;
     let lock_path = dir.join("oauth.lock");
-    brainmesh::guard::no_symlink(&lock_path)?;
+    hyperconsciousness::guard::no_symlink(&lock_path)?;
     let mut options = private_options();
     let lock = options
         .create(true)
@@ -2935,7 +2935,7 @@ pub fn token(dir: &Path) -> Result<String> {
     let path = dir.join("http.token");
 
     loop {
-        brainmesh::guard::no_symlink(&path)?;
+        hyperconsciousness::guard::no_symlink(&path)?;
         let mut read_options = private_options();
         match read_options.read(true).open(&path) {
             Ok(mut file) => {
@@ -2970,9 +2970,9 @@ pub fn token(dir: &Path) -> Result<String> {
             Ok(mut file) => {
                 file.write_all(created.as_bytes())?;
                 file.flush()?;
-                brainmesh::fsync::durable(&file)?;
+                hyperconsciousness::fsync::durable(&file)?;
                 #[cfg(unix)]
-                brainmesh::fsync::durable(&File::open(dir)?)?;
+                hyperconsciousness::fsync::durable(&File::open(dir)?)?;
                 return Ok(created);
             }
             Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
@@ -2982,9 +2982,9 @@ pub fn token(dir: &Path) -> Result<String> {
 }
 
 fn secure_dir(dir: &Path) -> Result<()> {
-    brainmesh::guard::no_symlink(dir)?;
+    hyperconsciousness::guard::no_symlink(dir)?;
     std::fs::create_dir_all(dir)?;
-    brainmesh::guard::no_symlink(dir)?;
+    hyperconsciousness::guard::no_symlink(dir)?;
     if !std::fs::metadata(dir)?.is_dir() {
         return Err(Error::Malformed(
             "OAuth credential location is not a directory",
@@ -3001,11 +3001,11 @@ fn secure_dir(dir: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use brainmesh::grant::{Grant, Scope, PERSONAL, READ, WRITE};
-    use brainmesh::id::{DeviceId, Hash};
-    use brainmesh::identity::{Identity, NO_KEYSTORE_ENV};
-    use brainmesh::keyring::DataKeys;
-    use brainmesh::org::{
+    use hyperconsciousness::grant::{Grant, Scope, PERSONAL, READ, WRITE};
+    use hyperconsciousness::id::{DeviceId, Hash};
+    use hyperconsciousness::identity::{Identity, NO_KEYSTORE_ENV};
+    use hyperconsciousness::keyring::DataKeys;
+    use hyperconsciousness::org::{
         id_of, AccessDecision, AccessDecisionEnvelope, AccessDenial, AccessEnvelope,
         AccessProposal, AccessRequest, AdminBundle, AdminRole,
     };
@@ -3166,8 +3166,8 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(reference.len, audio.len() as u64);
-        let keys = brainmesh::keyring::RuntimeKeys::open(&brain, &identity).unwrap();
-        let store = brainmesh::log::Store::open(&brain).unwrap();
+        let keys = hyperconsciousness::keyring::RuntimeKeys::open(&brain, &identity).unwrap();
+        let store = hyperconsciousness::log::Store::open(&brain).unwrap();
         let matches = store
             .authors()
             .unwrap()
@@ -3244,8 +3244,8 @@ mod tests {
         let repeated = raw_response(mobile_audio_endpoint(brain.clone(), auth, grant), &request);
         assert!(repeated.starts_with("HTTP/1.1 200 OK"), "{repeated}");
 
-        let keys = brainmesh::keyring::RuntimeKeys::open(&brain, &identity).unwrap();
-        let store = brainmesh::log::Store::open(&brain).unwrap();
+        let keys = hyperconsciousness::keyring::RuntimeKeys::open(&brain, &identity).unwrap();
+        let store = hyperconsciousness::log::Store::open(&brain).unwrap();
         let matches = store
             .authors()
             .unwrap()
@@ -3329,8 +3329,8 @@ mod tests {
             "{collision}"
         );
 
-        let keys = brainmesh::keyring::RuntimeKeys::open(&brain, &identity).unwrap();
-        let store = brainmesh::log::Store::open(&brain).unwrap();
+        let keys = hyperconsciousness::keyring::RuntimeKeys::open(&brain, &identity).unwrap();
+        let store = hyperconsciousness::log::Store::open(&brain).unwrap();
         let matches = store
             .authors()
             .unwrap()
@@ -3404,8 +3404,8 @@ mod tests {
         let employee_dir = tempfile::tempdir().unwrap();
         let mut root_identity = Identity::load_or_create(root_dir.path()).unwrap();
         root_identity.create_brain().unwrap();
-        let (org, _) = brainmesh::org::create_authority(root_dir.path()).unwrap();
-        let root = brainmesh::org::owner_authority(root_dir.path(), org).unwrap();
+        let (org, _) = hyperconsciousness::org::create_authority(root_dir.path()).unwrap();
+        let root = hyperconsciousness::org::owner_authority(root_dir.path(), org).unwrap();
         let admin = Identity::load_or_create(admin_dir.path()).unwrap();
         let employee = Identity::load_or_create(employee_dir.path()).unwrap();
         let role = AdminRole {
@@ -3481,7 +3481,7 @@ mod tests {
             &root_dir.path().to_path_buf(),
             &json!({
                 "kind": "org_access_denial",
-                "sensitivity": brainmesh::grant::PERSONAL,
+                "sensitivity": hyperconsciousness::grant::PERSONAL,
                 "org": org.hex(),
                 "request": request_id.hex(),
                 "denial": denial.encode().unwrap(),

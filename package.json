@@ -1,5 +1,5 @@
 {
-  "name": "brainmesh",
+  "name": "hyperconsciousness",
   "version": "0.1.0-alpha.1",
   "description": "Hyperconsciousness, an encrypted, append-only memory layer across your devices",
   "license": "MIT",
@@ -22,8 +22,7 @@
     "sync"
   ],
   "bin": {
-    "brainmesh": "npm/bin/brainmesh.js",
-    "hc": "npm/bin/brainmesh.js"
+    "hc": "npm/bin/hc.js"
   },
   "files": [
     "Cargo.lock",
@@ -31,7 +30,7 @@
     "LICENSE",
     "README.md",
     "rust-toolchain.toml",
-    "npm/bin/brainmesh.js",
+    "npm/bin/hc.js",
     "npm/scripts/install.js",
     "npm/scripts/verify-package.js",
     "src/"

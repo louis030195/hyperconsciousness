@@ -20,14 +20,14 @@ use std::sync::{Arc, Mutex, RwLock};
 
 use serde_json::{json, Value};
 
-use brainmesh::error::{Error, Result};
-use brainmesh::grant::{self, Grant};
-use brainmesh::hlc::{Clock, Hlc};
-use brainmesh::identity::Identity;
-use brainmesh::keyring::{DataKeys, RuntimeKeys};
-use brainmesh::log::Store;
-use brainmesh::secret;
-use brainmesh::{
+use hyperconsciousness::error::{Error, Result};
+use hyperconsciousness::grant::{self, Grant};
+use hyperconsciousness::hlc::{Clock, Hlc};
+use hyperconsciousness::identity::Identity;
+use hyperconsciousness::keyring::{DataKeys, RuntimeKeys};
+use hyperconsciousness::log::Store;
+use hyperconsciousness::secret;
+use hyperconsciousness::{
     blob::{BlobRef, Blobs},
     id::{Hash, ZERO_HASH},
     query::Snapshot,
@@ -69,7 +69,7 @@ struct CachedSnapshot {
 
 struct CachedSearchIndex {
     keys: Hash,
-    index: Arc<RwLock<brainmesh::search_index::Index>>,
+    index: Arc<RwLock<hyperconsciousness::search_index::Index>>,
 }
 
 /// One bounded observation produced by the private Companion app. The public
@@ -103,8 +103,8 @@ impl Server {
         &self,
         store: &Store,
         keys: &RuntimeKeys,
-    ) -> Result<brainmesh::revocation::Index> {
-        brainmesh::revocation::Index::load_or_build(
+    ) -> Result<hyperconsciousness::revocation::Index> {
+        hyperconsciousness::revocation::Index::load_or_build(
             &self.dir,
             store,
             keys,
@@ -150,7 +150,7 @@ impl Server {
         &self,
         store: &Store,
         keys: &RuntimeKeys,
-    ) -> Result<Arc<RwLock<brainmesh::search_index::Index>>> {
+    ) -> Result<Arc<RwLock<hyperconsciousness::search_index::Index>>> {
         let fingerprint = keys.cache_fingerprint();
         let mut cache = self
             .search_cache
@@ -168,8 +168,12 @@ impl Server {
             }
         }
         *cache = None;
-        let index =
-            brainmesh::search_index::Index::load_or_build(&self.dir, store, keys, fingerprint)?;
+        let index = hyperconsciousness::search_index::Index::load_or_build(
+            &self.dir,
+            store,
+            keys,
+            fingerprint,
+        )?;
         let index = Arc::new(RwLock::new(index));
         *cache = Some(CachedSearchIndex {
             keys: fingerprint,
@@ -252,7 +256,7 @@ impl Server {
             sensitivity: grant::PERSONAL,
         };
         let revoked = self.revocations(&store, &keys)?;
-        let effective = brainmesh::query::permit_write_indexed(
+        let effective = hyperconsciousness::query::permit_write_indexed(
             &store,
             &keys,
             &self.chain,
@@ -315,7 +319,7 @@ impl Server {
             sensitivity: grant::PERSONAL,
         };
         let revoked = self.revocations(&store, &keys)?;
-        let effective = brainmesh::query::permit_write_indexed(
+        let effective = hyperconsciousness::query::permit_write_indexed(
             &store,
             &keys,
             &self.chain,
@@ -444,7 +448,7 @@ impl Server {
             })
             .collect::<Vec<_>>();
         let revoked = self.revocations(&store, &keys)?;
-        let effective = brainmesh::query::permit_actions_indexed(
+        let effective = hyperconsciousness::query::permit_actions_indexed(
             &store,
             &keys,
             &self.chain,
@@ -634,7 +638,7 @@ impl Server {
                 // binding a continuation cursor to avoid meaningless misses.
                 tags.sort();
                 tags.dedup();
-                let mut filter = brainmesh::query::Filter {
+                let mut filter = hyperconsciousness::query::Filter {
                     text: arguments["query"]
                         .as_str()
                         .filter(|q| !q.trim().is_empty())
@@ -657,7 +661,7 @@ impl Server {
                     filter.until = cursor.until;
                 }
 
-                let snapshot = if brainmesh::search_index::Index::exists(&self.dir) {
+                let snapshot = if hyperconsciousness::search_index::Index::exists(&self.dir) {
                     None
                 } else {
                     self.snapshot(&store, &keys)?
@@ -668,7 +672,7 @@ impl Server {
                         .unwrap_or_else(|poisoned| poisoned.into_inner())
                 });
                 let answer = if let Some(cached) = snapshot_read.as_deref() {
-                    brainmesh::query::look_snapshot(
+                    hyperconsciousness::query::look_snapshot(
                         &store,
                         &keys,
                         cached,
@@ -684,7 +688,7 @@ impl Server {
                         let index = index
                             .read()
                             .unwrap_or_else(|poisoned| poisoned.into_inner());
-                        brainmesh::query::look_indexed(
+                        hyperconsciousness::query::look_indexed(
                             &store,
                             &keys,
                             &index,
@@ -697,7 +701,7 @@ impl Server {
                     })();
                     match indexed {
                         Ok(answer) => answer,
-                        Err(_) => brainmesh::query::look(
+                        Err(_) => hyperconsciousness::query::look(
                             &store,
                             &keys,
                             &call_chain,
@@ -790,14 +794,14 @@ impl Server {
                     .as_str()
                     .filter(|reference| !reference.trim().is_empty())
                     .ok_or(Error::Malformed("record needs a result ref"))?;
-                let answer = if brainmesh::search_index::Index::exists(&self.dir) {
+                let answer = if hyperconsciousness::search_index::Index::exists(&self.dir) {
                     let indexed = (|| {
                         let permissions = self.revocations(&store, &keys)?;
                         let index = self.search_index(&store, &keys)?;
                         let index = index
                             .read()
                             .unwrap_or_else(|poisoned| poisoned.into_inner());
-                        brainmesh::query::record_by_ref_indexed(
+                        hyperconsciousness::query::record_by_ref_indexed(
                             &store,
                             &keys,
                             &index,
@@ -810,7 +814,7 @@ impl Server {
                     })();
                     match indexed {
                         Ok(answer) => answer,
-                        Err(_) => brainmesh::query::record_by_ref(
+                        Err(_) => hyperconsciousness::query::record_by_ref(
                             &store,
                             &keys,
                             &call_chain,
@@ -825,7 +829,7 @@ impl Server {
                         let cached = snapshot
                             .read()
                             .unwrap_or_else(|poisoned| poisoned.into_inner());
-                        brainmesh::query::record_by_ref_snapshot(
+                        hyperconsciousness::query::record_by_ref_snapshot(
                             &store,
                             &keys,
                             &cached,
@@ -835,7 +839,7 @@ impl Server {
                             reference,
                         )?
                     } else {
-                        brainmesh::query::record_by_ref(
+                        hyperconsciousness::query::record_by_ref(
                             &store,
                             &keys,
                             &call_chain,
@@ -870,7 +874,7 @@ impl Server {
 
             // the map, so an agent stops guessing what to search for
             "overview" => {
-                let snapshot = if brainmesh::search_index::Index::exists(&self.dir) {
+                let snapshot = if hyperconsciousness::search_index::Index::exists(&self.dir) {
                     None
                 } else {
                     self.snapshot(&store, &keys)?
@@ -879,7 +883,7 @@ impl Server {
                     let cached = snapshot
                         .read()
                         .unwrap_or_else(|poisoned| poisoned.into_inner());
-                    brainmesh::query::overview_snapshot(
+                    hyperconsciousness::query::overview_snapshot(
                         &store,
                         &keys,
                         &cached,
@@ -894,7 +898,7 @@ impl Server {
                         let index = index
                             .read()
                             .unwrap_or_else(|poisoned| poisoned.into_inner());
-                        brainmesh::query::overview_indexed(
+                        hyperconsciousness::query::overview_indexed(
                             &store,
                             &keys,
                             &index,
@@ -906,7 +910,7 @@ impl Server {
                     })();
                     match indexed {
                         Ok(map) => map,
-                        Err(_) => brainmesh::query::overview(
+                        Err(_) => hyperconsciousness::query::overview(
                             &store,
                             &keys,
                             &call_chain,
@@ -954,7 +958,7 @@ impl Server {
                 let input = RememberInput::parse(arguments)?;
                 let item = input.item(now);
                 let revoked = self.revocations(&store, &keys)?;
-                let effective = brainmesh::query::permit_write_indexed(
+                let effective = hyperconsciousness::query::permit_write_indexed(
                     &store,
                     &keys,
                     &call_chain,
@@ -991,7 +995,7 @@ impl Server {
                     .map(|input| input.item(now))
                     .collect::<Vec<_>>();
                 let revoked = self.revocations(&store, &keys)?;
-                let effective = brainmesh::query::permit_actions_indexed(
+                let effective = hyperconsciousness::query::permit_actions_indexed(
                     &store,
                     &keys,
                     &call_chain,
@@ -1026,7 +1030,7 @@ impl Server {
                 let item = descriptor
                     .item(operation, now)
                     .map_err(|_| Error::Denied("secret use is unavailable under this grant"))?;
-                let effective = brainmesh::query::permit_action_indexed(
+                let effective = hyperconsciousness::query::permit_action_indexed(
                     &store,
                     &keys,
                     &call_chain,
@@ -1036,7 +1040,7 @@ impl Server {
                     grant::USE,
                     &revoked,
                 )?;
-                let use_id = Hash(*brainmesh::crypto::random_key()).hex();
+                let use_id = Hash(*hyperconsciousness::crypto::random_key()).hex();
                 self.append_record(
                     &identity,
                     &json!({
@@ -1180,12 +1184,12 @@ impl Server {
             }
 
             "files" => {
-                let filter = brainmesh::query::Filter {
+                let filter = hyperconsciousness::query::Filter {
                     kinds: vec!["file".to_string(), "workspace_file".to_string()],
                     limit: arguments["limit"].as_u64().unwrap_or(200).min(1_000) as usize,
                     ..Default::default()
                 };
-                let snapshot = if brainmesh::search_index::Index::exists(&self.dir) {
+                let snapshot = if hyperconsciousness::search_index::Index::exists(&self.dir) {
                     None
                 } else {
                     self.snapshot(&store, &keys)?
@@ -1196,7 +1200,7 @@ impl Server {
                         .unwrap_or_else(|poisoned| poisoned.into_inner())
                 });
                 let answer = if let Some(cached) = snapshot_read.as_deref() {
-                    brainmesh::query::look_snapshot(
+                    hyperconsciousness::query::look_snapshot(
                         &store,
                         &keys,
                         cached,
@@ -1212,7 +1216,7 @@ impl Server {
                         let index = index
                             .read()
                             .unwrap_or_else(|poisoned| poisoned.into_inner());
-                        brainmesh::query::look_indexed(
+                        hyperconsciousness::query::look_indexed(
                             &store,
                             &keys,
                             &index,
@@ -1225,7 +1229,7 @@ impl Server {
                     })();
                     match indexed {
                         Ok(answer) => answer,
-                        Err(_) => brainmesh::query::look(
+                        Err(_) => hyperconsciousness::query::look(
                             &store,
                             &keys,
                             &call_chain,
@@ -1366,7 +1370,7 @@ fn requested_scope(
     tool: &str,
     arguments: &Value,
     max_sensitivity: u8,
-    revoked: Option<&brainmesh::revocation::Index>,
+    revoked: Option<&hyperconsciousness::revocation::Index>,
 ) -> Result<grant::Scope> {
     let object = arguments.as_object().ok_or(Error::Malformed(
         "requested tool arguments must be an object",
@@ -1518,7 +1522,7 @@ fn level_of(name: &str) -> Result<u8> {
 /// changing which result set it is walking.
 fn search_cursor_binding(
     name: &str,
-    filter: &brainmesh::query::Filter,
+    filter: &hyperconsciousness::query::Filter,
     arguments: &Value,
 ) -> [u8; 8] {
     let canonical = json!({
@@ -1543,7 +1547,7 @@ fn search_cursor_binding(
 /// binding; grant, expiry and revocation checks still run on every page.
 fn encode_search_cursor(
     record: &Record,
-    filter: &brainmesh::query::Filter,
+    filter: &hyperconsciousness::query::Filter,
     binding: [u8; 8],
 ) -> String {
     let (hlc, author, sequence) = record.order_key();
@@ -1830,7 +1834,7 @@ fn append_many_once(
             keys.current_key()?,
             payload.as_bytes(),
         )?;
-        planned = brainmesh::log::Head {
+        planned = hyperconsciousness::log::Head {
             seq: record.seq,
             id: record.id(),
             empty: false,
@@ -1856,12 +1860,12 @@ fn append_once(dir: &PathBuf, identity: &Identity, payload: &str) -> Result<(Rec
     let log = store.log_for_write(identity.device())?;
     let mut head = log.cache_head()?;
     let (seq, prev) = if head.empty {
-        (0, brainmesh::id::ZERO_HASH)
+        (0, hyperconsciousness::id::ZERO_HASH)
     } else {
         (head.seq + 1, head.id)
     };
 
-    let record = brainmesh::record::Record::create(
+    let record = hyperconsciousness::record::Record::create(
         &identity.signing,
         seq,
         prev,
@@ -2074,10 +2078,10 @@ fn tools() -> Value {
 mod tests {
     use super::*;
     #[cfg(unix)]
-    use brainmesh::grant::USE;
-    use brainmesh::grant::{Scope, NORMAL, PERSONAL, READ, SECRET, WRITE};
-    use brainmesh::id::DeviceId;
-    use brainmesh::identity::NO_KEYSTORE_ENV;
+    use hyperconsciousness::grant::USE;
+    use hyperconsciousness::grant::{Scope, NORMAL, PERSONAL, READ, SECRET, WRITE};
+    use hyperconsciousness::id::DeviceId;
+    use hyperconsciousness::identity::NO_KEYSTORE_ENV;
     use std::io::Cursor;
 
     fn talk(lines: &[&str]) -> Vec<Value> {
@@ -2444,8 +2448,8 @@ mod tests {
         )
         .unwrap();
         std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o700)).unwrap();
-        brainmesh::secret::register_adapter(dir.path(), "stripe", &program).unwrap();
-        let descriptor = brainmesh::secret::Descriptor::new(
+        hyperconsciousness::secret::register_adapter(dir.path(), "stripe", &program).unwrap();
+        let descriptor = hyperconsciousness::secret::Descriptor::new(
             "stripe-production".into(),
             "stripe".into(),
             vec!["list-invoices".into()],
@@ -2459,8 +2463,10 @@ mod tests {
         .unwrap();
         let agent = ed25519_dalek::SigningKey::generate(&mut rand_core::OsRng);
         let scope = Scope {
-            kinds: vec![brainmesh::secret::operation_kind("stripe", "list-invoices").unwrap()],
-            tags: vec![brainmesh::secret::reference_tag(descriptor.id)],
+            kinds: vec![
+                hyperconsciousness::secret::operation_kind("stripe", "list-invoices").unwrap(),
+            ],
+            tags: vec![hyperconsciousness::secret::reference_tag(descriptor.id)],
             max_sensitivity: SECRET,
             ..Scope::default()
         };
@@ -2561,8 +2567,8 @@ mod tests {
         )
         .unwrap();
         std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o700)).unwrap();
-        brainmesh::secret::register_adapter(dir.path(), "vault", &program).unwrap();
-        let descriptor = brainmesh::secret::Descriptor::new(
+        hyperconsciousness::secret::register_adapter(dir.path(), "vault", &program).unwrap();
+        let descriptor = hyperconsciousness::secret::Descriptor::new(
             "billing".into(),
             "vault".into(),
             vec!["list".into()],
@@ -2810,7 +2816,7 @@ mod tests {
         .unwrap();
         let store = Store::open(dir.path()).unwrap();
         let keys = RuntimeKeys::open(dir.path(), &identity).unwrap();
-        brainmesh::search_index::Index::load_or_build(
+        hyperconsciousness::search_index::Index::load_or_build(
             dir.path(),
             &store,
             &keys,

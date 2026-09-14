@@ -9,6 +9,10 @@ after 1.0; prereleases may change unstable APIs and commands.
 
 ## Unreleased
 
+- Use `hyperconsciousness` for the Cargo/npm package, `hc` for the executable,
+  and `hyperconsciousness-ops` for the operator skill. Preserve existing stored
+  data and protocol identifiers.
+
 - Remove the bundled iOS and mobile web clients, static HTTP routes, and iOS CI.
   Keep the HTTP APIs for separately maintained clients.
 - Document source installation, narrow agent grants, and the local `read`
@@ -23,11 +27,11 @@ after 1.0; prereleases may change unstable APIs and commands.
   ciphertext inventory before local loose-byte eviction.
 - Support separate object remotes for encrypted spaces and private
   `--secret-file` configuration with atomic bounded local storage.
-- Name the user-facing CLI `hc` while retaining `brainmesh` compatibility.
+- Name the user-facing CLI `hc`.
 - Separate private Hyperconsciousness Companion code and credentials from the
   public knowledge and encrypted-sync repository.
 - Move the public product to a clean `hyperconsciousness` repository while
-  retaining the private `brainmesh` repository as the complete history archive.
+  retaining the original private repository as the complete history archive.
 - Package only the Rust CLI and its embedded mobile web client.
 - Declare and test the real Rust 1.88 minimum toolchain.
 - Remove unused RSA code from Web Push authentication and sign VAPID tokens

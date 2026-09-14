@@ -84,7 +84,7 @@ Revisit only if edited files become a real workload.
 ## 10. no networking in the core
 
 **Chosen:** the core computes what is missing and consumes bytes. The default
-transport is `ssh host brainmesh serve`, exactly the shape git has used for
+transport is `ssh host hc serve`, exactly the shape git has used for
 twenty years.
 
 This is why the same code runs over a tailnet, a jump host, `kubectl exec`, a
@@ -144,7 +144,7 @@ root-signed exact author cutoffs and per-retained-device key delivery. This
 goes in product copy, not a footnote, because implying recall burns someone
 once and never recovers.
 
-## 17. brainmesh is not a replacement for screenpipe's database
+## 17. hc is not a replacement for screenpipe's database
 
 **Chosen:** it is the layer between databases on different machines. Screenpipe
 keeps local SQLite for raw capture and publishes a curated stream of records.
@@ -207,7 +207,7 @@ already has one is the one mistake here that cannot be undone.
 ## 21. the grant is the agent's permission model
 
 **Chosen:** an MCP server is started under exactly one grant and cannot exceed
-it. `brainmesh mcp --as <grant>` is the whole configuration. Reads are filtered
+it. `hc mcp --as <grant>` is the whole configuration. Reads are filtered
 and logged, writes are checked against the same scope, and revoking the grant
 cuts the agent off mid conversation.
 
@@ -810,7 +810,7 @@ remain separate work. Decision 46 adds command-line submission and retry.
 attempting delivery, and `org submit` retries that exact envelope. HTTPS uses
 curl and the operating system trust store already required by bucket transport.
 Ciphertext goes over child stdin; retry mode also accepts dash so it need not
-enter brainmesh argv. A response counts only when its JSON names the exact full
+enter hc argv. A response counts only when its JSON names the exact full
 request id and supplies a boolean new-versus-existing queue state.
 
 **Rejected:** delete or hide the local request after a failed POST, which turns

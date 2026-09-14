@@ -17,7 +17,7 @@ use p256::ecdsa::{Signature, VerifyingKey};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
-use brainmesh::error::{Error, Result};
+use hyperconsciousness::error::{Error, Result};
 
 const MAX_PROOF_BYTES: usize = 8 * 1024;
 const MAX_REPLAY_IDS: usize = 8_192;

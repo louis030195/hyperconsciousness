@@ -6,7 +6,7 @@ use std::path::Path;
 use std::process::{Command, Output};
 
 fn brainmesh(args: &[&str], store: &Path) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_brainmesh"))
+    Command::new(env!("CARGO_BIN_EXE_hc"))
         .args(args)
         .arg("--dir")
         .arg(store)
