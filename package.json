@@ -1,0 +1,50 @@
+{
+  "name": "brainmesh",
+  "version": "0.1.0-alpha.1",
+  "description": "Hyperconsciousness, an encrypted, append-only memory layer across your devices",
+  "license": "MIT",
+  "author": "Louis Beaumont",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/louis030195/hyperconsciousness.git"
+  },
+  "homepage": "https://hyperconsciousness.ai",
+  "bugs": {
+    "url": "https://github.com/louis030195/hyperconsciousness/issues"
+  },
+  "keywords": [
+    "agents",
+    "cli",
+    "e2ee",
+    "mcp",
+    "personal-knowledge-management",
+    "second-brain",
+    "sync"
+  ],
+  "bin": {
+    "brainmesh": "npm/bin/brainmesh.js",
+    "hc": "npm/bin/brainmesh.js"
+  },
+  "files": [
+    "Cargo.lock",
+    "Cargo.toml",
+    "LICENSE",
+    "README.md",
+    "rust-toolchain.toml",
+    "npm/bin/brainmesh.js",
+    "npm/scripts/install.js",
+    "npm/scripts/verify-package.js",
+    "src/"
+  ],
+  "scripts": {
+    "postinstall": "node npm/scripts/install.js",
+    "prepack": "node npm/scripts/verify-package.js",
+    "test": "node npm/scripts/verify-package.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
