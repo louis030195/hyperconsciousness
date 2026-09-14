@@ -623,12 +623,11 @@ disclosing twice. The temporary chain is never used for `record`, `overview`,
 
 The VAPID public key is public endpoint configuration. Push subscription keys
 and endpoints remain private local state. The RFC 8291 encrypted push plaintext
-is exactly an event type and opaque request id; the service worker constructs
-generic lock-screen text locally. The PWA fetches the displayed purpose and
-scope only after opening the authenticated owner inbox. The version-one PWA
-stores its separate approval bearer in origin app storage. This is not a
-hardware-bound or biometric credential; native approval must add sender
-constraint before making that claim.
+is exactly an event type and opaque request id. An external approval client
+must fetch purpose and scope through the authenticated owner inbox; neither
+belongs in the notification payload. The server APIs do not guarantee how a
+client stores its approval credential. This repository includes no service
+worker, owner application, or platform key-storage implementation.
 
 ### OAuth ingress budgets
 
@@ -642,8 +641,8 @@ buckets and expires completed windows before admitting a new one.
 
 An exhausted or full table returns `429`, a decimal `Retry-After` header and a
 JSON `rate_limited` response before that route's parsing, cryptography or state
-mutation. `GET /health`, discovery metadata, `GET /authorize`, static/mobile
-assets, protected work budgets and `POST /mobile/logout` are independent and
+mutation. `GET /health`, discovery metadata, `GET /authorize`, protected work
+budgets and `POST /mobile/logout` are independent and
 remain available. The table is process memory and resets on restart. When a
 node-owned TLS terminator proxies over one local connection source, all of its
 clients share that source bucket; the terminator must enforce authenticated
