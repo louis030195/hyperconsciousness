@@ -4,7 +4,7 @@
 
 [package]
 name = "hyperconsciousness"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 edition = "2021"
 rust-version = "1.88"
 license = "MIT"

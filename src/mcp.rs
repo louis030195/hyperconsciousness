@@ -60,6 +60,7 @@ pub struct Server {
     permissions: Option<Arc<permission::Store>>,
     cache: Mutex<Option<CachedSnapshot>>,
     search_cache: Mutex<Option<CachedSearchIndex>>,
+    company_access: bool,
 }
 
 struct CachedSnapshot {
@@ -91,12 +92,93 @@ impl Server {
             permissions: None,
             cache: Mutex::new(None),
             search_cache: Mutex::new(None),
+            company_access: false,
         }
     }
 
     pub fn with_permissions(mut self, permissions: Arc<permission::Store>) -> Self {
         self.permissions = Some(permissions);
         self
+    }
+
+    pub fn with_company_access(mut self) -> Result<Self> {
+        let identity = Identity::load_for_brain(&self.dir)?;
+        if matches!(
+            identity.authority_role(),
+            hyperconsciousness::identity::AuthorityRole::LegacySharedKey
+        ) {
+            return Err(Error::Denied(
+                "company access requires a separate grant authority",
+            ));
+        }
+        hyperconsciousness::access::current(
+            &self.dir,
+            identity.grant_authority()?,
+            Clock::new().now().millis,
+        )?;
+        self.company_access = true;
+        Ok(self)
+    }
+
+    /// A policy once installed applies even when an old launch command lacks
+    /// the explicit flag. The flag additionally fails closed if state is lost.
+    fn company_access_enabled(&self) -> bool {
+        self.company_access
+            || hyperconsciousness::access::policy_installed(&self.dir).unwrap_or(true)
+    }
+
+    fn authorize_request(&self, request: &Value) -> Result<()> {
+        let name = request["params"]["name"].as_str().unwrap_or_default();
+        let secret = name == "use_secret"
+            || (name == "request_access"
+                && request["params"]["arguments"]["target_tool"] == "use_secret");
+        if !self.company_access_enabled() && !secret {
+            return Ok(());
+        }
+        let identity = Identity::load_for_brain(&self.dir)?;
+        let grant = self
+            .chain
+            .last()
+            .ok_or(Error::Denied("empty grant chain"))?;
+        grant::verify_chain(
+            &self.chain,
+            identity.grant_authority()?,
+            Clock::new().now().millis,
+        )?;
+        let keys = RuntimeKeys::open(&self.dir, &identity)?;
+        let store = Store::open(&self.dir)?;
+        let revoked = self.revocations(&store, &keys)?;
+        if self.chain.iter().any(|grant| revoked.contains(grant.id())) {
+            return Err(Error::Denied("grant has been revoked"));
+        }
+        let admission = hyperconsciousness::access::authorize(
+            &self.dir,
+            request,
+            identity.grant_authority()?,
+            identity.device(),
+            grant,
+            self.company_access,
+            Clock::new().now().millis,
+        )?;
+        self.append_record(
+            &identity,
+            &json!({
+                "kind": "access_admitted", "sensitivity": grant::SECRET,
+                "principal": admission.principal, "device": admission.device,
+                "grant": admission.grant, "policy_generation": admission.generation,
+            })
+            .to_string(),
+        )?;
+        Ok(())
+    }
+
+    pub fn refuse_unsigned_capture(&self) -> Result<()> {
+        if self.company_access_enabled() {
+            return Err(Error::Denied(
+                "company endpoints require signed MCP requests",
+            ));
+        }
+        Ok(())
     }
 
     fn revocations(
@@ -230,6 +312,7 @@ impl Server {
         content_type: &str,
         bytes: &[u8],
     ) -> Result<BlobRef> {
+        self.refuse_unsigned_capture()?;
         let extension = match content_type {
             "audio/ogg" => "ogg",
             "audio/mp4" => "m4a",
@@ -298,6 +381,7 @@ impl Server {
         &self,
         chunks: &[(&str, u64, &str, &[u8])],
     ) -> Result<Vec<BlobRef>> {
+        self.refuse_unsigned_capture()?;
         if chunks.is_empty() {
             return Err(Error::Malformed("mobile audio batch is empty"));
         }
@@ -373,6 +457,7 @@ impl Server {
         &self,
         chunk_ids: &BTreeSet<String>,
     ) -> Result<BTreeMap<String, BlobRef>> {
+        self.refuse_unsigned_capture()?;
         if chunk_ids.is_empty() {
             return Ok(BTreeMap::new());
         }
@@ -406,6 +491,7 @@ impl Server {
     /// Resolve an interrupted mobile upload. This cold scan runs only when a
     /// durable HTTP receipt was left pending across a crash.
     pub fn mobile_audio_record(&self, chunk_id: &str) -> Result<Option<BlobRef>> {
+        self.refuse_unsigned_capture()?;
         let identity = Identity::load_for_brain(&self.dir)?;
         let keys = RuntimeKeys::open(&self.dir, &identity)?;
         let store = Store::open(&self.dir)?;
@@ -430,6 +516,7 @@ impl Server {
     /// one append transaction. HTTP receipts keep each event independently
     /// idempotent when a phone retries after an ambiguous network failure.
     pub fn store_mobile_context_batch(&self, events: &[MobileContextInput<'_>]) -> Result<()> {
+        self.refuse_unsigned_capture()?;
         if events.is_empty() {
             return Err(Error::Malformed("mobile context batch is empty"));
         }
@@ -492,6 +579,7 @@ impl Server {
         &self,
         event_ids: &BTreeSet<String>,
     ) -> Result<BTreeSet<String>> {
+        self.refuse_unsigned_capture()?;
         if event_ids.is_empty() {
             return Ok(BTreeSet::new());
         }
@@ -581,6 +669,7 @@ impl Server {
             "tools/list" => Ok(json!({"tools": tools()})),
 
             "tools/call" => {
+                self.authorize_request(request)?;
                 let name = request["params"]["name"].as_str().unwrap_or_default();
                 let arguments = &request["params"]["arguments"];
 
@@ -1096,6 +1185,11 @@ impl Server {
             }
 
             "request_access" => {
+                if self.company_access_enabled() {
+                    return Err(Error::Denied(
+                        "company grant changes require an owner-signed policy update",
+                    ));
+                }
                 let permissions = self.permissions.as_ref().ok_or(Error::Denied(
                     "permission requests require an HTTP endpoint with an owner inbox",
                 ))?;
@@ -1323,6 +1417,14 @@ impl Server {
             .as_object_mut()
             .and_then(|object| object.remove("access_request_id"))
             .and_then(|value| value.as_str().map(String::from));
+        if self.company_access_enabled() {
+            return match request_id {
+                Some(_) => Err(Error::Denied(
+                    "company grants cannot be widened by a legacy approval session",
+                )),
+                None => Ok((self.chain.clone(), clean)),
+            };
+        }
         if !matches!(name, "search" | "recent" | "files" | "use_secret") {
             return match request_id {
                 Some(_) => Err(Error::Denied(

@@ -17,6 +17,7 @@
 //! consumes bytes, so the same core runs over a tailnet, over bluetooth to a
 //! wearable, or over a usb stick.
 
+pub mod access;
 pub mod blob;
 pub mod bundle;
 pub mod catalog;

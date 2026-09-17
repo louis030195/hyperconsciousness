@@ -669,6 +669,24 @@ fn handle(mut stream: TcpStream, endpoint: &Endpoint) -> Result<()> {
         );
     }
 
+    if request.method == "POST"
+        && matches!(
+            request.path.as_str(),
+            "/capture"
+                | "/mobile/audio/chunks"
+                | "/mobile/audio/batches"
+                | "/mobile/context/batches"
+        )
+        && endpoint.mcp.refuse_unsigned_capture().is_err()
+    {
+        return respond(
+            &mut stream,
+            403,
+            "application/json",
+            b"{\"error\":\"company endpoints require signed MCP requests\"}",
+        );
+    }
+
     match (request.method.as_str(), request.path.as_str()) {
         ("GET", "/mobile/config") => {
             let body = json!({
@@ -3104,6 +3122,44 @@ mod tests {
             public_url: "https://brain.example".to_string(),
             allowed_origins: Vec::new(),
             token: "pairing-token".to_string(),
+        }
+    }
+
+    #[test]
+    fn company_http_denies_copied_bearer_and_alternate_capture_routes() {
+        let f = crate::access_tests::Fixture::new(
+            hyperconsciousness::grant::READ | hyperconsciousness::grant::WRITE,
+        );
+        let endpoint = || {
+            let mut endpoint = mobile_audio_endpoint(
+                f.dir.path().to_path_buf(),
+                f.dir.path().join("http"),
+                f.grant.clone(),
+            );
+            endpoint.mcp = f.server();
+            endpoint
+        };
+        let request = |path: &str, body: &str| {
+            format!(
+            "POST {path} HTTP/1.1\r\nHost: brain.example\r\nAuthorization: Bearer pairing-token\r\nContent-Length: {}\r\n\r\n{body}", body.len())
+        };
+        let good = f.request("remember", json!({"text":"signed-http-probe"}));
+        let mut unsigned = good.clone();
+        unsigned.as_object_mut().unwrap().remove("hc_auth");
+        let response = raw_response(endpoint(), &request("/mcp", &unsigned.to_string()));
+        assert!(response.contains("signed hc_auth device proof is required"));
+        let response = raw_response(endpoint(), &request("/mcp", &good.to_string()));
+        assert!(response.contains("written"));
+        let response = raw_response(endpoint(), &request("/mcp", &good.to_string()));
+        assert!(response.contains("already been consumed"));
+        for path in [
+            "/capture",
+            "/mobile/audio/chunks",
+            "/mobile/audio/batches",
+            "/mobile/context/batches",
+        ] {
+            let response = raw_response(endpoint(), &request(path, "unsigned"));
+            assert!(response.starts_with("HTTP/1.1 403"), "{response}");
         }
     }
 

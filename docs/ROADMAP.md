@@ -30,7 +30,8 @@ untouched as rollback.
 | revocation, cascading to everything delegated below | done |
 | read log, receipts naming the grant and carrying no content | done; same-device MCP/CLI writer contention gets a bounded retry around membership migration plus receipt append |
 | grant-write provenance and combined access audit | done; every MCP `remember` and `remember_many` item stores the effective signed grant id plus declared grantee, batches validate every item before one durable append, bounded permission labels reject terminal formatting, audit renders malformed legacy fields safely, and revoke resolves only matching signed grant blobs |
-| opaque secret-use broker | done in source; encrypted references contain no credential, USE is distinct from READ/WRITE/SEND, local no-shell adapters are path-and-digest pinned, exact one-time approval is supported, and start/finish receipts retain only opaque ids, operation and outcome; real vault adapters and live-node rollout remain |
+| opaque secret-use broker | done in source; encrypted references contain no credential, USE is distinct from READ/WRITE/SEND, adapters are path-and-digest pinned, signed device requests are required, and start/finish receipts omit parameters/results; exact one-time approval remains available outside company mode; real vault adapters and live-node rollout remain |
+| company gateway identities | owner-signed member/group policy, multiple expiring device keys per principal, separate agent identities, exact grant allowlists, per-gateway signed requests, durable replay prevention and current-policy checks built locally; SSO, automatic policy delivery, client signing integration and deployed rollout remain; see [company access](COMPANY-ACCESS.md) |
 | enforcement at the node, fail closed on unknown sensitivity | done |
 | grants stored signed and rebuilt into a chain, canonical encoding | done |
 | `ask`, the first caller of the enforcement path, leaving a receipt | done |

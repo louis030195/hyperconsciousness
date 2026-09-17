@@ -27,6 +27,9 @@ use hyperconsciousness::space;
 use hyperconsciousness::wire::{self, Peer};
 use zeroize::Zeroizing;
 
+mod access_cli;
+#[cfg(test)]
+mod access_tests;
 mod bucket;
 mod dpop;
 mod fswatch;
@@ -135,6 +138,18 @@ short command: hc.
   hc ask <grant> [text]    read as that grant sees it, and log it
   hc mcp --as <grant>      serve that grant to an ai client
   hc serve-http --as <g>   the same, over http, for phones
+                                  --company-access requires current member/device policy
+  hc access device-new <private-key-file>
+                                  create a worker signing key without a brain or owner key
+  hc access sign-policy <policy.json> [--space name]
+                                  sign member/group policy on the owner device
+  hc access install <signed-policy.json> [--space name]
+                                  install the next policy generation on a serving node
+  hc access show [--space name]
+                                  inspect current signed company access policy
+  hc access sign-request --key-file <path> --authority <public-key>
+                                  --gateway <public-key> --principal <id> --grant <id> --generation <N>
+                                  sign one JSON-RPC request from stdin
   hc grant <device> [opts] let a device or agent read a slice
   hc secret adapter set <name> <absolute-program>
                                   pin one local no-shell credential adapter
@@ -4252,6 +4267,8 @@ fn run() -> Result<()> {
 
         "find" | "search-all" => find_command(&args.dir, &args.rest),
 
+        "access" => access_cli::run(&args.dir, &args.rest),
+
         "start" => {
             let mut identity = Identity::load_or_create(&args.dir)?;
             Store::open(&args.dir)?;
@@ -6376,6 +6393,11 @@ fn run() -> Result<()> {
 
             let (_, target_dir) = selected_brain(&args.dir, &args.rest)?;
             let server = mcp::Server::new(target_dir.clone(), grant_chain(&target_dir, prefix)?);
+            let server = if args.rest.iter().any(|arg| arg == "--company-access") {
+                server.with_company_access()?
+            } else {
+                server
+            };
             server.run(io::stdin().lock(), io::stdout())
         }
 
@@ -6439,9 +6461,15 @@ fn run() -> Result<()> {
                     dpop_jkt,
                 );
             }
+            let server = mcp::Server::new(target_dir, chain)
+                .with_permissions(std::sync::Arc::clone(&permissions));
+            let server = if args.rest.iter().any(|arg| arg == "--company-access") {
+                server.with_company_access()?
+            } else {
+                server
+            };
             let endpoint = http::Endpoint {
-                mcp: mcp::Server::new(target_dir, chain)
-                    .with_permissions(std::sync::Arc::clone(&permissions)),
+                mcp: server,
                 permissions,
                 oauth,
                 issued: std::sync::Mutex::new(auth.access),
@@ -6744,7 +6772,12 @@ fn run() -> Result<()> {
                 .filter(|value| {
                     matches!(
                         value["kind"].as_str(),
-                        Some("read" | "secret_use_started" | "secret_use_finished")
+                        Some(
+                            "read"
+                                | "secret_use_started"
+                                | "secret_use_finished"
+                                | "access_admitted"
+                        )
                     ) || value["provenance"] == "grant_write_v1"
                 })
                 .collect();
@@ -6766,6 +6799,14 @@ fn run() -> Result<()> {
                         ),
                         count_field(&value["returned"]),
                         count_field(&value["withheld"])
+                    );
+                } else if value["kind"] == "access_admitted" {
+                    println!(
+                        "grant {}  principal {}  device {}  admitted under policy {}",
+                        short_field(value["grant"].as_str()),
+                        short_field(value["principal"].as_str()),
+                        short_field(value["device"].as_str()),
+                        count_field(&value["policy_generation"]),
                     );
                 } else if value["kind"] == "secret_use_started" {
                     println!(

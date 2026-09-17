@@ -90,7 +90,10 @@ absolute and point to your chosen installation and store:
 MCP exposes `overview`, `request_access`, `access_status`, `search`, `recent`,
 `record`, `remember`, `remember_many`, `use_secret`, and `files`. A tool's
 presence does not grant permission to use it. Add `--write` only when the agent
-needs capture access. Credential operations require a separate `USE` grant.
+needs capture access. Credential operations require a separate `USE` grant and
+a signed device request. For company members, groups, multiple devices and
+agents, use [company gateway access](docs/COMPANY-ACCESS.md). Company mode checks
+current membership on every tool call and requires client-side request signing.
 
 ```sh
 hc revoke <grant-id> --dir "$HC_STORE"

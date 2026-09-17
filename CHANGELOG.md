@@ -9,6 +9,11 @@ after 1.0; prereleases may change unstable APIs and commands.
 
 ## Unreleased
 
+- Add owner-signed company member/group policies and per-device signed MCP
+  requests, with gateway binding, durable replay prevention and live policy
+  revocation checks. Secret-use requests now require device proof. See
+  [company gateway access](docs/COMPANY-ACCESS.md) for client migration and limits.
+
 - Use `hyperconsciousness` for the Cargo/npm package, `hc` for the executable,
   and `hyperconsciousness-ops` for the operator skill. Preserve existing stored
   data and protocol identifiers.

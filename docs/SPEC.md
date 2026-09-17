@@ -1447,6 +1447,14 @@ company.
 
 ## opaque secret use
 
+The MCP gateway requires an exact signed device request for secret use, including
+requests for one-time secret-use approval. A company policy additionally binds
+every MCP tool call to current member/device enrollment and group grant IDs.
+The request, policy, replay and migration contract is specified in
+[Company gateway access](COMPANY-ACCESS.md). Company mode disables legacy
+approval-session grant substitution; owner-signed policy updates authorize new
+grant IDs instead. These gates do not change the encrypted descriptor format.
+
 A `secret_ref` record contains version one, a random 32-byte id, an
 owner-visible name, an adapter name, a canonical nonempty operation list,
 `sensitivity = secret`, and reference/adapter tags. It contains no credential,
