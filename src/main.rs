@@ -3493,10 +3493,15 @@ fn recent_local_records<K: DataKeys + ?Sized>(
     keys: &K,
     limit: usize,
 ) -> Result<Vec<Record>> {
+    let heads = store.cache_heads()?;
+    let captures = hyperconsciousness::capture_state::State::scan(store, keys)?;
     let mut notes = std::collections::BTreeMap::new();
     for author in store.authors()? {
         for record in store.log(author)?.iter_records()? {
             let record = record?;
+            if !captures.visible(record.id(), false) {
+                continue;
+            }
             let visible = keys
                 .open_record(&record)
                 .ok()
@@ -3510,6 +3515,9 @@ fn recent_local_records<K: DataKeys + ?Sized>(
                 }
             }
         }
+    }
+    if heads != store.cache_heads()? {
+        return Err(Error::Denied("capture history changed during read"));
     }
     Ok(notes.into_values().collect())
 }

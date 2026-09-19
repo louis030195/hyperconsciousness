@@ -200,6 +200,7 @@ struct SnapshotRecord {
     payload: Zeroizing<Vec<u8>>,
     item: Item,
     revoked: Option<Hash>,
+    capture: Option<crate::capture_state::Meta>,
 }
 
 impl Drop for SnapshotRecord {
@@ -322,6 +323,10 @@ impl Snapshot {
         // decrypted allocation instead of merely freeing it.
         let payload = Zeroizing::new(payload);
         let (item, revoked) = inspect_payload(&payload, record.hlc.millis);
+        let capture = match crate::capture_state::Meta::from_payload(&payload) {
+            Ok(capture) => capture,
+            Err(_) => return false,
+        };
         let labels = item.tags.iter().fold(item.kind.capacity(), |bytes, tag| {
             bytes.saturating_add(tag.capacity())
         });
@@ -342,8 +347,22 @@ impl Snapshot {
             payload,
             item,
             revoked,
+            capture,
         });
         true
+    }
+
+    fn capture_state(&self) -> Result<crate::capture_state::State> {
+        let mut state = crate::capture_state::State::default();
+        for cached in &self.records {
+            if let Some(meta) = &cached.capture {
+                state.observe(
+                    meta.clone(),
+                    crate::capture_state::Stamp::new(&cached.record, cached.item.clone()),
+                );
+            }
+        }
+        Ok(state)
     }
 
     /// Return already-opened bytes only for the exact signed record. This is
@@ -2256,49 +2275,55 @@ pub fn look_indexed<K: DataKeys + ?Sized>(
         return Err(Error::Denied("search index changed during query"));
     }
     let effective = read_grant_indexed(store, keys, chain, authority, now, permissions)?;
+    let captures = index.capture_state(keys)?;
     let needle = filter.text.as_deref().map(PreparedNeedle::new);
     let limit = if filter.limit == 0 { 20 } else { filter.limit };
     let mut allowed = BTreeMap::new();
     let mut withheld = 0usize;
     let mut truncated = false;
 
-    let bulk_withheld = index.visit_query(
-        keys,
-        filter.text.as_deref(),
-        chain,
-        now,
-        |entry, candidate| {
-            if !chain
-                .iter()
-                .all(|grant| grant.allows(&entry.item, READ, now))
-            {
-                withheld += 1;
+    let mut visitor = |entry: &crate::search_index::Entry, candidate: bool| {
+        if !captures.visible(entry.id, false) {
+            return Ok(());
+        }
+        if !chain
+            .iter()
+            .all(|grant| grant.allows(&entry.item, READ, now))
+        {
+            withheld += 1;
+            return Ok(());
+        }
+        if filter
+            .before
+            .is_some_and(|before| (entry.hlc, entry.author.0, entry.seq) >= before)
+            || !filter.keeps_metadata(&entry.item)
+            || !candidate
+        {
+            return Ok(());
+        }
+        if let Some(needle) = needle.as_ref() {
+            let record = index.record(store, entry)?;
+            let payload = keys.open_record(&record)?;
+            if !filter.keeps(&entry.item, &payload, Some(needle)) {
                 return Ok(());
             }
-            if filter
-                .before
-                .is_some_and(|before| (entry.hlc, entry.author.0, entry.seq) >= before)
-                || !filter.keeps_metadata(&entry.item)
-                || !candidate
-            {
-                return Ok(());
-            }
-            if let Some(needle) = needle.as_ref() {
-                let record = index.record(store, entry)?;
-                let payload = keys.open_record(&record)?;
-                if !filter.keeps(&entry.item, &payload, Some(needle)) {
-                    return Ok(());
-                }
-            }
+        }
 
-            allowed.insert((entry.hlc, entry.author.0, entry.seq), entry.clone());
-            if allowed.len() > limit {
-                allowed.pop_first();
-                truncated = true;
-            }
-            Ok(())
-        },
-    )?;
+        allowed.insert((entry.hlc, entry.author.0, entry.seq), entry.clone());
+        if allowed.len() > limit {
+            allowed.pop_first();
+            truncated = true;
+        }
+        Ok(())
+    };
+    let bulk_withheld = if captures.is_empty() {
+        index.visit_query(keys, filter.text.as_deref(), chain, now, &mut visitor)?
+    } else {
+        // Bulk counts include historical versions; fold managed records before
+        // counting withheld results just as the streaming/snapshot paths do.
+        index.visit(keys, filter.text.as_deref(), &mut visitor)?;
+        0
+    };
     withheld = withheld.saturating_add(bulk_withheld);
 
     if !index.is_current(store)? || !permissions.is_current(store)? {
@@ -2349,6 +2374,10 @@ fn scan_snapshot<K: DataKeys + ?Sized>(
         window,
     } = request;
     let effective = read_grant(store, keys, chain, authority, now)?;
+    if !snapshot.is_current(store)? {
+        return Err(Error::Denied("snapshot changed during capture read"));
+    }
+    let captures = snapshot.capture_state()?;
     let needle = filter.text.as_deref().map(PreparedNeedle::new);
     let chain_ids: BTreeSet<Hash> = chain.iter().map(Grant::id).collect();
     let mut allowed = BTreeMap::new();
@@ -2357,6 +2386,9 @@ fn scan_snapshot<K: DataKeys + ?Sized>(
     let mut cancelled = false;
 
     for cached in &snapshot.records {
+        if !captures.visible(cached.record.id(), false) {
+            continue;
+        }
         if cached.revoked.is_some_and(|id| chain_ids.contains(&id)) {
             cancelled = true;
         }
@@ -2391,6 +2423,9 @@ fn scan_snapshot<K: DataKeys + ?Sized>(
         ));
     }
 
+    if !snapshot.is_current(store)? {
+        return Err(Error::Denied("capture history changed during read"));
+    }
     let records: Vec<Record> = allowed.into_values().collect();
     Ok(Answer {
         withheld,
@@ -2422,6 +2457,10 @@ fn scan<K: DataKeys + ?Sized>(request: ScanRequest<'_, K>) -> Result<Answer> {
         window,
     } = request;
     let effective = read_grant(store, keys, chain, authority, now)?;
+    let capture_heads = store.cache_heads()?;
+    let mut captures = crate::capture_state::State::default();
+    let mut captured_matches = Vec::new();
+    let mut captured_denied = Vec::new();
 
     let needle = filter.text.as_deref().map(PreparedNeedle::new);
     let chain_ids: BTreeSet<Hash> = chain.iter().map(Grant::id).collect();
@@ -2431,8 +2470,9 @@ fn scan<K: DataKeys + ?Sized>(request: ScanRequest<'_, K>) -> Result<Answer> {
     let mut cancelled = false;
 
     for author in store.authors()? {
-        for record in store.log(author)?.iter_records()? {
-            let record = record?;
+        for located in store.log(author)?.iter_located()? {
+            let located = located?;
+            let record = located.record;
             let Ok(payload) = keys.open_record(&record) else {
                 continue;
             };
@@ -2442,7 +2482,18 @@ fn scan<K: DataKeys + ?Sized>(request: ScanRequest<'_, K>) -> Result<Answer> {
                 cancelled = true;
             }
 
+            let managed = crate::capture_state::Meta::from_payload(&payload)?;
+            if let Some(meta) = &managed {
+                captures.observe(
+                    meta.clone(),
+                    crate::capture_state::Stamp::new(&record, item.clone()),
+                );
+            }
             if !chain.iter().all(|g| g.allows(&item, READ, now)) {
+                if managed.is_some() {
+                    captured_denied.push(record.id());
+                    continue;
+                }
                 withheld += 1;
                 continue;
             }
@@ -2455,6 +2506,10 @@ fn scan<K: DataKeys + ?Sized>(request: ScanRequest<'_, K>) -> Result<Answer> {
             }
 
             if filter.keeps(&item, &payload, needle.as_ref()) {
+                if managed.is_some() {
+                    captured_matches.push((record.id(), record.author, located.location));
+                    continue;
+                }
                 allowed.insert(record.order_key(), record);
                 if allowed.len() > limit {
                     match window {
@@ -2467,6 +2522,28 @@ fn scan<K: DataKeys + ?Sized>(request: ScanRequest<'_, K>) -> Result<Answer> {
         }
     }
 
+    withheld += captured_denied
+        .into_iter()
+        .filter(|id| captures.visible(*id, false))
+        .count();
+    for (id, author, location) in captured_matches {
+        if !captures.visible(id, false) {
+            continue;
+        }
+        let record = store.log(author)?.read_located(location)?;
+        if record.id() != id {
+            return Err(Error::Denied("capture location changed during read"));
+        }
+        allowed.insert(record.order_key(), record);
+        if allowed.len() > limit {
+            match window {
+                Window::Oldest => allowed.pop_last(),
+                Window::Newest => allowed.pop_first(),
+            };
+            truncated = true;
+        }
+    }
+
     // A matching revocation kills the whole result after the complete scan.
     // No record escapes merely because its revocation sorted after it.
     if cancelled {
@@ -2475,6 +2552,9 @@ fn scan<K: DataKeys + ?Sized>(request: ScanRequest<'_, K>) -> Result<Answer> {
         ));
     }
 
+    if capture_heads != store.cache_heads()? {
+        return Err(Error::Denied("capture history changed during read"));
+    }
     let records: Vec<Record> = allowed.into_values().collect();
 
     Ok(Answer {
@@ -2505,6 +2585,8 @@ pub fn record_by_ref<K: DataKeys + ?Sized>(
 ) -> Result<RecordAnswer> {
     let (author_prefix, sequence) = parse_reference(reference)?;
     let effective = permitted(store, keys, chain, authority, now)?;
+    let capture_heads = store.cache_heads()?;
+    let captures = crate::capture_state::State::scan(store, keys)?;
 
     let mut authors = store
         .authors()?
@@ -2522,6 +2604,11 @@ pub fn record_by_ref<K: DataKeys + ?Sized>(
     let record = store.log(author)?.read_at(sequence)?.ok_or(Error::Denied(
         "record reference is unavailable under this grant",
     ))?;
+    if !captures.visible(record.id(), true) {
+        return Err(Error::Denied(
+            "record reference is unavailable under this grant",
+        ));
+    }
     let payload = keys
         .open_record(&record)
         .map_err(|_| Error::Denied("record reference is unavailable under this grant"))?;
@@ -2532,6 +2619,9 @@ pub fn record_by_ref<K: DataKeys + ?Sized>(
         ));
     }
 
+    if capture_heads != store.cache_heads()? {
+        return Err(Error::Denied("capture history changed during read"));
+    }
     Ok(RecordAnswer {
         read_receipt: receipt(effective, 1, 0, false, Some(reference), now),
         record,
@@ -2571,6 +2661,10 @@ pub fn record_by_ref_snapshot<K: DataKeys + ?Sized>(
 ) -> Result<RecordAnswer> {
     let (author_prefix, sequence) = parse_reference(reference)?;
     let effective = read_grant(store, keys, chain, authority, now)?;
+    if !snapshot.is_current(store)? {
+        return Err(Error::Denied("snapshot changed during capture read"));
+    }
+    let captures = snapshot.capture_state()?;
     let chain_ids: BTreeSet<Hash> = chain.iter().map(Grant::id).collect();
     if snapshot
         .records
@@ -2603,6 +2697,11 @@ pub fn record_by_ref_snapshot<K: DataKeys + ?Sized>(
         .ok_or(Error::Denied(
             "record reference is unavailable under this grant",
         ))?;
+    if !captures.visible(cached.record.id(), true) {
+        return Err(Error::Denied(
+            "record reference is unavailable under this grant",
+        ));
+    }
     if !chain
         .iter()
         .all(|grant| grant.allows(&cached.item, READ, now))
@@ -2612,6 +2711,9 @@ pub fn record_by_ref_snapshot<K: DataKeys + ?Sized>(
         ));
     }
 
+    if !snapshot.is_current(store)? {
+        return Err(Error::Denied("capture history changed during read"));
+    }
     Ok(RecordAnswer {
         read_receipt: receipt(effective, 1, 0, false, Some(reference), now),
         record: cached.record.clone(),
@@ -2639,6 +2741,7 @@ pub fn record_by_ref_indexed<K: DataKeys + ?Sized>(
         return Err(Error::Denied("search index changed during point read"));
     }
     let effective = read_grant_indexed(store, keys, chain, authority, now, permissions)?;
+    let captures = index.capture_state(keys)?;
     let mut authors = store
         .authors()?
         .into_iter()
@@ -2669,6 +2772,11 @@ pub fn record_by_ref_indexed<K: DataKeys + ?Sized>(
         .iter()
         .all(|grant| grant.allows(&entry.item, READ, now))
     {
+        return Err(Error::Denied(
+            "record reference is unavailable under this grant",
+        ));
+    }
+    if !captures.visible(entry.id, true) {
         return Err(Error::Denied(
             "record reference is unavailable under this grant",
         ));
@@ -2712,6 +2820,9 @@ pub fn overview<K: DataKeys + ?Sized>(
     now: u64,
 ) -> Result<Overview> {
     let effective = read_grant(store, keys, chain, authority, now)?;
+    let capture_heads = store.cache_heads()?;
+    let mut captures = crate::capture_state::State::default();
+    let mut captured_items = Vec::new();
     let chain_ids: BTreeSet<Hash> = chain.iter().map(Grant::id).collect();
     let mut cancelled = false;
 
@@ -2743,6 +2854,14 @@ pub fn overview<K: DataKeys + ?Sized>(
                 cancelled = true;
             }
 
+            if let Some(meta) = crate::capture_state::Meta::from_payload(&payload)? {
+                captures.observe(
+                    meta,
+                    crate::capture_state::Stamp::new(&record, item.clone()),
+                );
+                captured_items.push((record.id(), item));
+                continue;
+            }
             if !chain.iter().all(|g| g.allows(&item, READ, now)) {
                 out.withheld += 1;
                 continue;
@@ -2756,6 +2875,23 @@ pub fn overview<K: DataKeys + ?Sized>(
             for tag in item.tags {
                 *tags.entry(tag).or_default() += 1;
             }
+        }
+    }
+
+    for (id, item) in captured_items {
+        if !captures.visible(id, false) {
+            continue;
+        }
+        if !chain.iter().all(|g| g.allows(&item, READ, now)) {
+            out.withheld += 1;
+            continue;
+        }
+        out.total += 1;
+        out.first = Some(out.first.map_or(item.at, |first: u64| first.min(item.at)));
+        out.last = Some(out.last.map_or(item.at, |last: u64| last.max(item.at)));
+        *kinds.entry(item.kind).or_default() += 1;
+        for tag in item.tags {
+            *tags.entry(tag).or_default() += 1;
         }
     }
 
@@ -2774,6 +2910,9 @@ pub fn overview<K: DataKeys + ?Sized>(
     out.tags.truncate(30);
     out.read_receipt = receipt(effective, out.total, out.withheld, false, None, now);
 
+    if capture_heads != store.cache_heads()? {
+        return Err(Error::Denied("capture history changed during read"));
+    }
     Ok(out)
 }
 
@@ -2788,6 +2927,10 @@ pub fn overview_snapshot<K: DataKeys + ?Sized>(
     now: u64,
 ) -> Result<Overview> {
     let effective = read_grant(store, keys, chain, authority, now)?;
+    if !snapshot.is_current(store)? {
+        return Err(Error::Denied("snapshot changed during capture read"));
+    }
+    let captures = snapshot.capture_state()?;
     let chain_ids: BTreeSet<Hash> = chain.iter().map(Grant::id).collect();
     let mut cancelled = false;
     let mut out = Overview {
@@ -2804,6 +2947,9 @@ pub fn overview_snapshot<K: DataKeys + ?Sized>(
     let mut tags: BTreeMap<String, usize> = BTreeMap::new();
 
     for cached in &snapshot.records {
+        if !captures.visible(cached.record.id(), false) {
+            continue;
+        }
         if cached.revoked.is_some_and(|id| chain_ids.contains(&id)) {
             cancelled = true;
         }
@@ -2840,6 +2986,9 @@ pub fn overview_snapshot<K: DataKeys + ?Sized>(
     out.tags.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
     out.tags.truncate(30);
     out.read_receipt = receipt(effective, out.total, out.withheld, false, None, now);
+    if !snapshot.is_current(store)? {
+        return Err(Error::Denied("capture history changed during read"));
+    }
     Ok(out)
 }
 
@@ -2858,6 +3007,7 @@ pub fn overview_indexed<K: DataKeys + ?Sized>(
         return Err(Error::Denied("search index changed during overview"));
     }
     let effective = read_grant_indexed(store, keys, chain, authority, now, permissions)?;
+    let captures = index.capture_state(keys)?;
     let mut out = Overview {
         total: 0,
         withheld: 0,
@@ -2871,6 +3021,9 @@ pub fn overview_indexed<K: DataKeys + ?Sized>(
     let mut kinds: BTreeMap<String, usize> = BTreeMap::new();
     let mut tags: BTreeMap<String, usize> = BTreeMap::new();
     index.visit(keys, None, |entry, _| {
+        if !captures.visible(entry.id, false) {
+            return Ok(());
+        }
         if !chain
             .iter()
             .all(|grant| grant.allows(&entry.item, READ, now))

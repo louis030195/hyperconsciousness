@@ -20,6 +20,7 @@
 pub mod access;
 pub mod blob;
 pub mod bundle;
+pub mod capture_state;
 pub mod catalog;
 pub mod crypto;
 pub mod discovery;
