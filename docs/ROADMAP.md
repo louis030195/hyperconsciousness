@@ -20,7 +20,7 @@ untouched as rollback.
 | chunked blobs, any size, resume, dedup, bytes on demand | done |
 | device-local blob retention policy | done; metadata default or crash-safe all-history archive, exact corrupt-chunk and malformed-pack quarantine, peer repair, batched partial-peer hydration and strict pre/post integrity proof |
 | proof-gated remote-only blob retention | done in source and isolated two-device fixture; an all-history receiver must explicitly handshake, accept only authorized referenced ciphertext and reprove the whole manifest before exact loose source eviction |
-| live screenpipe database archive | done in source and isolated API/two-device fixtures on macOS and native Windows; authenticated `VACUUM INTO`, in-memory token, stable version history and temporary cleanup; live 17.9 GB and native Linux dogfood pending |
+| live screenpipe database archive | legacy SQLite plus hybrid SQLite/Parquet bundle adapter; authenticated backup API, in-memory token, verified manifests, bounded tar-to-encryption stream and proof-gated cleanup; see [adapter scope and restore](SCREENPIPE-ADAPTER.md); hybrid native Windows and live-app restore remain unverified |
 | versions: every edit kept whole, history, and any older one retrievable | done |
 | enrollment, one command over ssh, no key ever shown | done |
 | transports: ssh, any command, multiple addresses, self-contained offline bundle | done |

@@ -38,8 +38,10 @@ mod mcp;
 mod oauth;
 mod permission;
 mod relay;
+mod screenpipe_adapter;
 mod service;
 mod sigv4;
+mod snapshot_archive;
 mod tcp;
 mod tunnel;
 
@@ -1546,19 +1548,6 @@ fn add_file(
     archive: Option<&str>,
     source: Option<&str>,
 ) -> Result<BlobRef> {
-    let identity = Identity::load_or_create(dir)?;
-    let keys = runtime_keys(dir, &identity)?;
-    keys.ensure_writer(identity.device())?;
-    let blobs = Blobs::open(dir)?;
-
-    // Stream the source into bounded encrypted chunks. This local cache is
-    // removed below only after the remote archive reproves the whole manifest.
-    hyperconsciousness::guard::no_symlink(path)?;
-    let reference = blobs.put_for_epoch(
-        std::fs::File::open(path)?,
-        keys.current_epoch(),
-        keys.current_key()?,
-    )?;
     let name = logical_name
         .map(str::to_string)
         .or_else(|| {
@@ -1566,6 +1555,24 @@ fn add_file(
                 .map(|name| name.to_string_lossy().into_owned())
         })
         .unwrap_or_else(|| "unnamed".to_string());
+
+    hyperconsciousness::guard::no_symlink(path)?;
+    add_reader(dir, File::open(path)?, &name, archive, source)
+}
+
+/// Application adapters supply bytes; HC's signed file/blob format is generic.
+fn add_reader(
+    dir: &PathBuf,
+    reader: impl Read,
+    name: &str,
+    archive: Option<&str>,
+    source: Option<&str>,
+) -> Result<BlobRef> {
+    let identity = Identity::load_or_create(dir)?;
+    let keys = runtime_keys(dir, &identity)?;
+    keys.ensure_writer(identity.device())?;
+    let blobs = Blobs::open(dir)?;
+    let reference = blobs.put_for_epoch(reader, keys.current_epoch(), keys.current_key()?)?;
 
     let mut value: serde_json::Value = serde_json::from_str(&reference.to_json())?;
     value["kind"] = serde_json::json!("file");
@@ -1782,35 +1789,20 @@ fn screenpipe_snapshot_path(staging: &Path) -> Result<PathBuf> {
     ))
 }
 
-fn validate_screenpipe_snapshot(path: &Path, reported_size: u64) -> Result<u64> {
-    hyperconsciousness::guard::no_symlink(path)?;
-    let metadata = std::fs::symlink_metadata(path)?;
-    if !metadata.is_file() || metadata.len() == 0 || metadata.len() != reported_size {
-        return Err(Error::Denied(
-            "screenpipe backup is not a complete regular file of the reported size",
-        ));
-    }
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
-    }
-    Ok(metadata.len())
-}
-
-fn remove_screenpipe_snapshot(path: &Path) -> Result<()> {
-    hyperconsciousness::guard::no_symlink(path)?;
-    if !std::fs::symlink_metadata(path)?.is_file() {
-        return Err(Error::Denied(
-            "refusing to remove a replaced screenpipe snapshot",
-        ));
-    }
-    std::fs::remove_file(path)?;
-    #[cfg(unix)]
-    if let Some(parent) = path.parent() {
-        hyperconsciousness::fsync::durable(&File::open(parent)?)?;
-    }
-    Ok(())
+fn archive_screenpipe_snapshot(
+    dir: &PathBuf,
+    snapshot: &screenpipe_adapter::Snapshot,
+    host: &str,
+) -> Result<BlobRef> {
+    snapshot.with_reader(|reader| {
+        add_reader(
+            dir,
+            reader,
+            snapshot.logical_name(),
+            Some(host),
+            Some(snapshot.source()),
+        )
+    })
 }
 
 fn screenpipe_archive(dir: &PathBuf, host: &str, port: u16, staging: &Path) -> Result<()> {
@@ -1843,8 +1835,8 @@ fn screenpipe_archive(dir: &PathBuf, host: &str, port: u16, staging: &Path) -> R
         }
     };
     drop(token);
-    let size = match validate_screenpipe_snapshot(&snapshot, reported) {
-        Ok(size) => size,
+    let backup = match screenpipe_adapter::Snapshot::open(&snapshot, reported) {
+        Ok(backup) => backup,
         Err(error) => {
             eprintln!("snapshot kept for inspection at {}", snapshot.display());
             return Err(error);
@@ -1860,7 +1852,9 @@ fn screenpipe_archive(dir: &PathBuf, host: &str, port: u16, staging: &Path) -> R
             return Err(error.into());
         }
     };
-    let required = size.saturating_add(SCREENPIPE_ENCRYPTION_HEADROOM);
+    let required = backup
+        .encryption_bytes()
+        .saturating_add(SCREENPIPE_ENCRYPTION_HEADROOM);
     if available < required {
         eprintln!(
             "consistent snapshot kept for retry at {}",
@@ -1871,20 +1865,14 @@ fn screenpipe_archive(dir: &PathBuf, host: &str, port: u16, staging: &Path) -> R
         ));
     }
 
-    if let Err(error) = add_file(
-        dir,
-        &snapshot,
-        Some("screenpipe.sqlite"),
-        Some(host),
-        Some("screenpipe:sqlite-vacuum-into-v1"),
-    ) {
+    if let Err(error) = archive_screenpipe_snapshot(dir, &backup, host) {
         eprintln!(
             "consistent snapshot kept for retry at {}",
             snapshot.display()
         );
         return Err(error);
     }
-    if let Err(error) = remove_screenpipe_snapshot(&snapshot) {
+    if let Err(error) = backup.remove() {
         eprintln!(
             "archive is complete but the temporary snapshot remains at {}",
             snapshot.display()
@@ -1892,8 +1880,12 @@ fn screenpipe_archive(dir: &PathBuf, host: &str, port: u16, staging: &Path) -> R
         return Err(error);
     }
     println!(
-        "removed temporary plaintext snapshot; restore with: hc get screenpipe.sqlite <destination> {host}"
+        "removed temporary plaintext snapshot; restore with: hc get {} <destination> {host}",
+        backup.logical_name()
     );
+    if backup.logical_name().ends_with(".tar") {
+        println!("extract the tar into a fresh directory, then use Screenpipe's storage restore command; never replace a live database");
+    }
     Ok(())
 }
 
@@ -9781,9 +9773,9 @@ mod cli_brand_tests {
 #[cfg(test)]
 mod screenpipe_archive_tests {
     use super::{
-        add_file, archive_preflight_peer, parse_screenpipe_backup_response, parse_screenpipe_token,
-        prepare_screenpipe_staging, remove_screenpipe_snapshot, request_screenpipe_backup,
-        validate_screenpipe_snapshot,
+        archive_preflight_peer, archive_screenpipe_snapshot, parse_screenpipe_backup_response,
+        parse_screenpipe_token, prepare_screenpipe_staging, request_screenpipe_backup,
+        screenpipe_adapter::Snapshot,
     };
     use hyperconsciousness::blob::Blobs;
     use hyperconsciousness::identity::Identity;
@@ -9836,7 +9828,15 @@ mod screenpipe_archive_tests {
             25
         );
         server.join().unwrap();
-        assert_eq!(validate_screenpipe_snapshot(&destination, 25).unwrap(), 25);
+        assert_eq!(Snapshot::open(&destination, 25).unwrap().bytes, 25);
+    }
+
+    #[test]
+    fn hybrid_backup_directory_is_accepted() {
+        let temp = tempfile::tempdir().unwrap();
+        let snapshot = temp.path().join("hybrid.screenpipe");
+        let size = super::screenpipe_adapter::fixture(&snapshot);
+        assert_eq!(Snapshot::open(&snapshot, size).unwrap().bytes, size);
     }
 
     #[test]
@@ -9859,14 +9859,57 @@ mod screenpipe_archive_tests {
         let staging = prepare_screenpipe_staging(&temp.path().join("stage")).unwrap();
         let snapshot = staging.join("one.sqlite");
         std::fs::write(&snapshot, b"snapshot").unwrap();
-        validate_screenpipe_snapshot(&snapshot, 8).unwrap();
+        let backup = Snapshot::open(&snapshot, 8).unwrap();
         assert!(snapshot.exists());
-        remove_screenpipe_snapshot(&snapshot).unwrap();
+        backup.remove().unwrap();
         assert!(!snapshot.exists());
     }
 
     #[test]
     fn proved_archive_releases_source_ciphertext_and_restores_exact_snapshot() {
+        prove_archive_roundtrip(false);
+    }
+
+    #[test]
+    fn proved_hybrid_archive_restores_every_bundle_member() {
+        prove_archive_roundtrip(true);
+    }
+
+    #[test]
+    fn refused_hybrid_archive_retains_staging_and_source_ciphertext() {
+        std::env::set_var("BRAINMESH_NO_KEYSTORE", "1");
+        let source_temp = tempfile::tempdir().unwrap();
+        let source_dir = source_temp.path().to_path_buf();
+        let mut source = Identity::load_or_create(&source_dir).unwrap();
+        source.create_brain().unwrap();
+        let archive_temp = tempfile::tempdir().unwrap();
+        let archive_dir = archive_temp.path().to_path_buf();
+        let mut archive = Identity::load_or_create(&archive_dir).unwrap();
+        archive
+            .accept(&source.invite(&archive.introduction()).unwrap())
+            .unwrap();
+        // The default metadata policy must refuse archive retention proof.
+        let key = *source.brain_key().unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let host = format!("tcp://{}", listener.local_addr().unwrap());
+        let server = thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            let _ = super::tcp::serve_stream(&archive_dir, stream, &key);
+        });
+        let path = source_temp.path().join("staged.screenpipe");
+        let size = super::screenpipe_adapter::fixture(&path);
+        let backup = Snapshot::open(&path, size).unwrap();
+        assert!(archive_screenpipe_snapshot(&source_dir, &backup, &host).is_err());
+        server.join().unwrap();
+        assert!(Snapshot::open(&path, size).is_ok());
+        assert!(!Blobs::open(&source_dir)
+            .unwrap()
+            .chunk_hashes()
+            .unwrap()
+            .is_empty());
+    }
+
+    fn prove_archive_roundtrip(hybrid: bool) {
         std::env::set_var("BRAINMESH_NO_KEYSTORE", "1");
         let source_temp = tempfile::tempdir().unwrap();
         let archive_temp = tempfile::tempdir().unwrap();
@@ -9902,17 +9945,16 @@ mod screenpipe_archive_tests {
 
         let snapshot = source_temp.path().join("consistent.sqlite");
         let contents = b"a consistent sqlite snapshot, not a live WAL copy";
-        std::fs::write(&snapshot, contents).unwrap();
+        let size = if hybrid {
+            super::screenpipe_adapter::fixture(&snapshot)
+        } else {
+            std::fs::write(&snapshot, contents).unwrap();
+            contents.len() as u64
+        };
+        let backup = Snapshot::open(&snapshot, size).unwrap();
         archive_preflight_peer(&host, "brainmesh", &Store::open(&source_dir).unwrap(), &key)
             .unwrap();
-        let reference = add_file(
-            &source_dir,
-            &snapshot,
-            Some("screenpipe.sqlite"),
-            Some(&host),
-            Some("screenpipe:sqlite-vacuum-into-v1"),
-        )
-        .unwrap();
+        let reference = archive_screenpipe_snapshot(&source_dir, &backup, &host).unwrap();
         server.join().unwrap();
 
         assert!(!Blobs::open(&source_dir).unwrap().is_complete(&reference));
@@ -9927,7 +9969,25 @@ mod screenpipe_archive_tests {
                 &mut restored,
             )
             .unwrap();
-        assert_eq!(restored, contents);
+        if hybrid {
+            let destination = source_temp.path().join("restored.screenpipe");
+            tar::Archive::new(restored.as_slice())
+                .unpack(&destination)
+                .unwrap();
+            let restored_backup = Snapshot::open(&destination, size).unwrap();
+            assert_eq!(restored_backup.logical_name(), "screenpipe.backup.tar");
+            // The validated manifest binds every payload's exact bytes, not
+            // just the tar's entry count or the existence of an index file.
+            assert_eq!(
+                std::fs::read(destination.join("manifest.json")).unwrap(),
+                std::fs::read(snapshot.join("manifest.json")).unwrap()
+            );
+        } else {
+            assert_eq!(restored, contents);
+        }
+        assert!(snapshot.exists());
+        backup.remove().unwrap();
+        assert!(!snapshot.exists());
     }
 }
 
