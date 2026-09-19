@@ -126,6 +126,7 @@ HC stores opaque capability references and grants specific operations.
 - [Agent skill](skills/hyperconsciousness/SKILL.md): scoped knowledge discovery.
 - [Architecture](docs/ARCHITECTURE.md) and [format specification](docs/SPEC.md).
 - [Screenpipe backup adapter](docs/SCREENPIPE-ADAPTER.md): legacy SQLite and hybrid SQLite + Parquet archives.
+- [Harness context plan](docs/HARNESS-CONTEXT-PLAN.md): bounded evidence, capture provenance, skills, handoffs and independent adapters.
 - [Threat model and constraints](docs/CONSTRAINTS.md).
 - [Failure cases](docs/EDGE-CASES.md) and [design decisions](docs/DECISIONS.md).
 - [Roadmap](docs/ROADMAP.md), [contributing](CONTRIBUTING.md), and
