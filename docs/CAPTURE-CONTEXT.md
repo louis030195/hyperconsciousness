@@ -57,7 +57,8 @@ The response contains:
 
 - `schema: "hc.capture-receipt.v1"`.
 - `durability: "local_log"` and `replication: "not_checked"`.
-- `retry_safe: false`: retrying after a lost response can duplicate a write.
+- `retry_safe: false` for legacy writes; explicit versioned changes return `true`
+  and `deduplication: "observed_history"` as described below.
 - `records`, in input order, each containing `ref`, full record hash `record_id`,
   signing node `author`, and `ingested_at_ms`.
 
@@ -72,15 +73,87 @@ actual grant and grantee inside the stored payload. `producer` is a caller's
 claim; `author` is the signing HC node, not proof of which application or model
 created the observation.
 
-Neither a source revision nor a receipt supplies deduplication, correction,
-retraction or synchronization guarantees. An ambiguous retry needs explicit
-reconciliation until namespace-bound idempotency exists. Do not use this change
-alone to enable unattended Data Sync migration.
+A source revision alone does not provide deduplication. Opt into the versioned
+contract below to make capture retries safe. Ordinary writes retain their
+append-only behavior.
+
+## Retry-safe changes and retractions
+
+Add `change` to a note with a complete `context` and request receipts:
+
+```json
+{
+  "version": 1,
+  "operation": "upsert"
+}
+```
+
+`change.version` is a positive, increasing integer chosen by the producer. It
+is independent of `context.version` (the envelope schema) and the source's
+opaque `context.revision`. The logical source consists of the authenticated
+grant principal plus `producer`, `source_id` and `record_id`. A grant renewal
+for the same principal keeps that namespace; a different agent principal has
+its own namespace, even if it chooses the same labels. Use an authenticated
+adapter principal consistently when multiple harnesses consume one source.
+
+For each version:
+
+- An exact retry returns the existing record ref/hash with `reused: true`.
+  Changed text, labels, context or operation under that version is rejected.
+- A correction uses a higher version with `operation: "upsert"`. A new version
+  below the highest observed version is rejected. Already accepted old versions
+  can still be retried for their receipt; this does not restore their visibility.
+- A retraction uses a higher version with `operation: "retract"`, `text: ""`,
+  and the source context. It requires an existing source in the writer's current
+  history. A higher explicit upsert can restore a previously retracted source.
+- Writers must still have WRITE permission on the new event and all observed
+  labels in that source's history. Retrying does not bypass expiry or revocation.
+  A receipt is available to a write-only caller without granting READ.
+
+All items in a versioned batch must include `change`; mixed legacy/versioned
+batches are rejected. Validate and authorize the entire batch before any append.
+A process or I/O failure during append may leave a durable prefix. Retrying the
+same batch repairs a torn tail and appends only missing events. This provides
+per-item recovery, not an all-or-nothing transaction during power failure.
+
+The author-log lock covers deduplication and append across local processes.
+Recovery uses the signed events themselves, plus a disposable encrypted index;
+losing or corrupting the cache does not lose accepted retry identities. The
+index stores source/version/content hashes in encrypted segment metadata and
+refreshes changed segments, without decrypting lifetime note bodies on each
+warm batch. Queries still traverse projection metadata; large-scale latency and
+memory ceilings are not claimed by these tests.
+
+Disconnected nodes can both accept the same version before either sees the
+other's event. After sync, identical events produce one deterministic search
+result; either physical ref can still reopen that current logical version.
+Conflicting content for the same version is hidden from normal reads, and a
+retry of that version is rejected. An explicit higher version resolves it.
+Receipts describe observed history, not global exactly-once execution or proof
+that all peers have synchronized. Do not use them to deduplicate external tool
+side effects such as sending email or charging a card.
+
+Updated readers apply the current-version projection before grant, text, date,
+limit or pagination selection. A replacement outside a reader's grant cannot
+resurrect an older permitted record. Search, recent, overview, point expansion
+and the owner's ordinary `hc read` suppress superseded/retracted captures.
+This includes scan, snapshot and encrypted-index paths; stale caches fail closed.
+Raw signed logs retain history.
+
+This contract manages text notes only. It cannot mutate file/control records,
+retract legacy notes merely by matching their untrusted context labels, erase
+historical ciphertext or remove derived handoffs and plaintext already copied
+elsewhere. Linked blobs and existing file grants retain their own lifetime;
+media deletion and transitive derived-data retention remain separate work.
+All serving readers must be upgraded before relying on these projection
+semantics. Older binaries do not understand capture changes and may expose old
+versions. This is not yet a Screenpipe Data Sync migration.
 
 ## Retrieve context and continue a task
 
 Call `search` or `recent` with `format: "structured"`. Each result can include
-`capture` and `capture_trust: "producer_claims_unverified"`. Under a small output
+`capture` and `capture_trust: "producer_claims_unverified"`. Managed results also include
+`change` with the accepted version and operation. Under a small output
 budget, source metadata may be omitted with `capture_omitted: true`; increase
 `max_output_chars` to retrieve it. Existing clipping and continuation fields
 still describe the text and page. Time filtering continues to use ingestion
@@ -107,4 +180,4 @@ Storage and replication encryption do not hide selected plaintext from the
 model provider a harness sends it to. The harness owns that disclosure decision,
 context assembly, compaction and tool execution. See the
 [delivery plan](HARNESS-CONTEXT-PLAN.md) for the remaining ingestion, trusted skill
-loading, current-version views and Screenpipe migration work.
+loading, media retention and Screenpipe migration work.

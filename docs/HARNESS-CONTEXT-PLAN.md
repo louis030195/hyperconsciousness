@@ -94,13 +94,16 @@ cite the result of a write and connect later notes to it without searching its
 own prose. A receipt proves local append, not replication or permanent retention.
 
 The [capture contract](CAPTURE-CONTEXT.md) documents the implemented envelope,
-write receipts and harness workflow. Receipts explicitly report `retry_safe: false`.
+write receipts and harness workflow. Legacy receipts report `retry_safe: false`; explicit versioned changes now
+provide retry-safe local ingestion and current-value text projection.
 
-Before enabling unattended source ingestion, add namespace-bound idempotency,
-conflicting-retry detection and crash recovery. A source revision identifier
-alone does not supply those semantics. Recovery must not decrypt lifetime
-history on every batch. Bound ownership to authenticated source principals;
-one producer may not retract another producer's record by guessing its ID.
+Namespace-bound, per-version idempotency, conflicting-retry detection and
+partial-append recovery are implemented for explicitly managed notes through
+`change`. Identity includes the authenticated principal. The encrypted search
+index carries projection metadata in its bounded segments, so warm ingestion
+does not decrypt lifetime note bodies. Offline duplicates converge logically;
+conflicting equal versions fail closed until explicitly superseded. This is
+not globally coordinated exactly-once delivery.
 
 ### C. Screenpipe producer and generic change semantics
 
@@ -114,9 +117,10 @@ without replacing raw evidence with an unverified LLM summary.
 
 Build a durable change/outbox contract in Screenpipe or an explicit bounded
 reconciliation strategy. Creation-time pagination alone misses corrections and
-deletions. HC needs generic current-version/retraction projections across
-search, full-record expansion and file access before adapter retractions can be
-called private deletion. Historical ciphertext erasure is a separate retention
+deletions. Current-version/retraction projections now cover explicitly managed
+text captures across search, overview, point expansion and ordinary owner reads.
+File/blob retention, legacy history migration and derived copies still require
+separate policies before adapter retractions can be called private deletion. Historical ciphertext erasure is a separate retention
 design, especially with shared epoch keys and offline recipients.
 
 Text becomes searchable HC records; media remains optional linked blobs. The

@@ -35,11 +35,16 @@ use hyperconsciousness::{
 };
 
 use crate::permission;
+#[path = "capture_writer.rs"]
+mod capture_writer;
 
 #[cfg(test)]
 #[path = "context_tests.rs"]
 mod context_tests;
 
+#[cfg(test)]
+#[path = "capture_change_tests.rs"]
+mod capture_change_tests;
 #[cfg(test)]
 #[path = "capture_tests.rs"]
 mod capture_tests;
@@ -1147,6 +1152,17 @@ impl Server {
             "remember" => {
                 let return_receipts = crate::capture::wants_receipts(arguments)?;
                 let input = RememberInput::parse(arguments)?;
+                if input.change.is_some() {
+                    if !return_receipts {
+                        return Err(Error::Malformed(
+                            "versioned capture requires return_receipts=true",
+                        ));
+                    }
+                    if serde_json::to_vec(arguments)?.len() > MAX_REMEMBER_BATCH_BYTES {
+                        return Err(Error::Malformed("capture payload is too large"));
+                    }
+                    return self.append_capture_changes(&identity, &call_chain, &[input]);
+                }
                 let item = input.item(now);
                 let revoked = self.revocations(&store, &keys)?;
                 let effective = hyperconsciousness::query::permit_write_indexed(
@@ -1185,6 +1201,12 @@ impl Server {
                     .iter()
                     .map(RememberInput::parse)
                     .collect::<Result<Vec<_>>>()?;
+                if inputs.iter().any(|input| input.change.is_some()) {
+                    if !return_receipts || inputs.iter().any(|input| input.change.is_none()) {
+                        return Err(Error::Malformed("versioned batches require change on every item and return_receipts=true"));
+                    }
+                    return self.append_capture_changes(&identity, &call_chain, &inputs);
+                }
                 let items = inputs
                     .iter()
                     .map(|input| input.item(now))
@@ -1928,9 +1950,13 @@ fn structured_search_page(
     for (index, record) in records.iter().rev().enumerate() {
         let bytes = payload(record)?;
         let text = shown_text(&bytes);
-        let capture = serde_json::from_slice::<Value>(&bytes)
-            .ok()
+        let value = serde_json::from_slice::<Value>(&bytes).ok();
+        let capture = value
+            .as_ref()
             .and_then(|v| crate::capture::Context::parse(&v["context"]).ok());
+        let change = value.as_ref().and_then(|v| {
+            hyperconsciousness::capture_state::Change::parse(&v["capture_change"]).ok()
+        });
         let mut include_capture = capture.is_some();
         let mut allowed_chars = max_excerpt;
         let more = index + 1 < records.len() || truncated;
@@ -1960,6 +1986,9 @@ fn structured_search_page(
                     .expect("item");
                 if include_capture {
                     item["capture"] = json!(capture);
+                    if let Some(change) = &change {
+                        item["change"] = json!(change);
+                    }
                     item["capture_trust"] = json!("producer_claims_unverified");
                 } else {
                     item["capture_omitted"] = json!(true);
@@ -1995,6 +2024,7 @@ fn structured_search_page(
 }
 
 struct RememberInput {
+    change: Option<hyperconsciousness::capture_state::Change>,
     context: Option<crate::capture::Context>,
     text: String,
     kind: String,
@@ -2004,9 +2034,23 @@ struct RememberInput {
 
 impl RememberInput {
     fn parse(arguments: &Value) -> Result<Self> {
+        let change = arguments
+            .get("change")
+            .filter(|v| !v.is_null())
+            .map(hyperconsciousness::capture_state::Change::parse)
+            .transpose()?;
+        let retract = change
+            .as_ref()
+            .is_some_and(|c| c.operation == hyperconsciousness::capture_state::Operation::Retract);
         let text = arguments["text"]
             .as_str()
-            .filter(|text| !text.trim().is_empty())
+            .filter(|text| {
+                if retract {
+                    text.is_empty()
+                } else {
+                    !text.trim().is_empty()
+                }
+            })
             .ok_or(Error::Malformed("remember needs text"))?
             .to_string();
         let kind = match arguments.get("kind") {
@@ -2041,7 +2085,13 @@ impl RememberInput {
             .filter(|value| !value.is_null())
             .map(crate::capture::Context::parse)
             .transpose()?;
+        if change.is_some() && (context.is_none() || kind != "note") {
+            return Err(Error::Malformed(
+                "versioned capture requires context and kind note",
+            ));
+        }
         Ok(Self {
+            change,
             context,
             text,
             kind,
@@ -2071,6 +2121,9 @@ impl RememberInput {
         });
         if let Some(context) = &self.context {
             payload["context"] = json!(context);
+        }
+        if let Some(change) = &self.change {
+            payload["capture_change"] = json!(change);
         }
         payload.to_string()
     }
@@ -2320,7 +2373,8 @@ fn tools() -> Value {
                 "properties": {
                     "text": {"type": "string"},
                     "context": crate::capture::Context::schema(),
-                    "return_receipts": {"type":"boolean", "description":"Return durable local record refs; does not prove replication or make retries idempotent."},
+                    "change": hyperconsciousness::capture_state::Change::schema(),
+                    "return_receipts": {"type":"boolean", "description":"Return durable local record refs; required for versioned changes. Legacy writes are not retry-safe. Does not prove replication."},
                     "kind": {"type": "string", "description": "default note"},
                     "tags": {"type": "array", "items": {"type": "string"}},
                     "sensitivity": {
@@ -2339,7 +2393,7 @@ fn tools() -> Value {
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "return_receipts": {"type":"boolean", "description":"Return one local receipt per input item in input order. Ambiguous retries can duplicate writes."},
+                    "return_receipts": {"type":"boolean", "description":"Return one local receipt per input item in input order. Versioned changes are retry-safe; legacy writes can duplicate on retries."},
                     "items": {
                         "type": "array",
                         "minItems": 1,
@@ -2349,6 +2403,7 @@ fn tools() -> Value {
                             "properties": {
                                 "text": {"type": "string"},
                                 "context": crate::capture::Context::schema(),
+                                "change": hyperconsciousness::capture_state::Change::schema(),
                                 "kind": {"type": "string", "description": "default note"},
                                 "tags": {"type": "array", "items": {"type": "string"}},
                                 "sensitivity": {

@@ -33,16 +33,16 @@ use crate::log::{Head, LocatedRecord, RecordLocation, Store};
 use crate::query;
 use crate::record::Record;
 
-const MANIFEST_MAGIC: &[u8; 4] = b"BQM5";
-const SEGMENT_MAGIC: &[u8; 4] = b"BQS5";
-const POSTINGS_MAGIC: &[u8; 4] = b"BQP5";
-const SEGMENT_PLAINTEXT_MAGIC: &[u8; 8] = b"HCSMET05";
-const POSTINGS_PLAINTEXT_MAGIC: &[u8; 8] = b"HCSPOST5";
+const MANIFEST_MAGIC: &[u8; 4] = b"BQM6";
+const SEGMENT_MAGIC: &[u8; 4] = b"BQS6";
+const POSTINGS_MAGIC: &[u8; 4] = b"BQP6";
+const SEGMENT_PLAINTEXT_MAGIC: &[u8; 8] = b"HCSMET06";
+const POSTINGS_PLAINTEXT_MAGIC: &[u8; 8] = b"HCSPOST6";
 const HEADER_LEN: usize = 4 + 4 + NONCE_LEN;
-const MANIFEST_CONTEXT: &str = "hyperconsciousness encrypted search manifest v5";
-const SEGMENT_CONTEXT: &str = "hyperconsciousness encrypted search metadata segment v5";
-const POSTINGS_CONTEXT: &str = "hyperconsciousness encrypted search postings segment v5";
-const SEGMENT_NAME_CONTEXT: &str = "hyperconsciousness search segment file name v5";
+const MANIFEST_CONTEXT: &str = "hyperconsciousness encrypted search manifest v6";
+const SEGMENT_CONTEXT: &str = "hyperconsciousness encrypted search metadata segment v6";
+const POSTINGS_CONTEXT: &str = "hyperconsciousness encrypted search postings segment v6";
+const SEGMENT_NAME_CONTEXT: &str = "hyperconsciousness search segment file name v6";
 const GRAM_CONTEXT: &str = "hyperconsciousness case-folded search gram v1";
 const MAX_MANIFEST_BYTES: usize = 16 * 1024 * 1024;
 const MAX_SEGMENT_BYTES: usize = 64 * 1024 * 1024;
@@ -92,6 +92,7 @@ pub(crate) struct Entry {
     pub location: RecordLocation,
     pub item: Item,
     indexed: bool,
+    pub capture: Option<crate::capture_state::Meta>,
 }
 
 #[derive(Debug)]
@@ -145,6 +146,31 @@ impl Index {
     /// Whether a previous persistent fold exists. Long-lived query servers use
     /// this hint to skip rebuilding the bounded plaintext snapshot after a
     /// large brain has already selected the disk-backed path.
+    pub fn capture_state<K: DataKeys + ?Sized>(
+        &self,
+        keys: &K,
+    ) -> Result<crate::capture_state::State> {
+        let mut state = crate::capture_state::State::default();
+        // Never filter by the caller's grant or text: an unseen correction or
+        // tombstone must still suppress an old result that the grant permits.
+        self.visit(keys, None, |entry, _| {
+            if let Some(meta) = &entry.capture {
+                state.observe(
+                    meta.clone(),
+                    crate::capture_state::Stamp {
+                        id: entry.id,
+                        author: entry.author,
+                        seq: entry.seq,
+                        at: entry.hlc.millis,
+                        item: entry.item.clone(),
+                    },
+                );
+            }
+            Ok(())
+        })?;
+        Ok(state)
+    }
+
     pub fn exists(root: &Path) -> bool {
         manifest_paths(root).into_iter().any(|path| path.is_file())
     }
@@ -489,6 +515,7 @@ impl Index {
                 location: located.location,
                 item,
                 indexed: indexed_grams.is_some(),
+                capture: crate::capture_state::Meta::from_payload(&payload)?,
             });
         }
         if segment.entries.is_empty() {
@@ -662,7 +689,7 @@ impl Index {
 
     fn encode_manifest(&self) -> Result<Vec<u8>> {
         let stored = StoredManifest {
-            schema: "hyperconsciousness.search-manifest.v5".to_string(),
+            schema: "hyperconsciousness.search-manifest.v6".to_string(),
             generation: self.generation,
             fingerprint: self.fingerprint.hex(),
             heads: self
@@ -700,7 +727,7 @@ impl Index {
 
     fn decode_manifest(root: &Path, bytes: &[u8]) -> Result<Self> {
         let stored: StoredManifest = serde_json::from_slice(bytes)?;
-        if stored.schema != "hyperconsciousness.search-manifest.v5"
+        if stored.schema != "hyperconsciousness.search-manifest.v6"
             || stored.heads.len() > MAX_AUTHORS
             || stored.segments.len() > MAX_SEGMENTS
         {
@@ -825,6 +852,15 @@ impl Segment {
             put_var_u32(&mut bytes, entry.location.length);
             bytes.push(entry.item.sensitivity);
             bytes.push(u8::from(entry.indexed));
+            bytes.push(u8::from(entry.capture.is_some()));
+            if let Some(meta) = &entry.capture {
+                bytes.extend_from_slice(&meta.source.0);
+                put_u64(&mut bytes, meta.version);
+                bytes.push(u8::from(
+                    meta.operation == crate::capture_state::Operation::Retract,
+                ));
+                bytes.extend_from_slice(&meta.digest.0);
+            }
             put_string(&mut bytes, &entry.item.kind)?;
             put_len(&mut bytes, entry.item.tags.len())?;
             for tag in &entry.item.tags {
@@ -905,6 +941,28 @@ impl Segment {
                 1 => true,
                 _ => return Err(Error::Malformed("invalid indexed-record flag")),
             };
+            let capture = match reader.u8()? {
+                0 => None,
+                1 => {
+                    let source = Hash(reader.array::<32>()?);
+                    let version = reader.u64()?;
+                    let operation = match reader.u8()? {
+                        0 => crate::capture_state::Operation::Upsert,
+                        1 => crate::capture_state::Operation::Retract,
+                        _ => return Err(Error::Malformed("invalid capture operation")),
+                    };
+                    if version == 0 {
+                        return Err(Error::Malformed("invalid capture version"));
+                    }
+                    Some(crate::capture_state::Meta {
+                        source,
+                        version,
+                        operation,
+                        digest: Hash(reader.array::<32>()?),
+                    })
+                }
+                _ => return Err(Error::Malformed("invalid capture metadata flag")),
+            };
             let kind = reader.string(MAX_LABEL_BYTES)?;
             let tag_count = reader.bounded_len(MAX_TAGS_PER_ENTRY)?;
             let mut tags = Vec::with_capacity(tag_count);
@@ -934,6 +992,7 @@ impl Segment {
                     sensitivity,
                 },
                 indexed,
+                capture,
             });
             previous_seq = Some(seq);
             previous_offset = Some(offset);
@@ -1610,6 +1669,7 @@ mod tests {
     fn gram_candidates_are_a_superset_for_ascii_unicode_and_large_records() {
         let entries = vec![
             Entry {
+                capture: None,
                 author: DeviceId([1; 32]),
                 seq: 0,
                 id: Hash([2; 32]),
@@ -1631,6 +1691,7 @@ mod tests {
                 indexed: true,
             },
             Entry {
+                capture: None,
                 author: DeviceId([1; 32]),
                 seq: 1,
                 id: Hash([3; 32]),
@@ -1670,6 +1731,7 @@ mod tests {
     fn compact_segment_roundtrips_and_rejects_noncanonical_bytes() {
         let author = DeviceId([1; 32]);
         let entry = Entry {
+            capture: None,
             author,
             seq: 7,
             id: Hash([2; 32]),

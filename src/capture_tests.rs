@@ -6,7 +6,7 @@ use super::*;
 use hyperconsciousness::grant::{Scope, PERSONAL, READ, WRITE};
 use hyperconsciousness::DeviceId;
 
-fn setup(actions: u8) -> (tempfile::TempDir, Identity, Server) {
+pub(super) fn setup(actions: u8) -> (tempfile::TempDir, Identity, Server) {
     std::env::set_var(hyperconsciousness::identity::NO_KEYSTORE_ENV, "1");
     let dir = tempfile::tempdir().unwrap();
     let mut identity = Identity::load_or_create(dir.path()).unwrap();
@@ -28,13 +28,13 @@ fn setup(actions: u8) -> (tempfile::TempDir, Identity, Server) {
     (dir, identity, server)
 }
 
-fn context(producer: &str, id: &str) -> Value {
+pub(super) fn context(producer: &str, id: &str) -> Value {
     json!({"version":1,"producer":producer,"source_id":"dataset-1",
         "record_id":id,"revision":"1","observed_at_ms":123,
         "material":"observation","source_refs":[]})
 }
 
-fn write(server: &Server, arguments: Value) -> Value {
+pub(super) fn write(server: &Server, arguments: Value) -> Value {
     let response = server
         .answer(&json!({"jsonrpc":"2.0","id":1,"method":"tools/call",
         "params":{"name":"remember_many","arguments":arguments}}))
