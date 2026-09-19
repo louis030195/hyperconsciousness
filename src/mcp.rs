@@ -40,6 +40,10 @@ use crate::permission;
 #[path = "context_tests.rs"]
 mod context_tests;
 
+#[cfg(test)]
+#[path = "capture_tests.rs"]
+mod capture_tests;
+
 /// the version of the protocol this speaks. clients send theirs in
 /// `initialize` and we answer with ours; mismatches are the client's to
 /// resolve, and every client in the wild negotiates down.
@@ -300,11 +304,31 @@ impl Server {
     }
 
     fn append_records(&self, identity: &Identity, payloads: &[String]) -> Result<()> {
+        self.append_records_receipt(identity, payloads).map(|_| ())
+    }
+
+    fn append_records_receipt(&self, identity: &Identity, payloads: &[String]) -> Result<String> {
         let (records, keys) = append_many(&self.dir, identity, payloads)?;
+        let receipts: Vec<Value> = records
+            .iter()
+            .map(|record| {
+                json!({
+                    "ref": format!("{}:{}", record.author.short(), record.seq),
+                    "record_id": record.id().hex(),
+                    "author": record.author.hex(),
+                    "ingested_at_ms": record.hlc.millis,
+                })
+            })
+            .collect();
         for (record, payload) in records.into_iter().zip(payloads) {
             self.cache_append(keys, record, payload.as_bytes().to_vec());
         }
-        Ok(())
+        Ok(json!({
+            "schema":"hc.capture-receipt.v1", "durability":"local_log",
+            "replication":"not_checked", "retry_safe":false,
+            "records":receipts,
+        })
+        .to_string())
     }
 
     /// Store one phone audio chunk as an encrypted Brainmesh file after
@@ -682,8 +706,10 @@ impl Server {
                 // treats an error as a crash would drop the conversation.
                 match self.call(name, arguments) {
                     Ok(text)
-                        if matches!(name, "search" | "recent")
-                            && arguments["format"] == "structured" =>
+                        if (matches!(name, "search" | "recent" | "record")
+                            && arguments["format"] == "structured")
+                            || (matches!(name, "remember" | "remember_many")
+                                && arguments["return_receipts"] == true) =>
                     {
                         let structured: Value = serde_json::from_str(&text)?;
                         Ok(
@@ -832,7 +858,7 @@ impl Server {
                         cursor_binding,
                         answer.truncated,
                         now,
-                        (output_chars, match_chars),
+                        (output_chars, match_chars, true),
                         |record| {
                             if let Some(cached) = snapshot_read.as_deref() {
                                 cached
@@ -927,6 +953,12 @@ impl Server {
             }
 
             "record" => {
+                let structured = match arguments.get("format") {
+                    None | Some(Value::Null) => false,
+                    Some(Value::String(value)) if value == "text" => false,
+                    Some(Value::String(value)) if value == "structured" => true,
+                    _ => return Err(Error::Malformed("record format must be text or structured")),
+                };
                 let reference = arguments["ref"]
                     .as_str()
                     .filter(|reference| !reference.trim().is_empty())
@@ -990,6 +1022,27 @@ impl Server {
                     .as_u64()
                     .unwrap_or(DEFAULT_RECORD_CHARS as u64)
                     .clamp(1, MAX_RECORD_CHARS as u64) as usize;
+                if structured {
+                    let output_chars = arguments["max_output_chars"]
+                        .as_u64()
+                        .unwrap_or(DEFAULT_RECORD_CHARS as u64)
+                        .clamp(1_024, MAX_RECORD_CHARS as u64)
+                        as usize;
+                    // A point read has no continuation cursor. Preserve line
+                    // breaks so handoffs and procedure candidates can be read
+                    // faithfully without treating them as trusted instructions.
+                    let output = structured_search_page(
+                        std::slice::from_ref(&answer.record),
+                        &hyperconsciousness::query::Filter::default(),
+                        [0; 8],
+                        false,
+                        now,
+                        (output_chars, max_chars, false),
+                        |_| Ok(answer.payload.clone()),
+                    )?;
+                    self.append_record(&identity, &answer.read_receipt)?;
+                    return Ok(output);
+                }
                 let text = shown_text(&answer.payload);
                 let (text, clipped) = clip_text(&text, max_chars);
                 let mut out = format!(
@@ -1092,6 +1145,7 @@ impl Server {
             }
 
             "remember" => {
+                let return_receipts = crate::capture::wants_receipts(arguments)?;
                 let input = RememberInput::parse(arguments)?;
                 let item = input.item(now);
                 let revoked = self.revocations(&store, &keys)?;
@@ -1105,12 +1159,16 @@ impl Server {
                     &revoked,
                 )?;
 
-                self.append_record(&identity, &input.payload(effective))?;
-
+                let payload = input.payload(effective);
+                if return_receipts {
+                    return self.append_records_receipt(&identity, &[payload]);
+                }
+                self.append_record(&identity, &payload)?;
                 Ok("written".to_string())
             }
 
             "remember_many" => {
+                let return_receipts = crate::capture::wants_receipts(arguments)?;
                 let values = arguments["items"]
                     .as_array()
                     .filter(|items| !items.is_empty())
@@ -1146,6 +1204,9 @@ impl Server {
                     .iter()
                     .map(|input| input.payload(effective))
                     .collect::<Vec<_>>();
+                if return_receipts {
+                    return self.append_records_receipt(&identity, &payloads);
+                }
                 self.append_records(&identity, &payloads)?;
                 Ok(format!("written {}", payloads.len()))
             }
@@ -1850,7 +1911,7 @@ fn structured_search_page(
     binding: [u8; 8],
     truncated: bool,
     now: u64,
-    (budget, max_excerpt): (usize, usize),
+    (budget, max_excerpt, compact): (usize, usize, bool),
     payload: impl Fn(&Record) -> Result<Vec<u8>>,
 ) -> Result<String> {
     let mut page = json!({
@@ -1867,11 +1928,19 @@ fn structured_search_page(
     for (index, record) in records.iter().rev().enumerate() {
         let bytes = payload(record)?;
         let text = shown_text(&bytes);
+        let capture = serde_json::from_slice::<Value>(&bytes)
+            .ok()
+            .and_then(|v| crate::capture::Context::parse(&v["context"]).ok());
+        let mut include_capture = capture.is_some();
         let mut allowed_chars = max_excerpt;
         let more = index + 1 < records.len() || truncated;
         let mut candidate;
         loop {
-            let (excerpt, clipped) = compact_text(&text, allowed_chars);
+            let (excerpt, clipped) = if compact {
+                compact_text(&text, allowed_chars)
+            } else {
+                clip_text(&text, allowed_chars)
+            };
             candidate = page.clone();
             candidate["items"]
                 .as_array_mut()
@@ -1883,6 +1952,19 @@ fn structured_search_page(
                     "text": excerpt,
                     "clipped": clipped,
                 }));
+            if capture.is_some() {
+                let item = candidate["items"]
+                    .as_array_mut()
+                    .expect("array")
+                    .last_mut()
+                    .expect("item");
+                if include_capture {
+                    item["capture"] = json!(capture);
+                    item["capture_trust"] = json!("producer_claims_unverified");
+                } else {
+                    item["capture_omitted"] = json!(true);
+                }
+            }
             candidate["has_more"] = json!(more);
             candidate["next_cursor"] = if more {
                 json!(encode_search_cursor(record, filter, binding))
@@ -1893,6 +1975,11 @@ fn structured_search_page(
                 break;
             }
             if allowed_chars == 0 {
+                if include_capture {
+                    include_capture = false;
+                    allowed_chars = max_excerpt;
+                    continue;
+                }
                 if page["items"].as_array().expect("array").is_empty() {
                     return Err(Error::Denied(
                         "context budget cannot fit one record reference",
@@ -1908,6 +1995,7 @@ fn structured_search_page(
 }
 
 struct RememberInput {
+    context: Option<crate::capture::Context>,
     text: String,
     kind: String,
     tags: Vec<String>,
@@ -1948,7 +2036,13 @@ impl RememberInput {
             Some(Value::String(name)) => level_of(name)?,
             Some(_) => return Err(Error::Malformed("remember sensitivity must be text")),
         };
+        let context = arguments
+            .get("context")
+            .filter(|value| !value.is_null())
+            .map(crate::capture::Context::parse)
+            .transpose()?;
         Ok(Self {
+            context,
             text,
             kind,
             tags,
@@ -1966,7 +2060,7 @@ impl RememberInput {
     }
 
     fn payload(&self, effective: &Grant) -> String {
-        json!({
+        let mut payload = json!({
             "kind": self.kind,
             "sensitivity": self.sensitivity,
             "tags": self.tags,
@@ -1974,8 +2068,11 @@ impl RememberInput {
             "provenance": "grant_write_v1",
             "grant": effective.id().hex(),
             "grantee": effective.to.hex(),
-        })
-        .to_string()
+        });
+        if let Some(context) = &self.context {
+            payload["context"] = json!(context);
+        }
+        payload.to_string()
     }
 }
 
@@ -2206,7 +2303,9 @@ fn tools() -> Value {
                 "type": "object",
                 "properties": {
                     "ref": {"type": "string", "description": "the ref shown by search, for example abcdef123456:42"},
+                    "format": {"type":"string", "enum":["text","structured"], "description":"Default text. Structured returns a bounded hc.context.v1 page with one item, including available capture metadata."},
                     "max_chars": {"type": "number", "description": "default 16000, max 1048576"},
+                    "max_output_chars": {"type":"number", "description":"Structured response character budget including metadata and JSON escaping, default 16000, minimum 1024, maximum 1048576."},
                 },
                 "required": ["ref"],
             },
@@ -2220,6 +2319,8 @@ fn tools() -> Value {
                 "type": "object",
                 "properties": {
                     "text": {"type": "string"},
+                    "context": crate::capture::Context::schema(),
+                    "return_receipts": {"type":"boolean", "description":"Return durable local record refs; does not prove replication or make retries idempotent."},
                     "kind": {"type": "string", "description": "default note"},
                     "tags": {"type": "array", "items": {"type": "string"}},
                     "sensitivity": {
@@ -2238,6 +2339,7 @@ fn tools() -> Value {
             "inputSchema": {
                 "type": "object",
                 "properties": {
+                    "return_receipts": {"type":"boolean", "description":"Return one local receipt per input item in input order. Ambiguous retries can duplicate writes."},
                     "items": {
                         "type": "array",
                         "minItems": 1,
@@ -2246,6 +2348,7 @@ fn tools() -> Value {
                             "type": "object",
                             "properties": {
                                 "text": {"type": "string"},
+                                "context": crate::capture::Context::schema(),
                                 "kind": {"type": "string", "description": "default note"},
                                 "tags": {"type": "array", "items": {"type": "string"}},
                                 "sensitivity": {
