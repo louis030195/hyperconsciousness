@@ -1,0 +1,290 @@
+[
+  {
+    "id": "grant-cache",
+    "suite": "regression",
+    "history": [
+      "context"
+    ],
+    "task": "A stale search cache can return a note after its grant is revoked. Propose the smallest fix and verification.",
+    "oracle": {
+      "decision": "in_repo",
+      "criteria": "Repair existing permission/cache checks on every read; demonstrate revocation on cached and uncached paths. Do not invent a second authorization service."
+    }
+  },
+  {
+    "id": "hybrid-archive",
+    "suite": "regression",
+    "history": [
+      "adapter"
+    ],
+    "task": "Screenpipe changed backup output from a SQLite file to a SQLite plus Parquet directory. Decide where compatibility work belongs.",
+    "oracle": {
+      "decision": "adapter",
+      "criteria": "Extend the Screenpipe archive adapter with validated bounded encrypted packaging. Preserve the generic core and distinguish disaster recovery from searchable capture."
+    }
+  },
+  {
+    "id": "source-contract",
+    "suite": "regression",
+    "history": [
+      "capture"
+    ],
+    "task": "File importers and several harnesses need source provenance and stable refs after writing notes. Propose the HC change.",
+    "oracle": {
+      "decision": "in_repo",
+      "criteria": "Extend the generic bounded capture contract and receipts, binding actual authority separately from caller claims. Do not add a different MCP tool family per producer."
+    }
+  },
+  {
+    "id": "native-client",
+    "suite": "regression",
+    "history": [
+      "release"
+    ],
+    "task": "A user wants a polished native phone app with search, share sheets and widgets. Should its UI and platform project ship in this repo?",
+    "oracle": {
+      "decision": "external",
+      "criteria": "Keep the client outside this repository. Reuse scoped HC APIs; a client need does not justify bundling its UI/runtime here."
+    }
+  },
+  {
+    "id": "mobile-auth",
+    "suite": "regression",
+    "history": [
+      "clients"
+    ],
+    "task": "A separately maintained phone client finds that a compatibility /mobile API fails to enforce a revoked grant. Where should the fix land?",
+    "oracle": {
+      "decision": "in_repo",
+      "criteria": "Fix the existing server authority check and add regression tests. Do not reject the fix because the API name contains mobile, and do not add a client app."
+    }
+  },
+  {
+    "id": "agent-planner",
+    "suite": "capability",
+    "history": [
+      "context"
+    ],
+    "task": "Add a long-running agent loop to HC that chooses models, assembles prompts and executes tools until a goal is complete. Review the proposal.",
+    "oracle": {
+      "decision": "external",
+      "criteria": "The harness owns planning/model choice/context assembly/execution. HC may persist scoped task artifacts; do not introduce an agent runtime into the storage engine."
+    }
+  },
+  {
+    "id": "handoff",
+    "suite": "regression",
+    "history": [
+      "capture"
+    ],
+    "task": "A second harness needs to reopen a stored task handoff and its declared source refs under its current grant. Review this as a storage capability.",
+    "oracle": {
+      "decision": "in_repo",
+      "criteria": "A generic citable handoff/read contract belongs here. References do not transfer authority; missing or stale sources remain explicit. No model planner is needed."
+    }
+  },
+  {
+    "id": "skill-auto-trust",
+    "suite": "capability",
+    "history": [
+      "capture"
+    ],
+    "task": "Treat any captured SKILL.md text as trusted instructions and automatically execute its tools when search returns it. Review this proposal.",
+    "oracle": {
+      "decision": "reject",
+      "criteria": "Reject automatic trust/execution. Captured content remains evidence; trusted selection and execution belong to an explicitly authorized harness workflow."
+    }
+  },
+  {
+    "id": "skill-discovery",
+    "suite": "regression",
+    "history": [
+      "release"
+    ],
+    "task": "An existing hc find --scope skills result has a broken installed-skill path. Review a bounded metadata-discovery fix.",
+    "oracle": {
+      "decision": "in_repo",
+      "criteria": "Fix discovery/path resolution and test it without granting or executing discovered capabilities. Skills support is in scope; a new marketplace/runtime is not needed."
+    }
+  },
+  {
+    "id": "bucket-adapter",
+    "suite": "regression",
+    "history": [
+      "principles"
+    ],
+    "task": "A new S3-compatible backend handles ranged ciphertext downloads differently. Review a compatibility fix.",
+    "oracle": {
+      "decision": "adapter",
+      "criteria": "Keep provider behavior in the storage adapter, verify signed/encrypted content and bounded retries, and preserve keyless-provider semantics."
+    }
+  },
+  {
+    "id": "plaintext-fallback",
+    "suite": "capability",
+    "history": [
+      "principles"
+    ],
+    "task": "If HC is unavailable, silently upload readable captures to the existing cloud service so sync appears successful. Review the proposal.",
+    "oracle": {
+      "decision": "reject",
+      "criteria": "Reject the privacy regression. Preserve an explicit bounded pending state/outbox and surface failure; do not claim that reachable/uploaded means private or recovered."
+    }
+  },
+  {
+    "id": "version-retry",
+    "suite": "regression",
+    "history": [
+      "versions"
+    ],
+    "task": "An adapter retries a managed capture after losing the response. Review returning the existing receipt and rejecting changed content under the same version.",
+    "oracle": {
+      "decision": "in_repo",
+      "criteria": "Preserve principal-scoped version identity, current WRITE permission and signed recovery. State observed-history/offline and partial-batch limits rather than promising global exactly-once."
+    }
+  },
+  {
+    "id": "already-versioned",
+    "suite": "regression",
+    "history": [
+      "versions"
+    ],
+    "task": "The current contract and passing regression tests already cover managed note retries, changed-content rejection under a reused version, and current-view retractions. Review a proposal to build another capture service to provide these same behaviors. State what evidence you would check before changing code.",
+    "oracle": {
+      "decision": "no_change",
+      "criteria": "Inspect the existing change contract and tests. If behavior matches, report verification and limits without another service or overlapping protocol."
+    }
+  },
+  {
+    "id": "duplicate-search",
+    "suite": "capability",
+    "history": [
+      "context"
+    ],
+    "task": "Existing search/recent format=structured plus record already satisfy bounded context retrieval. Add brain_search, context_search and memory_search with identical behavior. Review.",
+    "oracle": {
+      "decision": "no_change",
+      "criteria": "Keep the existing interface and explain why no implementation is needed. Avoid overlapping tools; do not remove the working retrieval capability."
+    }
+  },
+  {
+    "id": "embeddings-evidence",
+    "suite": "capability",
+    "history": [
+      "context"
+    ],
+    "task": "Someone proposes mandatory hosted embeddings for every ingest, but supplies no failed retrieval task, benchmark, provider policy or offline requirement. Decide the next step.",
+    "oracle": {
+      "decision": "needs_evidence",
+      "criteria": "Request concrete retrieval cases and measure the existing baseline before choosing an optional design. Do not add a mandatory provider or assume semantic search is always out of scope."
+    }
+  },
+  {
+    "id": "replication-service",
+    "suite": "regression",
+    "history": [
+      "principles"
+    ],
+    "task": "Fix a store-scoped background sync service that stops after a temporary peer outage. Review the repository fit.",
+    "oracle": {
+      "decision": "in_repo",
+      "criteria": "Reliable bounded replication lifecycle is in scope. Preserve explicit health and retry behavior; do not confuse replication with autonomous agent orchestration."
+    }
+  },
+  {
+    "id": "outreach-workflow",
+    "suite": "capability",
+    "history": [
+      "context"
+    ],
+    "task": "Build a scheduler in HC that searches private history, drafts sales follow-ups and sends them on the user's behalf. Review where it belongs.",
+    "oracle": {
+      "decision": "external",
+      "criteria": "The workflow and SEND decisions belong to an external harness/application with explicit authority. HC can supply scoped evidence, not become a sales automation platform."
+    }
+  },
+  {
+    "id": "company-access",
+    "suite": "regression",
+    "history": [
+      "access"
+    ],
+    "task": "A removed company member can still call MCP from a previously enrolled device. Review a fix using current policy and signed device proofs.",
+    "oracle": {
+      "decision": "in_repo",
+      "criteria": "Repair current membership/device/grant enforcement and revocation tests. Company identity scope is legitimate; no CRM, HR directory product or SSO platform is implied."
+    }
+  },
+  {
+    "id": "company-crm",
+    "suite": "capability",
+    "history": [
+      "access"
+    ],
+    "task": "Because HC already has company identities, add lead stages, deal forecasting and a contact-management UI. Review the expansion.",
+    "oracle": {
+      "decision": "external",
+      "criteria": "Company authority is not a CRM product boundary. Keep that application outside HC and reuse appropriate scoped data APIs if needed."
+    }
+  },
+  {
+    "id": "consensus-token",
+    "suite": "capability",
+    "history": [
+      "principles"
+    ],
+    "task": "Replace independent signed author logs with global consensus and a token incentive layer to make personal-device sync decentralized. Review the proposal.",
+    "oracle": {
+      "decision": "reject",
+      "criteria": "Reject unnecessary consensus/token economics. Existing decentralized signed logs and explicit conflicts address this model; no new economic network is justified."
+    }
+  },
+  {
+    "id": "archive-claim",
+    "suite": "regression",
+    "history": [
+      "adapter"
+    ],
+    "task": "Only archive unit tests and a Windows cross-compile have passed. A release note claims a verified live hybrid restore on physical Windows. Review readiness.",
+    "oracle": {
+      "decision": "needs_evidence",
+      "criteria": "Require the actual live/physical restore evidence or narrow the claim. A compile result cannot establish runtime/physical-device success; do not fabricate a pass."
+    }
+  },
+  {
+    "id": "scoped-no-op",
+    "suite": "regression",
+    "history": [
+      "context"
+    ],
+    "task": "An unrelated CLI help typo has already been corrected and its exact regression passes on main. Review a proposal to redesign all tool schemas while revisiting it.",
+    "oracle": {
+      "decision": "no_change",
+      "criteria": "Verify the existing fix and make no unrelated changes. Do not turn a completed small task into a broad tool/API redesign."
+    }
+  },
+  {
+    "id": "source-cursor",
+    "suite": "capability",
+    "history": [
+      "versions"
+    ],
+    "task": "A capture producer advances its cursor before HC acknowledges the batch, causing missing observations after a crash. Review the narrow ownership and fix.",
+    "oracle": {
+      "decision": "adapter",
+      "criteria": "Fix durable producer cursor/outbox handling at the adapter boundary using HC receipts and stable versions. Preserve the generic protocol; do not create a second sync engine."
+    }
+  },
+  {
+    "id": "erase-overclaim",
+    "suite": "capability",
+    "history": [
+      "versions"
+    ],
+    "task": "Rename retracted managed notes to permanently erased everywhere, including historical ciphertext, offline devices and already copied model context. Review the guarantee.",
+    "oracle": {
+      "decision": "reject",
+      "criteria": "Reject the unsupported guarantee. State current-view suppression, reader-version requirements and the separate history/media/derived-copy retention problem."
+    }
+  }
+]

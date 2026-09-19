@@ -4,6 +4,10 @@
 
 # Hyperconsciousness PRD
 
+For the current repository boundary and change-admission rules, see
+[MISSION.md](../MISSION.md). Client UX below is a separate-client vision, not
+a commitment to ship client applications from this repository.
+
 ## the problem
 
 Context is scattered across machines and nothing joins it. Notes are in one
@@ -98,14 +102,15 @@ those mechanics.
 
 ## how it relates to screenpipe
 
-Screenpipe today has an E2EE sync core that carries pipes, memories and
-connections, and full history sync that returns `410 Gone`. Issue #5647 states
-the gap: multi device personal context should not require an Enterprise build,
-and should not grow a third unrelated sync stack.
+HC is independently useful as private knowledge storage and context access for
+humans and agents. Screenpipe is one producer alongside files, conversations
+and harness artifacts; it is not a required account, runtime or database.
 
-This is intended to be that one stack. Screenpipe keeps its local database for
-raw capture and publishes a curated stream of records. Raw frames stay local,
-derived context syncs, blobs move on demand.
+Screenpipe keeps its local capture database and publishes consented records
+through an adapter. HC owns generic encrypted storage, grants, retrieval,
+replication and recovery. Backup archives and searchable capture are distinct
+contracts. Media retention and migration require their own verified policies.
 
-Standalone, this is a worse Syncthing. As screenpipe's sync layer, it is
-something no competitor has.
+See the [harness context plan](HARNESS-CONTEXT-PLAN.md) for the current delivery
+sequence and explicit limits. A source-specific need should extend an adapter
+or generic contract without turning HC into the source application's backend.

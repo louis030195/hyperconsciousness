@@ -1,0 +1,58 @@
+[
+  {
+    "id": "release",
+    "commit": "770a2128ff84e079ddb5b753541bdcc0de30db2e",
+    "path": "README.md",
+    "sha256": "2845907883039a1fc5458cc696630d590c1c6242d065aa6025c3739f47a5a3cb",
+    "lesson": "The public release declares engine, CLI and skills, with client apps separate."
+  },
+  {
+    "id": "clients",
+    "commit": "6dfef7f25b95465bea3d78ae1c820a131b3705a5",
+    "path": "docs/SPEC.md",
+    "sha256": "3853e0be1a62b67fb77228ac11dbbe587d490d7b11118a2d94720986c150bf20",
+    "lesson": "Clarifies external approval clients and avoids claiming their platform storage guarantees."
+  },
+  {
+    "id": "access",
+    "commit": "e66d1c99a73a6e1def9ed27f2a59d4d170dd622d",
+    "path": "docs/COMPANY-ACCESS.md",
+    "sha256": "26c819b02f9a326ce21aafdbf9083164f24469dba72e904378c4017497ba90d4",
+    "lesson": "Company access is current identity/grant enforcement, not a business application."
+  },
+  {
+    "id": "adapter",
+    "commit": "428e81aa926ea5bf311c9a43b5c3fa1cb260e687",
+    "path": "docs/SCREENPIPE-ADAPTER.md",
+    "sha256": "1f498aa97871a4c215a8a05eceb65150d8da448ca5468cf10fc7bb6074e3132a",
+    "lesson": "The adapter fixes legacy and hybrid archive compatibility while preserving backup scope."
+  },
+  {
+    "id": "context",
+    "commit": "5e5f60d4af3c421ddcd19d7e7aa288fd0db63d55",
+    "path": "docs/HARNESS-CONTEXT-PLAN.md",
+    "sha256": "2910d98b9589e30bdfefd20a39e4ad8fe0b4e54fcae8c179afc0f4de22e98347",
+    "lesson": "HC owns durable context and authority; harnesses own execution and context assembly."
+  },
+  {
+    "id": "capture",
+    "commit": "55656f2d617b500f161ec0cf121720b24465b5ee",
+    "path": "docs/CAPTURE-CONTEXT.md",
+    "sha256": "a0d596b597129dfa2b56e3578fc17175be9698d0783b041b0d52f94b840dffc5",
+    "lesson": "Capture declarations are unverified evidence; refs and receipts do not grant authority."
+  },
+  {
+    "id": "versions",
+    "commit": "7918220f7ae943130ca711d9425d10736ee44e94",
+    "path": "docs/CAPTURE-CONTEXT.md",
+    "sha256": "d62d6040f667778f8535e4f7164882bf586fb218bc99ad83a7cfc8c73399080e",
+    "lesson": "Explicit managed versions provide observed-history retry safety, with honest retention and offline limits."
+  },
+  {
+    "id": "principles",
+    "commit": "770a2128ff84e079ddb5b753541bdcc0de30db2e",
+    "path": "docs/DECISIONS.md",
+    "sha256": "3d5473f2d3302554ac3652490119b4d95f5ed151c276399951f7243dd228bd93",
+    "lesson": "Existing decisions keep secrets out of logs, networking out of the core, and consensus/token economics out of HC."
+  }
+]

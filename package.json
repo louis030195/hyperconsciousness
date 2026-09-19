@@ -38,7 +38,8 @@
   "scripts": {
     "postinstall": "node npm/scripts/install.js",
     "prepack": "node npm/scripts/verify-package.js",
-    "test": "node npm/scripts/verify-package.js"
+    "test": "node npm/scripts/verify-package.js",
+    "eval:scope": "node --test evals/scope/run.test.mjs && node evals/scope/run.mjs check"
   },
   "engines": {
     "node": ">=18"

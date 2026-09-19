@@ -7,6 +7,7 @@
 | document | what it answers |
 | --- | --- |
 | [WHITEPAPER.md](WHITEPAPER.md) | how the whole system works, in one short paper |
+| [Mission and scope](../MISSION.md) | the current independent product boundary and change admission test |
 | [PRD.md](PRD.md) | what this is, who for, and what it deliberately is not |
 | [SPEC.md](SPEC.md) | the formats. normative. enough to reimplement the reader |
 | [CONSTRAINTS.md](CONSTRAINTS.md) | invariants, threat model, and the limits we state rather than hide |

@@ -15,12 +15,26 @@ cargo fmt --all -- --check
 cargo clippy --locked --all-targets -- -D warnings
 cargo test --locked
 npm test
+npm run eval:scope
 npm pack --dry-run
 cargo package --locked
 ```
 
 This repository ships the Rust engine, CLI, and agent skills. Client apps are
 maintained separately. HTTP changes must preserve grant and OAuth boundaries.
+
+## Mission and scope review
+
+Read [MISSION.md](MISSION.md) before proposing a feature. Include the user
+outcome, ownership boundary, simplest complete implementation and verification
+in the PR. The [scope suite](evals/scope/README.md) checks historical boundary
+regressions and provides a balanced rubric for plans and diffs.
+
+`npm run eval:scope` needs Node 20+ and a full git checkout. It performs no model
+calls and never opens a private HC store. New runtime dependencies or library
+modules require a deliberate inventory update and a rationale in the PR; do not
+silently lower the standard to pass a feature. Existing approval/CODEOWNERS
+review still applies. Green structural checks do not prove semantic alignment.
 
 ## Protocol changes
 
