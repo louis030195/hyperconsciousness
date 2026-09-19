@@ -31,6 +31,7 @@ mod access_cli;
 #[cfg(test)]
 mod access_tests;
 mod bucket;
+mod capture;
 mod dpop;
 mod fswatch;
 mod http;

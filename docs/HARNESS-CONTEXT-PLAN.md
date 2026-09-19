@@ -4,8 +4,8 @@
 
 # HC as private context infrastructure for humans and harnesses
 
-Status: implementation plan, with the first read surface implemented alongside
-this document. This is not a claim that continuous Screenpipe ingestion or its
+Status: implementation plan, with bounded reads and the capture envelope implemented
+alongside this document. This is not a claim that continuous Screenpipe ingestion or its
 Data Sync migration has shipped.
 
 ## Product boundary
@@ -81,7 +81,7 @@ remote sync was not checked: recent retrieval is not proof that every producer
 is current. Do not advertise MCP resources or subscriptions until their handlers
 and revocation behavior exist. This release retains its negotiated protocol.
 
-### B. Generic capture provenance and durable references (next implementation)
+### B. Generic capture provenance and durable references (implemented)
 
 Extend existing bounded writes with an optional, versioned context envelope:
 producer, source dataset, source record, revision, original observation time,
@@ -92,6 +92,9 @@ claims, not identity, verified causality or permissions. Preserve legacy writes.
 Return durable HC record refs to callers that request them. This lets a harness
 cite the result of a write and connect later notes to it without searching its
 own prose. A receipt proves local append, not replication or permanent retention.
+
+The [capture contract](CAPTURE-CONTEXT.md) documents the implemented envelope,
+write receipts and harness workflow. Receipts explicitly report `retry_safe: false`.
 
 Before enabling unattended source ingestion, add namespace-bound idempotency,
 conflicting-retry detection and crash recovery. A source revision identifier
