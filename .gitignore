@@ -14,3 +14,6 @@ hc-demo/
 .env.*
 !.env.example
 .DS_Store
+
+# Local eval trials can contain private traces; commit synthetic cases only.
+evals/scope/runs/

@@ -1,0 +1,20 @@
+{
+  "commit": "62b762cdab020c3a980fa6cc51bf0f1687642183",
+  "agent_file_present": false,
+  "instruction_sources": [
+    {
+      "path": "README.md",
+      "sha256": "f6bbd55109108dd4013a8eb114fbea87052eb4f0a34bb2b3e00d460602b1491b"
+    },
+    {
+      "path": "CONTRIBUTING.md",
+      "sha256": "cc0453fb4b12259ea6dbb10d50bacc19ab4750069215699554f2c7315a2df537"
+    },
+    {
+      "path": "docs/HARNESS-CONTEXT-PLAN.md",
+      "sha256": "15c6adfbc43474f81d42b6d4e3f4c15c3725f3e14ca6c04fa4e3161a1275f551"
+    }
+  ],
+  "evidence_class": "git_snapshot",
+  "model_trials": "not_run"
+}

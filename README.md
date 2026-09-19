@@ -121,6 +121,8 @@ HC stores opaque capability references and grants specific operations.
 
 ## Documentation
 
+- [Mission and scope](MISSION.md) and [scope evals](evals/scope/README.md).
+
 - [Operator skill](skills/hyperconsciousness-ops/SKILL.md): sync, workspaces, grants, secrets,
   remote storage, services, and recovery commands.
 - [Agent skill](skills/hyperconsciousness/SKILL.md): scoped knowledge discovery.
