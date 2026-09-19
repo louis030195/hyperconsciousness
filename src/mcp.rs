@@ -832,8 +832,7 @@ impl Server {
                         cursor_binding,
                         answer.truncated,
                         now,
-                        output_chars,
-                        match_chars,
+                        (output_chars, match_chars),
                         |record| {
                             if let Some(cached) = snapshot_read.as_deref() {
                                 cached
@@ -1851,8 +1850,7 @@ fn structured_search_page(
     binding: [u8; 8],
     truncated: bool,
     now: u64,
-    budget: usize,
-    max_excerpt: usize,
+    (budget, max_excerpt): (usize, usize),
     payload: impl Fn(&Record) -> Result<Vec<u8>>,
 ) -> Result<String> {
     let mut page = json!({
