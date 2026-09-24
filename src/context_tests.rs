@@ -170,3 +170,140 @@ fn legacy_text_and_invalid_format_have_explicit_behavior() {
     assert_eq!(page["items"], json!([]));
     assert_eq!(page["has_more"], false);
 }
+
+#[test]
+fn text_reads_and_audit_receipts_do_not_reveal_hidden_totals() {
+    for indexed in [false, true] {
+        let (_dir, identity, server) = setup();
+        note(&server, &identity, "visible", PERSONAL);
+        note(&server, &identity, "hidden", grant::SECRET);
+        let store = Store::open(&server.dir).unwrap();
+        let keys = RuntimeKeys::open(&server.dir, &identity).unwrap();
+        if indexed {
+            hyperconsciousness::search_index::Index::load_or_build(
+                &server.dir,
+                &store,
+                &keys,
+                keys.cache_fingerprint(),
+            )
+            .unwrap();
+        }
+        for tool in ["search", "recent", "files", "overview"] {
+            let output = server.call(tool, &json!({"kind":"note"})).unwrap();
+            assert!(!output.contains("hidden"));
+            assert!(!output.contains("does not cover"));
+            assert!(!output.contains("outside this grant"));
+            assert!(!output.contains("devices"));
+        }
+        let mut receipts = 0;
+        for author in store.authors().unwrap() {
+            for record in store.log(author).unwrap().iter_records().unwrap() {
+                let payload = keys.open_record(&record.unwrap()).unwrap();
+                let value: Value = serde_json::from_slice(&payload).unwrap();
+                if value["kind"] == "read" {
+                    receipts += 1;
+                    assert!(value.get("withheld").is_none());
+                    assert!(value.get("returned").is_some());
+                }
+            }
+        }
+        assert_eq!(receipts, 4);
+    }
+}
+
+#[test]
+fn resident_permission_cache_reuses_current_view_and_observes_revocation() {
+    let (_dir, identity, server) = setup();
+    note(&server, &identity, "visible", PERSONAL);
+    let store = Store::open(&server.dir).unwrap();
+    let keys = RuntimeKeys::open(&server.dir, &identity).unwrap();
+    let first = server.revocations(&store, &keys).unwrap();
+    let second = server.revocations(&store, &keys).unwrap();
+    assert!(Arc::ptr_eq(&first, &second));
+    append(
+        &server.dir,
+        &identity,
+        &json!({"kind":"revoke", "grant":server.chain[0].id().hex()}).to_string(),
+    )
+    .unwrap();
+    let refreshed = server.revocations(&store, &keys).unwrap();
+    assert!(refreshed.contains(server.chain[0].id()));
+    assert!(refreshed.is_current(&store).unwrap());
+    assert!(server.call("search", &json!({})).is_err());
+}
+
+#[test]
+fn capture_projection_reuses_audit_tails_and_applies_inaccessible_retractions() {
+    let (_dir, identity, server) = setup();
+    let source = json!({"producer":"tests","source_id":"chat","record_id":"one"});
+    let payload = |version, operation, sensitivity| {
+        json!({"kind":"note","text":"versioned",
+        "sensitivity":sensitivity,"context":source,"grantee":server.chain[0].to.hex(),
+        "provenance":"grant_write_v1","capture_change":{"version":version,"operation":operation}})
+        .to_string()
+    };
+    let (original, _) = append(&server.dir, &identity, &payload(1, "upsert", PERSONAL)).unwrap();
+    let store = Store::open(&server.dir).unwrap();
+    let keys = RuntimeKeys::open(&server.dir, &identity).unwrap();
+    let mut index = hyperconsciousness::search_index::Index::load_or_build(
+        &server.dir,
+        &store,
+        &keys,
+        keys.cache_fingerprint(),
+    )
+    .unwrap();
+    let first = index.capture_state_shared(&keys).unwrap();
+    let second = index.capture_state_shared(&keys).unwrap();
+    assert!(Arc::ptr_eq(&first, &second));
+    assert!(first.visible(original.id(), false));
+    append(&server.dir, &identity, r#"{"kind":"read","returned":1}"#).unwrap();
+    assert!(index
+        .refresh_current(&store, &keys, keys.cache_fingerprint())
+        .unwrap());
+    let after_audit = index.capture_state_shared(&keys).unwrap();
+    assert!(Arc::ptr_eq(&first, &after_audit));
+    append(
+        &server.dir,
+        &identity,
+        &payload(2, "retract", grant::SECRET),
+    )
+    .unwrap();
+    assert!(index
+        .refresh_current(&store, &keys, keys.cache_fingerprint())
+        .unwrap());
+    assert!(!index
+        .capture_state_shared(&keys)
+        .unwrap()
+        .visible(original.id(), false));
+    assert!(
+        first.visible(original.id(), false),
+        "readers retain an immutable prefix view"
+    );
+    assert!(index
+        .capture_state_shared(&hyperconsciousness::crypto::random_key())
+        .is_err());
+    assert!(!index
+        .refresh_current(&store, &keys, Hash::of(b"different key view"))
+        .unwrap());
+}
+
+#[test]
+fn owner_can_disable_resident_views_without_disabling_authorization() {
+    let (_dir, identity, mut server) = setup();
+    server.resident_cache = false;
+    note(&server, &identity, "visible", PERSONAL);
+    note(&server, &identity, "hidden", grant::SECRET);
+    let output = server.call("search", &json!({"query":"visible"})).unwrap();
+    assert!(output.contains("visible"));
+    assert!(!output.contains("hidden"));
+    assert!(server.cache.lock().unwrap().is_none());
+    assert!(server.search_cache.lock().unwrap().is_none());
+    assert!(server.policy_cache.lock().unwrap().is_none());
+    append(
+        &server.dir,
+        &identity,
+        &json!({"kind":"revoke", "grant":server.chain[0].id().hex()}).to_string(),
+    )
+    .unwrap();
+    assert!(server.call("search", &json!({})).is_err());
+}

@@ -16,6 +16,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, File, OpenOptions};
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, OnceLock};
 
 use base64ct::{Base64UrlUnpadded, Encoding};
 use fs4::fs_std::FileExt;
@@ -33,18 +34,22 @@ use crate::log::{Head, LocatedRecord, RecordLocation, Store};
 use crate::query;
 use crate::record::Record;
 
-const MANIFEST_MAGIC: &[u8; 4] = b"BQM6";
-const SEGMENT_MAGIC: &[u8; 4] = b"BQS6";
-const POSTINGS_MAGIC: &[u8; 4] = b"BQP6";
-const SEGMENT_PLAINTEXT_MAGIC: &[u8; 8] = b"HCSMET06";
-const POSTINGS_PLAINTEXT_MAGIC: &[u8; 8] = b"HCSPOST6";
+const MANIFEST_MAGIC: &[u8; 4] = b"BQM7";
+const SEGMENT_MAGIC: &[u8; 4] = b"BQS7";
+const POSTINGS_MAGIC: &[u8; 4] = b"BQP7";
+const SEGMENT_PLAINTEXT_MAGIC: &[u8; 8] = b"HCSMET07";
+const POSTINGS_PLAINTEXT_MAGIC: &[u8; 8] = b"HCSPOST7";
 const HEADER_LEN: usize = 4 + 4 + NONCE_LEN;
-const MANIFEST_CONTEXT: &str = "hyperconsciousness encrypted search manifest v6";
-const SEGMENT_CONTEXT: &str = "hyperconsciousness encrypted search metadata segment v6";
-const POSTINGS_CONTEXT: &str = "hyperconsciousness encrypted search postings segment v6";
-const SEGMENT_NAME_CONTEXT: &str = "hyperconsciousness search segment file name v6";
+const MANIFEST_CONTEXT: &str = "hyperconsciousness encrypted search manifest v7";
+const SEGMENT_CONTEXT: &str = "hyperconsciousness encrypted search metadata segment v7";
+const POSTINGS_CONTEXT: &str = "hyperconsciousness encrypted search postings segment v7";
+const SEGMENT_NAME_CONTEXT: &str = "hyperconsciousness search segment file name v7";
 const GRAM_CONTEXT: &str = "hyperconsciousness case-folded search gram v1";
 const MAX_MANIFEST_BYTES: usize = 16 * 1024 * 1024;
+const MANIFEST_PAGE_BYTES: usize = 1024 * 1024;
+const MAX_MANIFEST_PAGES: usize = 128;
+const PAGE_MAGIC: &[u8; 4] = b"BQC7";
+const PAGE_CONTEXT: &str = "hyperconsciousness encrypted search directory page v7";
 const MAX_SEGMENT_BYTES: usize = 64 * 1024 * 1024;
 const MAX_AUTHORS: usize = 16_384;
 const MAX_SEGMENTS: usize = 1_000_000;
@@ -54,6 +59,11 @@ const MAX_LABEL_BYTES: usize = 256 * 1024;
 const MAX_TAGS_PER_ENTRY: usize = 65_536;
 const MAX_POSTINGS_PER_SEGMENT: usize = MAX_SEGMENT_BYTES / 12;
 const GRAM_FILTER_BYTES: usize = 1024;
+const MAX_GRAM_FILTER_BYTES: usize = 128 * 1024;
+const MAX_CAPTURE_CACHE_RECORDS: usize = 50_000;
+const MAX_CAPTURE_CACHE_BYTES: usize = 16 * 1024 * 1024;
+const MAX_READ_TAIL_RECORDS: usize = 10_000;
+const MAX_READ_TAIL_BYTES: usize = 64 * 1024 * 1024;
 const GRAM_FILTER_HASHES: u64 = 3;
 const BUILD_ATTEMPTS: usize = 3;
 
@@ -64,6 +74,8 @@ pub struct Index {
     fingerprint: Hash,
     heads: Vec<(DeviceId, Head)>,
     segments: Vec<SegmentRef>,
+    captures: OnceLock<Arc<crate::capture_state::State>>,
+    pages: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -77,6 +89,9 @@ struct SegmentRef {
     gram_filter: Vec<u8>,
     entries: u32,
     unindexed: u32,
+    managed: u32,
+    kinds: Option<Vec<String>>,
+    tags: Option<Vec<String>>,
     min_at: u64,
     max_at: u64,
     min_sensitivity: u8,
@@ -111,6 +126,13 @@ struct StoredManifest {
 }
 
 #[derive(Serialize, Deserialize)]
+struct StoredDirectory {
+    schema: String,
+    bytes: usize,
+    pages: Vec<String>,
+}
+
+#[derive(Serialize, Deserialize)]
 struct StoredHead {
     author: String,
     seq: u64,
@@ -129,6 +151,9 @@ struct StoredSegmentRef {
     gram_filter: String,
     entries: u32,
     unindexed: u32,
+    managed: u32,
+    kinds: Option<Vec<String>>,
+    tags: Option<Vec<String>>,
     min_at: u64,
     max_at: u64,
     min_sensitivity: u8,
@@ -143,32 +168,101 @@ enum SummaryAccess {
 }
 
 impl Index {
-    /// Whether a previous persistent fold exists. Long-lived query servers use
-    /// this hint to skip rebuilding the bounded plaintext snapshot after a
-    /// large brain has already selected the disk-backed path.
+    /// An owned capture projection for callers that need to update it locally.
     pub fn capture_state<K: DataKeys + ?Sized>(
         &self,
         keys: &K,
     ) -> Result<crate::capture_state::State> {
+        Ok((*self.capture_state_shared(keys)?).clone())
+    }
+
+    /// Reuse a bounded immutable projection under the exact usable-key view.
+    pub fn capture_state_shared<K: DataKeys + ?Sized>(
+        &self,
+        keys: &K,
+    ) -> Result<Arc<crate::capture_state::State>> {
+        let reusable = keys.cache_identity() == Some(self.fingerprint);
+        if let Some(state) = self.captures.get().filter(|_| reusable) {
+            return Ok(Arc::clone(state));
+        }
         let mut state = crate::capture_state::State::default();
-        // Never filter by the caller's grant or text: an unseen correction or
-        // tombstone must still suppress an old result that the grant permits.
-        self.visit(keys, None, |entry, _| {
-            if let Some(meta) = &entry.capture {
-                state.observe(
-                    meta.clone(),
-                    crate::capture_state::Stamp {
-                        id: entry.id,
-                        author: entry.author,
-                        seq: entry.seq,
-                        at: entry.hlc.millis,
-                        item: entry.item.clone(),
-                    },
-                );
+        // Corrections are folded independently of query scope. Authenticated
+        // summaries let ordinary history skip this projection entirely.
+        for descriptor in self.segments.iter().filter(|s| s.managed != 0) {
+            for entry in self.open_segment(keys, descriptor)?.entries {
+                if let Some(meta) = entry.capture {
+                    state.observe(
+                        meta,
+                        crate::capture_state::Stamp {
+                            id: entry.id,
+                            author: entry.author,
+                            seq: entry.seq,
+                            at: entry.hlc.millis,
+                            item: entry.item,
+                        },
+                    );
+                }
             }
-            Ok(())
-        })?;
+        }
+        let state = Arc::new(state);
+        if reusable
+            && state.cache_bytes() <= MAX_CAPTURE_CACHE_BYTES
+            && self
+                .segments
+                .iter()
+                .map(|s| s.managed as usize)
+                .sum::<usize>()
+                <= MAX_CAPTURE_CACHE_RECORDS
+        {
+            let _ = self.captures.set(Arc::clone(&state));
+        }
         Ok(state)
+    }
+
+    /// Refresh a process-local projection and publish after the newest disk generation.
+    /// The caller must discard this view when the usable-key fingerprint changes.
+    pub fn refresh_current<K: DataKeys + ?Sized>(
+        &mut self,
+        store: &Store,
+        keys: &K,
+        fingerprint: Hash,
+    ) -> Result<bool> {
+        if fingerprint != self.fingerprint {
+            return Ok(false);
+        }
+        if self.is_current(store)? {
+            return Ok(true);
+        }
+        let lock_path = cache_dir(&self.root).join("cache.lock");
+        guard::no_symlink(&lock_path)?;
+        let lock = OpenOptions::new().read(true).write(true).open(lock_path)?;
+        if !FileExt::try_lock_exclusive(&lock)? {
+            return Err(Error::Denied("search index is being refreshed"));
+        }
+        if !self.refresh(store, keys)? {
+            return Ok(false);
+        }
+        // Another process may have advanced the alternating slots since this
+        // resident view was built. Never publish a lower generation over it.
+        self.generation = Self::load_slots(&self.root, keys)?
+            .iter()
+            .map(|index| index.generation)
+            .fold(self.generation, u64::max)
+            .saturating_add(1);
+        self.save_manifest(keys)?;
+        Ok(true)
+    }
+
+    /// A read is a signed-prefix snapshot. Ordinary appends do not invalidate
+    /// it; verify the bounded tail at release and fail closed on corrections,
+    /// relevant revocations, forks, removal, or unreadable tail records.
+    pub(crate) fn validate_read<K: DataKeys + ?Sized>(
+        &self,
+        store: &Store,
+        keys: &K,
+        chain: &[Grant],
+    ) -> Result<()> {
+        validate_read_tail(store, keys, &self.heads, chain)
     }
 
     pub fn exists(root: &Path) -> bool {
@@ -233,7 +327,11 @@ impl Index {
         K: DataKeys + ?Sized,
         F: FnMut(&Entry, bool) -> Result<()>,
     {
-        self.visit_inner(keys, text, None, &mut visitor).map(|_| ())
+        self.visit_inner(keys, text, None, &mut |e, c| {
+            visitor(e, c)?;
+            Ok(None)
+        })
+        .map(|_| ())
     }
 
     /// Visit exact query candidates while preserving the full-scan withheld
@@ -242,6 +340,7 @@ impl Index {
     /// segment whose route filter excludes the query needs no metadata open; a
     /// fully denied segment contributes its exact entry count directly. Mixed
     /// scopes still open and evaluate every metadata entry.
+    #[cfg(test)]
     pub(crate) fn visit_query<K, F>(
         &self,
         keys: &K,
@@ -254,7 +353,24 @@ impl Index {
         K: DataKeys + ?Sized,
         F: FnMut(&Entry, bool) -> Result<()>,
     {
-        self.visit_inner(keys, text, Some((chain, now)), &mut visitor)
+        self.visit_inner(keys, text, Some((chain, now)), &mut |e, c| {
+            visitor(e, c)?;
+            Ok(None)
+        })
+    }
+
+    pub(crate) fn visit_ranked<K, F>(
+        &self,
+        keys: &K,
+        text: Option<&str>,
+        access: Option<(&[Grant], u64)>,
+        mut visitor: F,
+    ) -> Result<usize>
+    where
+        K: DataKeys + ?Sized,
+        F: FnMut(&Entry, bool) -> Result<Option<u64>>,
+    {
+        self.visit_inner(keys, text, access, &mut visitor)
     }
 
     fn visit_inner<K, F>(
@@ -266,16 +382,24 @@ impl Index {
     ) -> Result<usize>
     where
         K: DataKeys + ?Sized,
-        F: FnMut(&Entry, bool) -> Result<()>,
+        F: FnMut(&Entry, bool) -> Result<Option<u64>>,
     {
         let query_grams = text.and_then(|text| normalized_grams(text.as_bytes()));
         let mut bulk_withheld = 0usize;
-        for descriptor in &self.segments {
+        let mut floor = None;
+        let mut descriptors: Vec<_> = self.segments.iter().collect();
+        descriptors
+            .sort_unstable_by_key(|s| std::cmp::Reverse((s.max_at, s.author, s.log_segment)));
+        for descriptor in descriptors {
             let summary_access = access
                 .map(|(chain, now)| descriptor.summary_access(chain, now))
                 .unwrap_or(SummaryAccess::Mixed);
             if summary_access == SummaryAccess::None {
                 bulk_withheld = bulk_withheld.saturating_add(descriptor.entries as usize);
+                continue;
+            }
+            let older = floor.is_some_and(|at| descriptor.max_at < at);
+            if summary_access == SummaryAccess::All && older {
                 continue;
             }
             let routed_out = query_grams
@@ -286,6 +410,7 @@ impl Index {
             }
             let mut segment = self.open_segment(keys, descriptor)?;
             let candidates = match query_grams.as_ref() {
+                _ if older => Some(BTreeSet::new()),
                 None => None,
                 Some(grams) if grams.is_empty() => None,
                 Some(grams) if descriptor.maybe_contains_all(grams) => {
@@ -294,11 +419,13 @@ impl Index {
                 }
                 Some(_) => Some(segment.unindexed_candidates()),
             };
-            for (position, entry) in segment.entries.iter().enumerate() {
+            let mut ordered: Vec<_> = segment.entries.iter().enumerate().collect();
+            ordered.sort_unstable_by_key(|(_, e)| std::cmp::Reverse((e.hlc, e.author, e.seq)));
+            for (position, entry) in ordered {
                 let candidate = candidates
                     .as_ref()
                     .is_none_or(|positions| positions.contains(&(position as u32)));
-                visitor(entry, candidate)?;
+                floor = visitor(entry, candidate)?.or(floor);
             }
         }
         Ok(bulk_withheld)
@@ -337,6 +464,8 @@ impl Index {
             fingerprint,
             heads: heads.clone(),
             segments: Vec::new(),
+            captures: OnceLock::new(),
+            pages: Vec::new(),
         };
 
         for (author, expected) in &heads {
@@ -364,6 +493,10 @@ impl Index {
                 return Err(Error::Malformed("too many authors for search index"));
             }
             let mut next = self.clone();
+            next.captures = OnceLock::new();
+            let mut capture_tail = Vec::new();
+            let mut can_reuse_captures =
+                keys.cache_identity() == Some(self.fingerprint) && self.captures.get().is_some();
 
             for (author, old_head) in &self.heads {
                 let Some((_, current)) = before.iter().find(|(candidate, _)| candidate == author)
@@ -387,6 +520,21 @@ impl Index {
                     current,
                     log.iter_located_tail_from(old_head.seq + 1)?,
                     |located| {
+                        if can_reuse_captures {
+                            if let Ok(payload) = keys.open_record(&located.record) {
+                                if let Some(meta) =
+                                    crate::capture_state::Meta::from_payload(&payload)?
+                                {
+                                    capture_tail.push((
+                                        meta,
+                                        crate::capture_state::Stamp::new(
+                                            &located.record,
+                                            query::classify(&payload, located.record.hlc.millis),
+                                        ),
+                                    ));
+                                }
+                            }
+                        }
                         affected.insert(located.location.segment);
                         Ok(())
                     },
@@ -403,6 +551,7 @@ impl Index {
                 if self.heads.iter().any(|(known, _)| known == author) {
                     continue;
                 }
+                can_reuse_captures = false;
                 let log = store.log(*author)?;
                 if !next.rebuild_segments(keys, *author, current, log.iter_located()?)? {
                     return Ok(false);
@@ -413,6 +562,22 @@ impl Index {
                 next.heads = before;
                 next.segments
                     .sort_by_key(|segment| (segment.author, segment.log_segment));
+                if can_reuse_captures
+                    && next
+                        .segments
+                        .iter()
+                        .map(|s| s.managed as usize)
+                        .sum::<usize>()
+                        <= MAX_CAPTURE_CACHE_RECORDS
+                {
+                    let mut state = Arc::clone(self.captures.get().expect("checked capture cache"));
+                    for (meta, stamp) in capture_tail {
+                        Arc::make_mut(&mut state).observe(meta, stamp);
+                    }
+                    if state.cache_bytes() <= MAX_CAPTURE_CACHE_BYTES {
+                        let _ = next.captures.set(state);
+                    }
+                }
                 *self = next;
                 return Ok(true);
             }
@@ -578,6 +743,18 @@ impl Index {
             postings_file,
             postings_ciphertext: postings_hash,
             gram_filter: build_gram_filter(segment.grams.keys().copied()),
+            managed: segment
+                .entries
+                .iter()
+                .filter(|e| e.capture.is_some())
+                .count() as u32,
+            kinds: label_summary(segment.entries.iter().map(|e| e.item.kind.as_str())),
+            tags: label_summary(
+                segment
+                    .entries
+                    .iter()
+                    .flat_map(|e| e.item.tags.iter().map(String::as_str)),
+            ),
             entries: segment.entries.len() as u32,
             unindexed: segment
                 .entries
@@ -631,8 +808,48 @@ impl Index {
             let Ok(plaintext) = open_bytes(MANIFEST_MAGIC, MANIFEST_CONTEXT, keys, &bytes) else {
                 continue;
             };
-            if let Ok(index) = Self::decode_manifest(root, &plaintext) {
-                indexes.push(index);
+            let Ok(directory) = serde_json::from_slice::<StoredDirectory>(&plaintext) else {
+                continue;
+            };
+            if directory.schema != "hyperconsciousness.search-directory.v7"
+                || directory.pages.is_empty()
+                || directory.pages.len() > MAX_MANIFEST_PAGES
+                || directory.bytes > MAX_MANIFEST_PAGES * MANIFEST_PAGE_BYTES
+                || directory.bytes.div_ceil(MANIFEST_PAGE_BYTES) != directory.pages.len()
+            {
+                continue;
+            }
+            let assembled = (|| -> Result<Vec<u8>> {
+                let mut assembled = Vec::new();
+                for name in &directory.pages {
+                    let hash = Hash::from_hex(name)
+                        .filter(|h| h.hex() == *name)
+                        .ok_or(Error::Malformed("invalid search directory page"))?;
+                    let bytes = durable::read_bounded(
+                        &segments_dir(root).join(name),
+                        MANIFEST_PAGE_BYTES + HEADER_LEN + 16,
+                    )?;
+                    if Hash::of(&bytes) != hash {
+                        return Err(Error::Denied("search directory page changed"));
+                    }
+                    let page = open_bytes(PAGE_MAGIC, PAGE_CONTEXT, keys, &bytes)?;
+                    if page.len() > MANIFEST_PAGE_BYTES
+                        || assembled.len().saturating_add(page.len()) > directory.bytes
+                    {
+                        return Err(Error::Malformed("search directory page exceeds bound"));
+                    }
+                    assembled.extend(page);
+                }
+                if assembled.len() != directory.bytes {
+                    return Err(Error::Malformed("incomplete search directory"));
+                }
+                Ok(assembled)
+            })();
+            if let Ok(assembled) = assembled {
+                if let Ok(mut index) = Self::decode_manifest(root, &assembled) {
+                    index.pages = directory.pages;
+                    indexes.push(index);
+                }
             }
         }
         Ok(indexes)
@@ -640,7 +857,26 @@ impl Index {
 
     fn save_manifest<K: DataKeys + ?Sized>(&self, keys: &K) -> Result<()> {
         let plaintext = self.encode_manifest()?;
-        let bytes = seal_bytes(MANIFEST_MAGIC, MANIFEST_CONTEXT, keys, &plaintext)?;
+        let max = MAX_MANIFEST_PAGES * MANIFEST_PAGE_BYTES;
+        if plaintext.len() > max {
+            return Err(Error::TooLarge {
+                got: plaintext.len(),
+                max,
+            });
+        }
+        let mut pages = Vec::new();
+        for page in plaintext.chunks(MANIFEST_PAGE_BYTES) {
+            let bytes = seal_bytes(PAGE_MAGIC, PAGE_CONTEXT, keys, page)?;
+            let name = Hash::of(&bytes).hex();
+            durable::write_private(&segments_dir(&self.root).join(&name), &bytes)?;
+            pages.push(name);
+        }
+        let directory = serde_json::to_vec(&StoredDirectory {
+            schema: "hyperconsciousness.search-directory.v7".into(),
+            bytes: plaintext.len(),
+            pages,
+        })?;
+        let bytes = seal_bytes(MANIFEST_MAGIC, MANIFEST_CONTEXT, keys, &directory)?;
         if bytes.len() > MAX_MANIFEST_BYTES {
             return Err(Error::TooLarge {
                 got: bytes.len(),
@@ -663,6 +899,7 @@ impl Index {
             .flat_map(|segment| [segment.file.clone(), segment.postings_file.clone()])
             .collect();
         for index in Self::load_slots(&self.root, keys)? {
+            retained.extend(index.pages);
             retained.extend(
                 index
                     .segments
@@ -689,7 +926,7 @@ impl Index {
 
     fn encode_manifest(&self) -> Result<Vec<u8>> {
         let stored = StoredManifest {
-            schema: "hyperconsciousness.search-manifest.v6".to_string(),
+            schema: "hyperconsciousness.search-manifest.v7".to_string(),
             generation: self.generation,
             fingerprint: self.fingerprint.hex(),
             heads: self
@@ -715,6 +952,9 @@ impl Index {
                     gram_filter: Base64UrlUnpadded::encode_string(&segment.gram_filter),
                     entries: segment.entries,
                     unindexed: segment.unindexed,
+                    managed: segment.managed,
+                    kinds: segment.kinds.clone(),
+                    tags: segment.tags.clone(),
                     min_at: segment.min_at,
                     max_at: segment.max_at,
                     min_sensitivity: segment.min_sensitivity,
@@ -727,7 +967,7 @@ impl Index {
 
     fn decode_manifest(root: &Path, bytes: &[u8]) -> Result<Self> {
         let stored: StoredManifest = serde_json::from_slice(bytes)?;
-        if stored.schema != "hyperconsciousness.search-manifest.v6"
+        if stored.schema != "hyperconsciousness.search-manifest.v7"
             || stored.heads.len() > MAX_AUTHORS
             || stored.segments.len() > MAX_SEGMENTS
         {
@@ -770,6 +1010,15 @@ impl Index {
                     .all(|byte| byte.is_ascii_hexdigit())
                 || segment.entries as usize > MAX_ENTRIES_PER_SEGMENT
                 || segment.unindexed > segment.entries
+                || segment.managed > segment.entries
+                || [&segment.kinds, &segment.tags]
+                    .into_iter()
+                    .flatten()
+                    .any(|labels| {
+                        labels.len() > 64
+                            || labels.iter().map(String::len).sum::<usize>() > 4096
+                            || !labels.windows(2).all(|p| p[0] < p[1])
+                    })
                 || segment.entries == 0
                 || segment.min_at > segment.max_at
                 || segment.min_sensitivity > segment.max_sensitivity
@@ -782,7 +1031,7 @@ impl Index {
                 .ok_or(Error::Malformed("invalid search postings hash"))?;
             let gram_filter = Base64UrlUnpadded::decode_vec(&segment.gram_filter)
                 .map_err(|_| Error::Malformed("invalid search gram filter"))?;
-            if gram_filter.len() != GRAM_FILTER_BYTES {
+            if !(GRAM_FILTER_BYTES..=MAX_GRAM_FILTER_BYTES).contains(&gram_filter.len()) {
                 return Err(Error::Malformed("invalid search gram filter"));
             }
             segments.push(SegmentRef {
@@ -795,6 +1044,9 @@ impl Index {
                 gram_filter,
                 entries: segment.entries,
                 unindexed: segment.unindexed,
+                managed: segment.managed,
+                kinds: segment.kinds,
+                tags: segment.tags,
                 min_at: segment.min_at,
                 max_at: segment.max_at,
                 min_sensitivity: segment.min_sensitivity,
@@ -813,8 +1065,85 @@ impl Index {
             fingerprint,
             heads,
             segments,
+            captures: OnceLock::new(),
+            pages: Vec::new(),
         })
     }
+}
+
+/// Verify a bounded append-only suffix before releasing a prefix read. Callers
+/// must separately recheck the runtime key view, expiration and membership.
+pub fn validate_read_tail<K: DataKeys + ?Sized>(
+    store: &Store,
+    keys: &K,
+    heads: &[(DeviceId, Head)],
+    chain: &[Grant],
+) -> Result<()> {
+    let mut verified = heads.to_vec();
+    let mut count = 0usize;
+    let mut bytes = 0usize;
+    for _ in 0..BUILD_ATTEMPTS {
+        let heads = verified.as_slice();
+        let current = store.cache_heads()?;
+        for (author, old) in heads {
+            if !current.iter().any(|(id, head)| {
+                id == author && (head == old || (!head.empty && (old.empty || head.seq > old.seq)))
+            }) {
+                return Err(Error::Denied("search snapshot prefix changed"));
+            }
+        }
+        for (author, head) in &current {
+            let old = heads
+                .iter()
+                .find(|(id, _)| id == author)
+                .map(|(_, h)| *h)
+                .unwrap_or_else(empty_head);
+            if old == *head {
+                continue;
+            }
+            let start = if old.empty {
+                0
+            } else {
+                old.seq.saturating_add(1)
+            };
+            let valid = visit_tail(
+                *author,
+                old,
+                head,
+                store.log(*author)?.iter_located_tail_from(start)?,
+                |located| {
+                    count += 1;
+                    bytes = bytes.saturating_add(located.location.length as usize);
+                    if count > MAX_READ_TAIL_RECORDS || bytes > MAX_READ_TAIL_BYTES {
+                        return Err(Error::Denied("search snapshot tail exceeds read budget"));
+                    }
+                    let payload = keys.open_record(&located.record)?;
+                    if crate::capture_state::Meta::from_payload(&payload)?.is_some() {
+                        return Err(Error::Denied("capture history changed during read"));
+                    }
+                    if let Ok(value) = serde_json::from_slice::<serde_json::Value>(&payload) {
+                        if value["kind"] == "revoke"
+                            && value["grant"]
+                                .as_str()
+                                .and_then(Hash::from_hex)
+                                .is_some_and(|id| chain.iter().any(|g| g.id() == id))
+                        {
+                            return Err(Error::Denied("grant revoked during read"));
+                        }
+                    }
+                    Ok(())
+                },
+            )?;
+            if !valid {
+                return Err(Error::Denied("search snapshot tail changed"));
+            }
+        }
+        if current == store.cache_heads()? {
+            return Ok(());
+        }
+        verified = current;
+    }
+    Err(Error::Denied("read tail changed throughout release check"))
 }
 
 impl Segment {
@@ -1009,6 +1338,19 @@ impl Segment {
         let max_sensitivity = entries.iter().map(|entry| entry.item.sensitivity).max();
         if entries.len() != descriptor.entries as usize
             || unindexed != descriptor.unindexed as usize
+            || entries.iter().filter(|e| e.capture.is_some()).count() != descriptor.managed as usize
+            || descriptor.kinds.as_ref().is_some_and(|kinds| {
+                Some(kinds) != label_summary(entries.iter().map(|e| e.item.kind.as_str())).as_ref()
+            })
+            || descriptor.tags.as_ref().is_some_and(|tags| {
+                Some(tags)
+                    != label_summary(
+                        entries
+                            .iter()
+                            .flat_map(|e| e.item.tags.iter().map(String::as_str)),
+                    )
+                    .as_ref()
+            })
             || min_at != Some(descriptor.min_at)
             || max_at != Some(descriptor.max_at)
             || min_sensitivity != Some(descriptor.min_sensitivity)
@@ -1125,7 +1467,17 @@ impl SegmentRef {
             let denies_all = self.min_sensitivity > scope.max_sensitivity
                 || self.min_sensitivity > SECRET
                 || scope.after.is_some_and(|after| self.max_at < after)
-                || scope.before.is_some_and(|before| self.min_at >= before);
+                || scope.before.is_some_and(|before| self.min_at >= before)
+                || (!scope.kinds.is_empty()
+                    && self
+                        .kinds
+                        .as_ref()
+                        .is_some_and(|kinds| !kinds.iter().any(|k| scope.kinds.contains(k))))
+                || (!scope.tags.is_empty()
+                    && self
+                        .tags
+                        .as_ref()
+                        .is_some_and(|tags| !tags.iter().any(|t| scope.tags.contains(t))));
             if denies_all {
                 return SummaryAccess::None;
             }
@@ -1133,7 +1485,11 @@ impl SegmentRef {
                 && self.max_sensitivity <= SECRET
                 && scope.after.is_none_or(|after| self.min_at >= after)
                 && scope.before.is_none_or(|before| self.max_at < before)
-                && scope.kinds.is_empty()
+                && (scope.kinds.is_empty()
+                    || self
+                        .kinds
+                        .as_ref()
+                        .is_some_and(|kinds| kinds.iter().all(|k| scope.kinds.contains(k))))
                 && scope.tags.is_empty();
             all &= allows_all;
         }
@@ -1324,10 +1680,32 @@ fn grams(bytes: &[u8]) -> Option<BTreeSet<u64>> {
     Some(grams)
 }
 
+fn label_summary<'a>(labels: impl Iterator<Item = &'a str>) -> Option<Vec<String>> {
+    let mut unique = BTreeSet::new();
+    let mut bytes = 0usize;
+    for label in labels {
+        if unique.insert(label) {
+            bytes = bytes.saturating_add(label.len());
+        }
+        if unique.len() > 64 || bytes > 4096 {
+            return None;
+        }
+    }
+    Some(unique.into_iter().map(str::to_owned).collect())
+}
+
 fn build_gram_filter(grams: impl Iterator<Item = u64>) -> Vec<u8> {
-    let mut filter = vec![0u8; GRAM_FILTER_BYTES];
+    let grams: Vec<_> = grams.collect();
+    // Twelve bits per distinct gram keeps diverse text from saturating a
+    // fixed 1 KiB route filter. The cap bounds attacker-controlled allocation.
+    let size = grams
+        .len()
+        .saturating_mul(12)
+        .div_ceil(8)
+        .clamp(GRAM_FILTER_BYTES, MAX_GRAM_FILTER_BYTES);
+    let mut filter = vec![0u8; size];
     for gram in grams {
-        for bit in gram_filter_bits(gram) {
+        for bit in gram_filter_bits(gram, size) {
             filter[bit / 8] |= 1 << (bit % 8);
         }
     }
@@ -1335,19 +1713,19 @@ fn build_gram_filter(grams: impl Iterator<Item = u64>) -> Vec<u8> {
 }
 
 fn gram_filter_contains(filter: &[u8], gram: u64) -> bool {
-    filter.len() == GRAM_FILTER_BYTES
-        && gram_filter_bits(gram)
+    (GRAM_FILTER_BYTES..=MAX_GRAM_FILTER_BYTES).contains(&filter.len())
+        && gram_filter_bits(gram, filter.len())
             .into_iter()
             .all(|bit| filter[bit / 8] & (1 << (bit % 8)) != 0)
 }
 
-fn gram_filter_bits(gram: u64) -> [usize; GRAM_FILTER_HASHES as usize] {
+fn gram_filter_bits(gram: u64, bytes: usize) -> [usize; GRAM_FILTER_HASHES as usize] {
     let first = gram;
     let second = gram.rotate_left(29) | 1;
     std::array::from_fn(|index| {
         first
             .wrapping_add((index as u64).wrapping_mul(second))
-            .wrapping_rem((GRAM_FILTER_BYTES * 8) as u64) as usize
+            .wrapping_rem((bytes * 8) as u64) as usize
     })
 }
 
@@ -1501,6 +1879,343 @@ mod tests {
         }
     }
 
+    struct RacingKeys<'a> {
+        key: &'a [u8; 32],
+        store: &'a Store,
+        signing: &'a SigningKey,
+        payload: String,
+        fired: Cell<bool>,
+    }
+    impl DataKeys for RacingKeys<'_> {
+        fn current_epoch(&self) -> u32 {
+            1
+        }
+        fn key(&self, _: u32) -> Result<&[u8; 32]> {
+            Ok(self.key)
+        }
+        fn open_record(&self, record: &Record) -> Result<Vec<u8>> {
+            if !self.fired.replace(true) {
+                append(
+                    self.store,
+                    self.signing,
+                    self.key,
+                    std::slice::from_ref(&self.payload),
+                );
+            }
+            record.open(self.key)
+        }
+    }
+
+    #[test]
+    fn prefix_search_survives_ordinary_appends_but_rejects_revocation_and_corrections() {
+        for mode in ["ordinary", "revoke", "correction"] {
+            let root = tempfile::tempdir().unwrap();
+            let store = Store::open(root.path()).unwrap();
+            let signing = SigningKey::generate(&mut OsRng);
+            let key = random_key();
+            let authority = DeviceId(signing.verifying_key().to_bytes());
+            let grant =
+                Grant::issue(&signing, authority, Scope::everything(), READ, u64::MAX).unwrap();
+            append(
+                &store,
+                &signing,
+                &key,
+                &[r#"{"kind":"note","text":"needle"}"#.into()],
+            );
+            let index =
+                Index::load_or_build(root.path(), &store, &key, Hash::of(key.as_slice())).unwrap();
+            let permissions = crate::revocation::Index::load_or_build(
+                root.path(),
+                &store,
+                &key,
+                Hash::of(key.as_slice()),
+            )
+            .unwrap();
+            let payload = match mode {
+                "revoke" => serde_json::json!({"kind":"revoke", "grant":grant.id().hex()}),
+                "correction" => serde_json::json!({"kind":"note", "provenance":"grant_write_v1",
+                    "grantee":authority.hex(), "context":{"producer":"test","source_id":"chat","record_id":"one"},
+                    "capture_change":{"version":2,"operation":"retract"}}),
+                _ => serde_json::json!({"kind":"note", "text":"later note"}),
+            }.to_string();
+            let keys = RacingKeys {
+                key: &key,
+                store: &store,
+                signing: &signing,
+                payload,
+                fired: Cell::new(false),
+            };
+            let result = query::look_indexed(
+                &store,
+                &keys,
+                &index,
+                &permissions,
+                &[grant],
+                authority,
+                1,
+                &query::Filter {
+                    text: Some("needle".into()),
+                    ..Default::default()
+                },
+            );
+            assert!(keys.fired.get());
+            if mode == "ordinary" {
+                assert_eq!(result.unwrap().records.len(), 1);
+            } else {
+                assert!(result.is_err(), "{mode} must invalidate the response");
+            }
+        }
+    }
+
+    #[test]
+    fn tail_validation_catches_a_revocation_appended_during_validation_itself() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::open(root.path()).unwrap();
+        let signing = SigningKey::generate(&mut OsRng);
+        let key = random_key();
+        let authority = DeviceId(signing.verifying_key().to_bytes());
+        let grant = Grant::issue(&signing, authority, Scope::everything(), READ, u64::MAX).unwrap();
+        append(&store, &signing, &key, &["initial".into()]);
+        let heads = store.cache_heads().unwrap();
+        append(&store, &signing, &key, &["ordinary tail".into()]);
+        let keys = RacingKeys {
+            key: &key,
+            store: &store,
+            signing: &signing,
+            payload: serde_json::json!({"kind":"revoke","grant":grant.id().hex()}).to_string(),
+            fired: Cell::new(false),
+        };
+        assert!(validate_read_tail(&store, &keys, &heads, &[grant]).is_err());
+    }
+
+    #[test]
+    fn newest_window_bounds_common_query_body_opens_and_preserves_pagination() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::open(root.path()).unwrap();
+        let signing = SigningKey::generate(&mut OsRng);
+        let key = random_key();
+        append(
+            &store,
+            &signing,
+            &key,
+            &(0..1000)
+                .map(|n| format!(r#"{{"kind":"note","text":"common {n}"}}"#))
+                .collect::<Vec<_>>(),
+        );
+        let keys = CountingKeys {
+            key: key.clone(),
+            opened: Cell::new(0),
+        };
+        let index =
+            Index::load_or_build(root.path(), &store, &keys, Hash::of(key.as_slice())).unwrap();
+        let permissions = crate::revocation::Index::load_or_build(
+            root.path(),
+            &store,
+            &keys,
+            Hash::of(key.as_slice()),
+        )
+        .unwrap();
+        let authority = DeviceId(signing.verifying_key().to_bytes());
+        let grant = Grant::issue(&signing, authority, Scope::everything(), READ, u64::MAX).unwrap();
+        let mut filter = query::Filter {
+            text: Some("common".into()),
+            limit: 20,
+            ..Default::default()
+        };
+        for expected_last in [999, 979] {
+            keys.opened.set(0);
+            let result = query::look_indexed(
+                &store,
+                &keys,
+                &index,
+                &permissions,
+                std::slice::from_ref(&grant),
+                authority,
+                1,
+                &filter,
+            )
+            .unwrap();
+            assert_eq!(result.records.len(), 20);
+            assert_eq!(result.records.last().unwrap().seq, expected_last);
+            assert!(result.truncated);
+            assert!(
+                keys.opened.get() <= 21,
+                "must decrypt only the page plus one match"
+            );
+            filter.before = Some(result.records[0].order_key());
+        }
+    }
+
+    #[test]
+    fn resident_refresh_never_rolls_back_another_process_generation() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::open(root.path()).unwrap();
+        let signing = SigningKey::generate(&mut OsRng);
+        let key = random_key();
+        let fingerprint = Hash::of(key.as_slice());
+        append(&store, &signing, &key, &["first".into()]);
+        let mut resident = Index::load_or_build(root.path(), &store, &key, fingerprint).unwrap();
+        for _ in 0..3 {
+            append(&store, &signing, &key, &["external writer".into()]);
+            Index::load_or_build(root.path(), &store, &key, fingerprint).unwrap();
+        }
+        let before = Index::load_slots(root.path(), &key)
+            .unwrap()
+            .iter()
+            .map(|i| i.generation)
+            .max()
+            .unwrap();
+        assert!(resident.refresh_current(&store, &key, fingerprint).unwrap());
+        assert!(resident.generation > before);
+        assert_eq!(
+            Index::load_or_build(root.path(), &store, &key, fingerprint)
+                .unwrap()
+                .generation,
+            resident.generation
+        );
+    }
+
+    #[test]
+    fn ordered_queries_preserve_equal_clock_multi_author_pages_and_scope() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::open(root.path()).unwrap();
+        let keys = random_key();
+        let signers: Vec<_> = (0..4).map(|_| SigningKey::generate(&mut OsRng)).collect();
+        for signer in &signers {
+            let author = DeviceId(signer.verifying_key().to_bytes());
+            let log = store.log_for_write(author).unwrap();
+            let mut cursor = log.cache_head().unwrap();
+            for seq in 0..30 {
+                let payload = serde_json::json!({"kind":"note","text":"Café 家族 common",
+                    "sensitivity":if seq % 2 == 0 { NORMAL } else { SECRET }})
+                .to_string();
+                let record = Record::create(
+                    signer,
+                    seq,
+                    cursor.id,
+                    Hlc {
+                        millis: 1000,
+                        counter: 0,
+                    },
+                    1,
+                    &keys,
+                    payload.as_bytes(),
+                )
+                .unwrap();
+                log.append_new_batch(&[record], &mut cursor).unwrap();
+            }
+        }
+        let index =
+            Index::load_or_build(root.path(), &store, &keys, Hash::of(keys.as_slice())).unwrap();
+        let permissions = crate::revocation::Index::load_or_build(
+            root.path(),
+            &store,
+            &keys,
+            Hash::of(keys.as_slice()),
+        )
+        .unwrap();
+        let authority = DeviceId(signers[0].verifying_key().to_bytes());
+        let grant = Grant::issue(&signers[0], authority, Scope::default(), READ, u64::MAX).unwrap();
+        let mut filter = query::Filter {
+            text: Some("CAFÉ".into()),
+            limit: 7,
+            ..Default::default()
+        };
+        for _ in 0..10 {
+            let indexed = query::look_indexed(
+                &store,
+                &keys,
+                &index,
+                &permissions,
+                std::slice::from_ref(&grant),
+                authority,
+                1,
+                &filter,
+            )
+            .unwrap();
+            let streamed = query::look(
+                &store,
+                &keys,
+                std::slice::from_ref(&grant),
+                authority,
+                1,
+                &filter,
+            )
+            .unwrap();
+            assert_eq!(
+                indexed.records.iter().map(Record::id).collect::<Vec<_>>(),
+                streamed.records.iter().map(Record::id).collect::<Vec<_>>()
+            );
+            assert_eq!(indexed.truncated, streamed.truncated);
+            assert_eq!(indexed.withheld, streamed.withheld);
+            if !indexed.truncated {
+                break;
+            }
+            filter.before = Some(indexed.records[0].order_key());
+        }
+    }
+
+    #[test]
+    fn adaptive_route_filter_has_no_false_negatives_for_diverse_grams() {
+        let grams: Vec<u64> = (0u64..40_000)
+            .map(|n| {
+                let hash = Hash::of(&n.to_be_bytes());
+                u64::from_be_bytes(hash.0[..8].try_into().unwrap())
+            })
+            .collect();
+        let filter = build_gram_filter(grams.iter().copied());
+        assert!(filter.len() > GRAM_FILTER_BYTES);
+        assert!(filter.len() <= MAX_GRAM_FILTER_BYTES);
+        assert!(grams.iter().all(|g| gram_filter_contains(&filter, *g)));
+        let false_positives = (40_000u64..50_000)
+            .filter(|n| {
+                let hash = Hash::of(&n.to_be_bytes());
+                gram_filter_contains(&filter, u64::from_be_bytes(hash.0[..8].try_into().unwrap()))
+            })
+            .count();
+        assert!(false_positives < 500, "route filter unexpectedly saturated");
+        assert!(!gram_filter_contains(&[], 1));
+    }
+
+    #[test]
+    fn paged_manifest_survives_flat_limit_and_recovers_from_missing_page() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::open(root.path()).unwrap();
+        let signing = SigningKey::generate(&mut OsRng);
+        let key = random_key();
+        append(&store, &signing, &key, &["one".into()]);
+        let mut index =
+            Index::load_or_build(root.path(), &store, &key, Hash::of(key.as_slice())).unwrap();
+        let descriptor = index.segments[0].clone();
+        index.segments = (0..9000)
+            .map(|n| {
+                let mut d = descriptor.clone();
+                d.log_segment = n;
+                d
+            })
+            .collect();
+        assert!(index.encode_manifest().unwrap().len() > MAX_MANIFEST_BYTES);
+        index.generation += 1;
+        index.save_manifest(&key).unwrap();
+        let loaded = Index::load_slots(root.path(), &key).unwrap();
+        let newest = loaded.iter().max_by_key(|i| i.generation).unwrap();
+        assert_eq!(newest.segments.len(), 9000);
+        assert!(newest.pages.len() > 16);
+        assert!(
+            fs::metadata(&manifest_paths(root.path())[(index.generation % 2) as usize])
+                .unwrap()
+                .len()
+                < 16_000
+        );
+        fs::remove_file(segments_dir(root.path()).join(&newest.pages[3])).unwrap();
+        let recovered = Index::load_slots(root.path(), &key).unwrap();
+        assert_eq!(recovered.len(), 1);
+        assert_eq!(recovered[0].segments.len(), 1);
+        assert!(Index::load_slots(root.path(), &random_key())
+            .unwrap()
+            .is_empty());
+    }
+
     fn append(store: &Store, signing: &SigningKey, key: &[u8; 32], payloads: &[String]) {
         let log = store
             .log_for_write(DeviceId(signing.verifying_key().to_bytes()))
@@ -1543,7 +2258,7 @@ mod tests {
             ],
         );
         let keys = CountingKeys {
-            key,
+            key: key.clone(),
             opened: Cell::new(0),
         };
         let fingerprint = Hash::of(b"search index test keys");
@@ -1766,6 +2481,9 @@ mod tests {
             gram_filter: build_gram_filter(std::iter::once(17)),
             entries: 1,
             unindexed: 0,
+            managed: 0,
+            kinds: None,
+            tags: None,
             min_at: 42,
             max_at: 42,
             min_sensitivity: NORMAL,
@@ -1877,6 +2595,9 @@ mod tests {
             gram_filter: build_gram_filter(std::iter::once(23)),
             entries: 100_000,
             unindexed: 0,
+            managed: 0,
+            kinds: None,
+            tags: None,
             min_at: 0,
             max_at: 0,
             min_sensitivity: NORMAL,
@@ -1949,7 +2670,7 @@ mod tests {
             .collect();
         append(&store, &signing, &key, &payloads);
         let keys = CountingKeys {
-            key,
+            key: key.clone(),
             opened: Cell::new(0),
         };
         let fingerprint = Hash::of(b"indexed query test keys");
@@ -2082,7 +2803,7 @@ mod tests {
             .collect();
         append(&store, &signing, &key, &payloads);
         let keys = CountingKeys {
-            key,
+            key: key.clone(),
             opened: Cell::new(0),
         };
         let fingerprint = Hash::of(b"persistent search benchmark keys");

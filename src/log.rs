@@ -487,13 +487,15 @@ impl Log {
     /// Read one wire-sized page without loading an author's entire history.
     /// Segments remain the durable index; the page boundary is always between
     /// complete records and at least one record is returned when one fits.
+    /// Seek by segment sequence; this is not an integrity scan of older bytes.
+    /// Receivers still verify every delivered signature and predecessor link.
     pub fn read_page(&self, from_seq: u64, max_bytes: usize) -> Result<Vec<Record>> {
         if max_bytes == 0 {
             return Err(Error::TooLarge { got: 1, max: 0 });
         }
         let mut out = Vec::new();
         let mut page_bytes = 0usize;
-        for located in self.iter_located()? {
+        for located in self.iter_located_tail_from(from_seq)? {
             let located = located?;
             let record = located.record;
             let used = located.location.length as usize;

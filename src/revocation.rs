@@ -185,16 +185,19 @@ impl Index {
     /// fingerprint, so resolving a short id never requires opening unrelated
     /// memory records again.
     pub fn grant_chain(&self, prefix: &str) -> Result<Vec<Grant>> {
-        let matches: Vec<&String> = self
+        // A BTree range seeks directly to an exact id or prefix. Inspect at
+        // most two matching ids to distinguish absence from ambiguity.
+        let mut matches = self
             .grants
-            .keys()
-            .filter(|id| id.starts_with(prefix))
-            .collect();
-        let mut at = match matches.len() {
-            1 => matches[0].clone(),
-            0 => return Err(Error::Malformed("no usable grant starts with that")),
-            _ => return Err(Error::Malformed("that prefix matches several grants")),
-        };
+            .range(prefix.to_owned()..)
+            .take_while(|(id, _)| id.starts_with(prefix));
+        let mut at = matches
+            .next()
+            .map(|(id, _)| id.clone())
+            .ok_or(Error::Malformed("no usable grant starts with that"))?;
+        if matches.next().is_some() {
+            return Err(Error::Malformed("that prefix matches several grants"));
+        }
 
         let mut chain = Vec::new();
         loop {
@@ -245,6 +248,23 @@ impl Index {
 
     pub fn is_current(&self, store: &Store) -> Result<bool> {
         Ok(self.heads == store.cache_heads()?)
+    }
+
+    /// Update the existing verified process fold. A key-view change requires
+    /// a rebuild; no stale fold is returned when catch-up fails.
+    pub fn refresh_current<K: DataKeys + ?Sized>(
+        &mut self,
+        store: &Store,
+        keys: &K,
+        fingerprint: Hash,
+    ) -> Result<bool> {
+        if self.fingerprint != fingerprint {
+            return Ok(false);
+        }
+        if self.is_current(store)? {
+            return Ok(true);
+        }
+        self.refresh(store, keys)
     }
 
     fn refresh<K: DataKeys + ?Sized>(&mut self, store: &Store, keys: &K) -> Result<bool> {

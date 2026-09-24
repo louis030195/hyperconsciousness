@@ -179,7 +179,7 @@ pub fn revoked<K: DataKeys + ?Sized>(store: &Store, keys: &K) -> Result<BTreeSet
 
 pub struct Answer {
     pub records: Vec<Record>,
-    /// how many were withheld, so a caller can be told rather than misled
+    /// Trusted-node diagnostic only; do not expose hidden counts to agents.
     pub withheld: usize,
     /// whether matching records existed beyond the returned window
     pub truncated: bool,
@@ -460,7 +460,7 @@ fn read_grant_indexed<'a, K: DataKeys + ?Sized>(
 fn receipt(
     effective: &Grant,
     returned: usize,
-    withheld: usize,
+    _withheld: usize,
     truncated: bool,
     text: Option<&str>,
     now: u64,
@@ -471,7 +471,6 @@ fn receipt(
         "grant": effective.id().hex(),
         "principal": effective.to.hex(),
         "returned": returned,
-        "withheld": withheld,
         "truncated": truncated,
         "query": text.map(|t| Hash::of(t.as_bytes()).short()),
         "at": now,
@@ -2275,23 +2274,24 @@ pub fn look_indexed<K: DataKeys + ?Sized>(
         return Err(Error::Denied("search index changed during query"));
     }
     let effective = read_grant_indexed(store, keys, chain, authority, now, permissions)?;
-    let captures = index.capture_state(keys)?;
+    let captures = index.capture_state_shared(keys)?;
     let needle = filter.text.as_deref().map(PreparedNeedle::new);
     let limit = if filter.limit == 0 { 20 } else { filter.limit };
-    let mut allowed = BTreeMap::new();
+    let mut allowed: BTreeMap<(Hlc, [u8; 32], u64), crate::search_index::Entry> = BTreeMap::new();
     let mut withheld = 0usize;
     let mut truncated = false;
 
     let mut visitor = |entry: &crate::search_index::Entry, candidate: bool| {
+        let floor = (allowed.len() > limit).then(|| allowed.first_key_value().unwrap().0 .0.millis);
         if !captures.visible(entry.id, false) {
-            return Ok(());
+            return Ok(floor);
         }
         if !chain
             .iter()
             .all(|grant| grant.allows(&entry.item, READ, now))
         {
             withheld += 1;
-            return Ok(());
+            return Ok(floor);
         }
         if filter
             .before
@@ -2299,40 +2299,45 @@ pub fn look_indexed<K: DataKeys + ?Sized>(
             || !filter.keeps_metadata(&entry.item)
             || !candidate
         {
-            return Ok(());
+            return Ok(floor);
+        }
+        // Once an extra match proves truncation, older candidates cannot
+        // change the newest page and need no body decryption.
+        if allowed.len() > limit
+            && allowed
+                .first_key_value()
+                .is_some_and(|(oldest, _)| (entry.hlc, entry.author.0, entry.seq) <= *oldest)
+        {
+            return Ok(floor);
         }
         if let Some(needle) = needle.as_ref() {
             let record = index.record(store, entry)?;
             let payload = keys.open_record(&record)?;
             if !filter.keeps(&entry.item, &payload, Some(needle)) {
-                return Ok(());
+                return Ok(floor);
             }
         }
 
         allowed.insert((entry.hlc, entry.author.0, entry.seq), entry.clone());
-        if allowed.len() > limit {
+        if allowed.len() > limit.saturating_add(1) {
             allowed.pop_first();
             truncated = true;
         }
-        Ok(())
+        Ok((allowed.len() > limit).then(|| allowed.first_key_value().unwrap().0 .0.millis))
     };
-    let bulk_withheld = if captures.is_empty() {
-        index.visit_query(keys, filter.text.as_deref(), chain, now, &mut visitor)?
-    } else {
-        // Bulk counts include historical versions; fold managed records before
-        // counting withheld results just as the streaming/snapshot paths do.
-        index.visit(keys, filter.text.as_deref(), &mut visitor)?;
-        0
-    };
+    let access = captures.is_empty().then_some((chain, now));
+    let bulk_withheld = index.visit_ranked(keys, filter.text.as_deref(), access, &mut visitor)?;
     withheld = withheld.saturating_add(bulk_withheld);
 
-    if !index.is_current(store)? || !permissions.is_current(store)? {
-        return Err(Error::Denied("search index changed during query"));
+    if allowed.len() > limit {
+        allowed.pop_first();
+        truncated = true;
     }
     let records = allowed
         .into_values()
         .map(|entry| index.record(store, &entry))
         .collect::<Result<Vec<_>>>()?;
+    index.validate_read(store, keys, chain)?;
     Ok(Answer {
         withheld,
         truncated,
@@ -2741,7 +2746,7 @@ pub fn record_by_ref_indexed<K: DataKeys + ?Sized>(
         return Err(Error::Denied("search index changed during point read"));
     }
     let effective = read_grant_indexed(store, keys, chain, authority, now, permissions)?;
-    let captures = index.capture_state(keys)?;
+    let captures = index.capture_state_shared(keys)?;
     let mut authors = store
         .authors()?
         .into_iter()
@@ -2785,9 +2790,7 @@ pub fn record_by_ref_indexed<K: DataKeys + ?Sized>(
     let payload = keys
         .open_record(&record)
         .map_err(|_| Error::Denied("record reference is unavailable under this grant"))?;
-    if !index.is_current(store)? || !permissions.is_current(store)? {
-        return Err(Error::Denied("search index changed during point read"));
-    }
+    index.validate_read(store, keys, chain)?;
     Ok(RecordAnswer {
         read_receipt: receipt(effective, 1, 0, false, Some(reference), now),
         record,
@@ -3007,7 +3010,7 @@ pub fn overview_indexed<K: DataKeys + ?Sized>(
         return Err(Error::Denied("search index changed during overview"));
     }
     let effective = read_grant_indexed(store, keys, chain, authority, now, permissions)?;
-    let captures = index.capture_state(keys)?;
+    let captures = index.capture_state_shared(keys)?;
     let mut out = Overview {
         total: 0,
         withheld: 0,
@@ -3046,9 +3049,7 @@ pub fn overview_indexed<K: DataKeys + ?Sized>(
         }
         Ok(())
     })?;
-    if !index.is_current(store)? || !permissions.is_current(store)? {
-        return Err(Error::Denied("search index changed during overview"));
-    }
+    index.validate_read(store, keys, chain)?;
     out.kinds = kinds.into_iter().collect();
     out.kinds.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
     out.tags = tags.into_iter().collect();

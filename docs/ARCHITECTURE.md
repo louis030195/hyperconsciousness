@@ -54,15 +54,19 @@ that one view. Long-running agent servers may retain a bounded process-local
 snapshot keyed by signed heads and the runtime-key fingerprint. Oversized
 brains use a persistent encrypted search fold split along bounded author-log
 segments. Its manifest binds exact heads, the usable-key fingerprint, each
-shard hash, and a fixed authenticated route filter. Compact metadata shards
+shard hash, and an adaptive authenticated route filter. Bounded encrypted
+directory pages keep the root small. Compact metadata shards
 hold labels and verified local record coordinates; separate opaque-gram
 postings shards open only when that filter may match. Canonical delta-varints
 bound the compact representation. Authenticated per-segment time and
-sensitivity bounds let decisive all/none grant scopes skip metadata while
+sensitivity bounds plus bounded kind/tag unions let decisive all/none grant scopes skip metadata while
 mixed scopes retain entry-by-entry evaluation. Neither shard contains plaintext
 bodies or duplicated ciphertext. Content-bound opaque shard names keep both
 alternating manifest generations recoverable. One append refolds only the
-affected active segment. Point
+affected active segment. Resident managed-capture projections advance through
+verified tails within a count/byte budget. Newest-first query windows avoid
+opening bodies that cannot change the page. A bounded final suffix check
+separates ordinary appends from revocation and capture changes. Point
 permission checks use a separate encrypted local fold containing only revoked
 grant ids, verified signed grant blobs, and opaque secret-reference
 descriptors. MCP startup resolves its grant chain from the same fold. It

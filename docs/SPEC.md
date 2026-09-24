@@ -131,7 +131,7 @@ older one stay in one brain without a migration.
   "workspace:brain/path:company", "workspace:brain/path:company/plan.md"],
   "id": "<blob id>", "len": 123, "chunks": ["<hex>"] }
 { "kind": "read", "grant": "<grant id>", "principal": "<declared grantee>",
-  "returned": 4, "withheld": 2, "truncated": false, "query": "<short hash>" }
+  "returned": 4, "truncated": false, "query": "<short hash>" }
 { "kind": "note", "text": "written by an agent", "provenance": "grant_write_v1",
   "grant": "<effective grant id>", "grantee": "<declared grantee>" }
 ```
@@ -700,27 +700,77 @@ does not replace the process-local snapshot rules or the read receipt appended
 for each page.
 
 When the bounded process-local snapshot cannot represent the readable brain,
-MCP search may use the persistent encrypted search fold. Its alternating
-manifest names the exact usable-key fingerprint, complete signed author heads,
-and hashes of encrypted index shards. Every bounded local author-log segment
-maps to a compact metadata shard containing permission labels and byte
-coordinates plus signed ids, and a separate opaque lowercase-trigram postings
-shard. The encrypted manifest includes a fixed route filter for each segment.
-Every inserted gram must test present; collisions only open extra postings
-shards. Posting positions, record sequences, local offsets, and bounded counts
-use shortest-form unsigned varints; zero or overflowing deltas and overlong
-forms are malformed. The manifest also binds each segment's exact entry count
-and minimum/maximum time and sensitivity. An already-verified grant chain may
-skip a segment only when those bounds prove every entry allowed or every entry
-denied; kind/tag and overlapping scopes remain mixed and open metadata. Every
-returned candidate is reopened from the log, compared with its indexed author,
-sequence, id and clock, decrypted, exact-matched, and grant-checked. Short
-queries and records that exceed the gram bound remain exact-check candidates.
-Any missing, stale, corrupt or concurrently changed required component fails to
-the ordinary signed-log scan. Cache format changes invalidate the manifest and
-rebuild from signed history. Shard filenames are opaque and content-bound;
-publishing a successor never overwrites bytes named by the retained older
-manifest generation.
+MCP search may use the persistent encrypted search fold. Derived format v7
+rebuilds older caches without changing signed records, grants or wire formats.
+Alternating encrypted directory roots reference content-hashed encrypted pages
+of at most 1 MiB plaintext each, at most 128 pages (128 MiB decoded directory).
+The root is published durably after its pages. Missing, modified, oversized or
+incomplete pages reject that generation; the other generation or signed logs
+supply recovery. Both retained generations' pages and shards survive cleanup.
+This raises the old flat-directory ceiling without claiming unlimited memory:
+the directory is still decoded in memory, and total index shard storage grows
+with history. Roots remain capped at 16 MiB; metadata/postings shards at 64 MiB.
+
+The directory binds exact usable-key fingerprints, signed author heads, shard
+hashes, permission labels and verified byte coordinates. Each bounded log
+segment has separate encrypted metadata and opaque lowercase-trigram postings.
+Adaptive authenticated route filters allocate twelve bits per distinct gram,
+between 1 KiB and 128 KiB. Every inserted gram must test present; collisions
+only cause extra reads. Canonical delta-varints encode positions, sequences,
+offsets and counts. Overlong, zero or overflowing deltas are malformed.
+Authenticated entry/managed counts, time/sensitivity bounds and bounded kind/tag
+unions may prove exclusion. Incomplete label summaries are unknown, never an
+exclusion. Mixed grants still check each entry. Metadata containing managed
+captures is folded regardless of the reader's scope so inaccessible corrections
+and retractions still suppress old results.
+
+A trusted process may reuse a managed-capture projection bound to the complete
+runtime key/cutoff view. Ordinary history does not enter this fold. Verified
+tails advance it; unknown authors or changed key views trigger reconstruction.
+Retention stops above 50,000 managed records or a conservative 16 MiB accounting
+budget. Oversized projections remain transient; their construction still scales
+with managed history. Custom key providers must explicitly supply a complete
+cache identity to enable resident reuse.
+
+Newest-first traversal uses authenticated segment time bounds and exact record
+order to retain one page plus an extra match for truncation. Only a proven fully
+allowed segment older than that extra match can skip all metadata; mixed grants
+still preserve trusted-node diagnostic counts. Every returned record is reopened
+and signature/identity checked. Candidate bodies are decrypted and exact-matched;
+short/Unicode queries and unindexed records retain the same semantics.
+
+Indexed reads use a signed-prefix data snapshot. The final release check verifies
+new tail signatures and predecessor links, rejects changed/missing prefixes,
+relevant ancestor revocations, unreadable tails, and any managed-capture change.
+Ordinary new records and audit receipts may arrive without invalidating a read.
+Tail validation catches up at most three times, with a total 10,000-record/64 MiB
+budget, failing closed if a stable boundary is unavailable. MCP additionally
+reopens the runtime key view and verifies grant expiry before releasing formatted
+results. Company reads recheck current membership/policy generation without
+consuming the admitted proof twice. This is a bounded local release check, not a
+cross-node transaction or a way to recall data already returned.
+
+Grant-scoped CLI `ask` omits hidden totals and durably appends its read receipt
+before printing result text. MCP text and structured responses disclose neither hidden-record totals nor the
+global device inventory. New read receipts retain grant, principal, returned
+count, truncation and query hash, but omit hidden totals. Existing append-only
+receipts are not erased. The trusted in-process query API retains diagnostics;
+callers must not expose them through an agent-facing API.
+
+Process-local permission folds are reused only under the same key fingerprint
+and verified current heads, and refresh signed tails before permission checks.
+Exact/prefix grant resolution seeks a sorted range and examines at most two
+matching IDs, preserving ambiguity rejection and complete ancestor validation.
+Durable read receipts and atomic bounded capture batching remain mandatory.
+The owner launch setting `HC_RESIDENT_CACHE=off` disables between-call retention
+of process snapshot/search/policy views while preserving authorization and
+encrypted rebuildable disk indexes. Absent defaults to enabled; only `on`, `1`
+and `true` explicitly enable it, and other configured values disable it.
+
+Sync pages seek the relevant log segment instead of decoding every prior record.
+Incoming signature, predecessor, replay, fork and removed-device-cutoff checks
+remain unchanged. Full head discovery and explicit integrity/recovery operations
+still scan history; this optimization does not promise constant-time idle sync.
 
 ### native handset storage and snapshot boundary
 

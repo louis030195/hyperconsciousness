@@ -73,7 +73,9 @@ pub struct Server {
     permissions: Option<Arc<permission::Store>>,
     cache: Mutex<Option<CachedSnapshot>>,
     search_cache: Mutex<Option<CachedSearchIndex>>,
+    policy_cache: Mutex<Option<(Hash, Arc<hyperconsciousness::revocation::Index>)>>,
     company_access: bool,
+    resident_cache: bool,
 }
 
 struct CachedSnapshot {
@@ -105,7 +107,13 @@ impl Server {
             permissions: None,
             cache: Mutex::new(None),
             search_cache: Mutex::new(None),
+            policy_cache: Mutex::new(None),
             company_access: false,
+            // Owner-controlled launch setting, never a tool argument. Invalid
+            // values choose the privacy-preserving no-retention behavior.
+            resident_cache: std::env::var("HC_RESIDENT_CACHE")
+                .map(|value| matches!(value.as_str(), "on" | "1" | "true"))
+                .unwrap_or_else(|error| matches!(error, std::env::VarError::NotPresent)),
         }
     }
 
@@ -198,19 +206,45 @@ impl Server {
         &self,
         store: &Store,
         keys: &RuntimeKeys,
-    ) -> Result<hyperconsciousness::revocation::Index> {
-        hyperconsciousness::revocation::Index::load_or_build(
+    ) -> Result<Arc<hyperconsciousness::revocation::Index>> {
+        if !self.resident_cache {
+            return Ok(Arc::new(
+                hyperconsciousness::revocation::Index::load_or_build(
+                    &self.dir,
+                    store,
+                    keys,
+                    keys.cache_fingerprint(),
+                )?,
+            ));
+        }
+        let fingerprint = keys.cache_fingerprint();
+        let mut cache = self.policy_cache.lock().unwrap_or_else(|p| p.into_inner());
+        if let Some((known, index)) = cache.as_mut() {
+            if *known == fingerprint
+                && (index.is_current(store)?
+                    || Arc::make_mut(index).refresh_current(store, keys, fingerprint)?)
+            {
+                return Ok(Arc::clone(index));
+            }
+        }
+        *cache = None;
+        let index = Arc::new(hyperconsciousness::revocation::Index::load_or_build(
             &self.dir,
             store,
             keys,
-            keys.cache_fingerprint(),
-        )
+            fingerprint,
+        )?);
+        *cache = Some((fingerprint, Arc::clone(&index)));
+        Ok(index)
     }
 
     /// Return a snapshot only after proving that both the signed log heads and
     /// the exact locally usable key/cutoff view still match. Oversized brains
     /// intentionally return `None` and use the streaming path.
     fn snapshot(&self, store: &Store, keys: &RuntimeKeys) -> Result<Option<Arc<RwLock<Snapshot>>>> {
+        if !self.resident_cache {
+            return Ok(None);
+        }
         let fingerprint = keys.cache_fingerprint();
         let mut cache = self
             .cache
@@ -246,20 +280,37 @@ impl Server {
         store: &Store,
         keys: &RuntimeKeys,
     ) -> Result<Arc<RwLock<hyperconsciousness::search_index::Index>>> {
+        if !self.resident_cache {
+            return Ok(Arc::new(RwLock::new(
+                hyperconsciousness::search_index::Index::load_or_build(
+                    &self.dir,
+                    store,
+                    keys,
+                    keys.cache_fingerprint(),
+                )?,
+            )));
+        }
         let fingerprint = keys.cache_fingerprint();
         let mut cache = self
             .search_cache
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         if let Some(cached) = cache.as_ref() {
-            let current = cached.keys == fingerprint
-                && cached
+            if cached.keys == fingerprint {
+                let current = cached
                     .index
                     .read()
-                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .unwrap_or_else(|p| p.into_inner())
                     .is_current(store)?;
-            if current {
-                return Ok(Arc::clone(&cached.index));
+                if current
+                    || cached
+                        .index
+                        .write()
+                        .unwrap_or_else(|p| p.into_inner())
+                        .refresh_current(store, keys, fingerprint)?
+                {
+                    return Ok(Arc::clone(&cached.index));
+                }
             }
         }
         *cache = None;
@@ -296,10 +347,6 @@ impl Server {
         if !keep {
             *cache = None;
         }
-        *self
-            .search_cache
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner()) = None;
     }
 
     fn append_record(&self, identity: &Identity, payload: &str) -> Result<()> {
@@ -709,7 +756,21 @@ impl Server {
                 // a denied tool is a result, not a transport error. the model
                 // has to see it to change what it asks for, and a client that
                 // treats an error as a crash would drop the conversation.
-                match self.call(name, arguments) {
+                let result = self.call(name, arguments).and_then(|text| {
+                    if self.company_access_enabled()
+                        && matches!(name, "search" | "recent" | "record" | "overview" | "files")
+                    {
+                        let identity = Identity::load_for_brain(&self.dir)?;
+                        hyperconsciousness::access::revalidate_read(
+                            &self.dir,
+                            request,
+                            identity.grant_authority()?,
+                            Clock::new().now().millis,
+                        )?;
+                    }
+                    Ok(text)
+                });
+                match result {
                     Ok(text)
                         if (matches!(name, "search" | "recent" | "record")
                             && arguments["format"] == "structured")
@@ -743,622 +804,624 @@ impl Server {
         let now = Clock::new().now().millis;
         let (call_chain, clean_arguments) = self.call_chain(name, arguments)?;
         let arguments = &clean_arguments;
-
-        match name {
-            "search" | "recent" => {
-                let structured = match arguments.get("format") {
-                    None | Some(Value::Null) => false,
-                    Some(Value::String(value)) if value == "text" => false,
-                    Some(Value::String(value)) if value == "structured" => true,
-                    _ => return Err(Error::Malformed("search format must be text or structured")),
-                };
-                let requested_limit =
-                    arguments["limit"].as_u64().unwrap_or(20).clamp(1, 200) as usize;
-                let output_chars = arguments["max_output_chars"]
-                    .as_u64()
-                    .unwrap_or(DEFAULT_SEARCH_CHARS as u64)
-                    .clamp(1_024, MAX_SEARCH_CHARS as u64)
-                    as usize;
-                // A reference, date and newline need about forty characters.
-                // Keep every returned record identifiable even under a small
-                // response budget; content receives the space left over.
-                let budgeted_limit =
-                    (output_chars.saturating_sub(SEARCH_FOOTER_RESERVE) / 40).max(1);
-                let effective_limit = requested_limit.min(budgeted_limit);
-                let mut tags = arguments["tags"]
-                    .as_array()
-                    .map(|tags| {
-                        tags.iter()
-                            .filter_map(|tag| tag.as_str().map(String::from))
-                            .collect::<Vec<_>>()
-                    })
-                    .unwrap_or_default();
-                // Tag matching is an any-of set, so normalize it before
-                // binding a continuation cursor to avoid meaningless misses.
-                tags.sort();
-                tags.dedup();
-                let mut filter = hyperconsciousness::query::Filter {
-                    text: arguments["query"]
-                        .as_str()
-                        .filter(|q| !q.trim().is_empty())
-                        .map(String::from),
-                    kind: arguments["kind"].as_str().map(String::from),
-                    kinds: Vec::new(),
-                    tags,
-                    since: since(arguments.get("since")),
-                    until: since(arguments.get("until")),
-                    before: None,
-                    limit: effective_limit,
-                };
-                let cursor_binding = search_cursor_binding(name, &filter, arguments);
-                if let Some(cursor) = arguments["cursor"].as_str() {
-                    let cursor = decode_search_cursor(cursor, cursor_binding)?;
-                    filter.before = Some(cursor.before);
-                    // Relative dates such as -7 are resolved once on the
-                    // first page. Later pages retain that exact time window.
-                    filter.since = cursor.since;
-                    filter.until = cursor.until;
-                }
-
-                let snapshot = if hyperconsciousness::search_index::Index::exists(&self.dir) {
-                    None
-                } else {
-                    self.snapshot(&store, &keys)?
-                };
-                let snapshot_read = snapshot.as_ref().map(|snapshot| {
-                    snapshot
-                        .read()
-                        .unwrap_or_else(|poisoned| poisoned.into_inner())
-                });
-                let answer = if let Some(cached) = snapshot_read.as_deref() {
-                    hyperconsciousness::query::look_snapshot(
-                        &store,
-                        &keys,
-                        cached,
-                        &call_chain,
-                        identity.grant_authority()?,
-                        now,
-                        &filter,
-                    )?
-                } else {
-                    let indexed = (|| {
-                        let permissions = self.revocations(&store, &keys)?;
-                        let index = self.search_index(&store, &keys)?;
-                        let index = index
-                            .read()
-                            .unwrap_or_else(|poisoned| poisoned.into_inner());
-                        hyperconsciousness::query::look_indexed(
-                            &store,
-                            &keys,
-                            &index,
-                            &permissions,
-                            &call_chain,
-                            identity.grant_authority()?,
-                            now,
-                            &filter,
-                        )
-                    })();
-                    match indexed {
-                        Ok(answer) => answer,
-                        Err(_) => hyperconsciousness::query::look(
-                            &store,
-                            &keys,
-                            &call_chain,
-                            identity.grant_authority()?,
-                            now,
-                            &filter,
-                        )?,
+        let reading = matches!(name, "search" | "recent" | "record" | "overview" | "files");
+        let read_heads = reading.then(|| store.cache_heads()).transpose()?;
+        let result = (|| {
+            match name {
+                "search" | "recent" => {
+                    let structured = match arguments.get("format") {
+                        None | Some(Value::Null) => false,
+                        Some(Value::String(value)) if value == "text" => false,
+                        Some(Value::String(value)) if value == "structured" => true,
+                        _ => {
+                            return Err(Error::Malformed(
+                                "search format must be text or structured",
+                            ))
+                        }
+                    };
+                    let requested_limit =
+                        arguments["limit"].as_u64().unwrap_or(20).clamp(1, 200) as usize;
+                    let output_chars = arguments["max_output_chars"]
+                        .as_u64()
+                        .unwrap_or(DEFAULT_SEARCH_CHARS as u64)
+                        .clamp(1_024, MAX_SEARCH_CHARS as u64)
+                        as usize;
+                    // A reference, date and newline need about forty characters.
+                    // Keep every returned record identifiable even under a small
+                    // response budget; content receives the space left over.
+                    let budgeted_limit =
+                        (output_chars.saturating_sub(SEARCH_FOOTER_RESERVE) / 40).max(1);
+                    let effective_limit = requested_limit.min(budgeted_limit);
+                    let mut tags = arguments["tags"]
+                        .as_array()
+                        .map(|tags| {
+                            tags.iter()
+                                .filter_map(|tag| tag.as_str().map(String::from))
+                                .collect::<Vec<_>>()
+                        })
+                        .unwrap_or_default();
+                    // Tag matching is an any-of set, so normalize it before
+                    // binding a continuation cursor to avoid meaningless misses.
+                    tags.sort();
+                    tags.dedup();
+                    let mut filter = hyperconsciousness::query::Filter {
+                        text: arguments["query"]
+                            .as_str()
+                            .filter(|q| !q.trim().is_empty())
+                            .map(String::from),
+                        kind: arguments["kind"].as_str().map(String::from),
+                        kinds: Vec::new(),
+                        tags,
+                        since: since(arguments.get("since")),
+                        until: since(arguments.get("until")),
+                        before: None,
+                        limit: effective_limit,
+                    };
+                    let cursor_binding = search_cursor_binding(name, &filter, arguments);
+                    if let Some(cursor) = arguments["cursor"].as_str() {
+                        let cursor = decode_search_cursor(cursor, cursor_binding)?;
+                        filter.before = Some(cursor.before);
+                        // Relative dates such as -7 are resolved once on the
+                        // first page. Later pages retain that exact time window.
+                        filter.since = cursor.since;
+                        filter.until = cursor.until;
                     }
-                };
 
-                if structured {
+                    let snapshot = if hyperconsciousness::search_index::Index::exists(&self.dir) {
+                        None
+                    } else {
+                        self.snapshot(&store, &keys)?
+                    };
+                    let snapshot_read = snapshot.as_ref().map(|snapshot| {
+                        snapshot
+                            .read()
+                            .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    });
+                    let answer = if let Some(cached) = snapshot_read.as_deref() {
+                        hyperconsciousness::query::look_snapshot(
+                            &store,
+                            &keys,
+                            cached,
+                            &call_chain,
+                            identity.grant_authority()?,
+                            now,
+                            &filter,
+                        )?
+                    } else {
+                        let indexed = (|| {
+                            let permissions = self.revocations(&store, &keys)?;
+                            let index = self.search_index(&store, &keys)?;
+                            let index = index
+                                .read()
+                                .unwrap_or_else(|poisoned| poisoned.into_inner());
+                            hyperconsciousness::query::look_indexed(
+                                &store,
+                                &keys,
+                                &index,
+                                &permissions,
+                                &call_chain,
+                                identity.grant_authority()?,
+                                now,
+                                &filter,
+                            )
+                        })();
+                        match indexed {
+                            Ok(answer) => answer,
+                            Err(_) => hyperconsciousness::query::look(
+                                &store,
+                                &keys,
+                                &call_chain,
+                                identity.grant_authority()?,
+                                now,
+                                &filter,
+                            )?,
+                        }
+                    };
+
+                    if structured {
+                        let match_chars = arguments["max_chars"]
+                            .as_u64()
+                            .unwrap_or(DEFAULT_MATCH_CHARS as u64)
+                            .clamp(40, MAX_MATCH_CHARS as u64)
+                            as usize;
+                        let output = structured_search_page(
+                            &answer.records,
+                            &filter,
+                            cursor_binding,
+                            answer.truncated,
+                            now,
+                            (output_chars, match_chars, true),
+                            |record| {
+                                if let Some(cached) = snapshot_read.as_deref() {
+                                    cached
+                                        .payload(record)
+                                        .map(Vec::from)
+                                        .ok_or(Error::Denied("context payload unavailable"))
+                                } else {
+                                    keys.open_record(record)
+                                }
+                            },
+                        )?;
+                        drop(snapshot_read);
+                        self.append_record(&identity, &answer.read_receipt)?;
+                        return Ok(output);
+                    }
+
                     let match_chars = arguments["max_chars"]
                         .as_u64()
                         .unwrap_or(DEFAULT_MATCH_CHARS as u64)
                         .clamp(40, MAX_MATCH_CHARS as u64)
                         as usize;
-                    let output = structured_search_page(
-                        &answer.records,
-                        &filter,
-                        cursor_binding,
-                        answer.truncated,
-                        now,
-                        (output_chars, match_chars, true),
-                        |record| {
-                            if let Some(cached) = snapshot_read.as_deref() {
-                                cached
-                                    .payload(record)
-                                    .map(Vec::from)
-                                    .ok_or(Error::Denied("context payload unavailable"))
-                            } else {
-                                keys.open_record(record)
-                            }
-                        },
-                    )?;
-                    drop(snapshot_read);
-                    self.append_record(&identity, &answer.read_receipt)?;
-                    return Ok(output);
-                }
+                    let mut out = String::new();
+                    let mut used_chars = 0usize;
+                    let mut clipped = 0usize;
+                    let total_records = answer.records.len();
+                    let content_chars = output_chars.saturating_sub(SEARCH_FOOTER_RESERVE);
+                    for (index, record) in answer.records.iter().enumerate() {
+                        let bytes = if let Some(cached) = snapshot_read.as_deref() {
+                            cached.payload(record).map(Vec::from)
+                        } else {
+                            keys.open_record(record).ok()
+                        };
+                        let Some(bytes) = bytes else {
+                            continue;
+                        };
 
-                let match_chars = arguments["max_chars"]
-                    .as_u64()
-                    .unwrap_or(DEFAULT_MATCH_CHARS as u64)
-                    .clamp(40, MAX_MATCH_CHARS as u64) as usize;
-                let mut out = String::new();
-                let mut used_chars = 0usize;
-                let mut clipped = 0usize;
-                let total_records = answer.records.len();
-                let content_chars = output_chars.saturating_sub(SEARCH_FOOTER_RESERVE);
-                for (index, record) in answer.records.iter().enumerate() {
-                    let bytes = if let Some(cached) = snapshot_read.as_deref() {
-                        cached.payload(record).map(Vec::from)
-                    } else {
-                        keys.open_record(record).ok()
-                    };
-                    let Some(bytes) = bytes else {
-                        continue;
-                    };
+                        let text = shown_text(&bytes);
+                        let prefix = format!(
+                            "{}  [{}:{}]  ",
+                            day(record.hlc.millis),
+                            record.author.short(),
+                            record.seq,
+                        );
+                        let remaining_records = total_records - index;
+                        let fair_share = content_chars
+                            .saturating_sub(used_chars)
+                            .checked_div(remaining_records)
+                            .unwrap_or(0);
+                        let body_chars =
+                            match_chars.min(fair_share.saturating_sub(prefix.len() + 1));
+                        let (text, was_clipped) = compact_text(&text, body_chars);
+                        clipped += usize::from(was_clipped);
 
-                    let text = shown_text(&bytes);
-                    let prefix = format!(
-                        "{}  [{}:{}]  ",
-                        day(record.hlc.millis),
-                        record.author.short(),
-                        record.seq,
-                    );
-                    let remaining_records = total_records - index;
-                    let fair_share = content_chars
-                        .saturating_sub(used_chars)
-                        .checked_div(remaining_records)
-                        .unwrap_or(0);
-                    let body_chars = match_chars.min(fair_share.saturating_sub(prefix.len() + 1));
-                    let (text, was_clipped) = compact_text(&text, body_chars);
-                    clipped += usize::from(was_clipped);
+                        // date and id on every line, so a model can say when
+                        // something happened and ask for that exact thing again
+                        out.push_str(&prefix);
+                        out.push_str(&text);
+                        out.push('\n');
+                        used_chars += prefix.chars().count() + text.chars().count() + 1;
+                    }
 
-                    // date and id on every line, so a model can say when
-                    // something happened and ask for that exact thing again
-                    out.push_str(&prefix);
-                    out.push_str(&text);
-                    out.push('\n');
-                    used_chars += prefix.chars().count() + text.chars().count() + 1;
-                }
+                    if out.is_empty() {
+                        out.push_str("nothing in this grant matched\n");
+                    }
 
-                if out.is_empty() {
-                    out.push_str("nothing in this grant matched\n");
-                }
-
-                if answer.withheld > 0 {
-                    out.push_str(&format!(
-                        "\n{} records exist that this grant does not cover\n",
-                        answer.withheld
-                    ));
-                }
-                if clipped > 0 {
-                    out.push_str(&format!(
+                    if clipped > 0 {
+                        out.push_str(&format!(
                         "\n{clipped} excerpts clipped; call record with a result ref for full content\n"
                     ));
-                }
-                if effective_limit < requested_limit {
-                    out.push_str(&format!(
+                    }
+                    if effective_limit < requested_limit {
+                        out.push_str(&format!(
                         "\nresponse budget limited this call to {effective_limit} results; raise max_output_chars for more\n"
                     ));
+                    }
+                    if answer.truncated {
+                        if let Some(record) = answer.records.first() {
+                            out.push_str(&format!(
+                                "\nnext_cursor: {}\n",
+                                encode_search_cursor(record, &filter, cursor_binding)
+                            ));
+                        }
+                    }
+
+                    drop(snapshot_read);
+                    self.append_record(&identity, &answer.read_receipt)?;
+                    Ok(out)
                 }
-                if answer.truncated {
-                    if let Some(record) = answer.records.first() {
+
+                "record" => {
+                    let structured = match arguments.get("format") {
+                        None | Some(Value::Null) => false,
+                        Some(Value::String(value)) if value == "text" => false,
+                        Some(Value::String(value)) if value == "structured" => true,
+                        _ => {
+                            return Err(Error::Malformed(
+                                "record format must be text or structured",
+                            ))
+                        }
+                    };
+                    let reference = arguments["ref"]
+                        .as_str()
+                        .filter(|reference| !reference.trim().is_empty())
+                        .ok_or(Error::Malformed("record needs a result ref"))?;
+                    let answer = if hyperconsciousness::search_index::Index::exists(&self.dir) {
+                        let indexed = (|| {
+                            let permissions = self.revocations(&store, &keys)?;
+                            let index = self.search_index(&store, &keys)?;
+                            let index = index
+                                .read()
+                                .unwrap_or_else(|poisoned| poisoned.into_inner());
+                            hyperconsciousness::query::record_by_ref_indexed(
+                                &store,
+                                &keys,
+                                &index,
+                                &permissions,
+                                &call_chain,
+                                identity.grant_authority()?,
+                                now,
+                                reference,
+                            )
+                        })();
+                        match indexed {
+                            Ok(answer) => answer,
+                            Err(_) => hyperconsciousness::query::record_by_ref(
+                                &store,
+                                &keys,
+                                &call_chain,
+                                identity.grant_authority()?,
+                                now,
+                                reference,
+                            )?,
+                        }
+                    } else {
+                        let snapshot = self.snapshot(&store, &keys)?;
+                        if let Some(snapshot) = snapshot {
+                            let cached = snapshot
+                                .read()
+                                .unwrap_or_else(|poisoned| poisoned.into_inner());
+                            hyperconsciousness::query::record_by_ref_snapshot(
+                                &store,
+                                &keys,
+                                &cached,
+                                &call_chain,
+                                identity.grant_authority()?,
+                                now,
+                                reference,
+                            )?
+                        } else {
+                            hyperconsciousness::query::record_by_ref(
+                                &store,
+                                &keys,
+                                &call_chain,
+                                identity.grant_authority()?,
+                                now,
+                                reference,
+                            )?
+                        }
+                    };
+                    let max_chars = arguments["max_chars"]
+                        .as_u64()
+                        .unwrap_or(DEFAULT_RECORD_CHARS as u64)
+                        .clamp(1, MAX_RECORD_CHARS as u64)
+                        as usize;
+                    if structured {
+                        let output_chars = arguments["max_output_chars"]
+                            .as_u64()
+                            .unwrap_or(DEFAULT_RECORD_CHARS as u64)
+                            .clamp(1_024, MAX_RECORD_CHARS as u64)
+                            as usize;
+                        // A point read has no continuation cursor. Preserve line
+                        // breaks so handoffs and procedure candidates can be read
+                        // faithfully without treating them as trusted instructions.
+                        let output = structured_search_page(
+                            std::slice::from_ref(&answer.record),
+                            &hyperconsciousness::query::Filter::default(),
+                            [0; 8],
+                            false,
+                            now,
+                            (output_chars, max_chars, false),
+                            |_| Ok(answer.payload.clone()),
+                        )?;
+                        self.append_record(&identity, &answer.read_receipt)?;
+                        return Ok(output);
+                    }
+                    let text = shown_text(&answer.payload);
+                    let (text, clipped) = clip_text(&text, max_chars);
+                    let mut out = format!(
+                        "{}  [{}:{}]\n{}",
+                        day(answer.record.hlc.millis),
+                        answer.record.author.short(),
+                        answer.record.seq,
+                        text,
+                    );
+                    if clipped {
                         out.push_str(&format!(
-                            "\nnext_cursor: {}\n",
-                            encode_search_cursor(record, &filter, cursor_binding)
-                        ));
+                        "\n\ncontent clipped at {max_chars} characters; call record again with a larger max_chars"
+                    ));
                     }
+
+                    self.append_record(&identity, &answer.read_receipt)?;
+                    Ok(out)
                 }
 
-                drop(snapshot_read);
-                self.append_record(&identity, &answer.read_receipt)?;
-                Ok(out)
-            }
-
-            "record" => {
-                let structured = match arguments.get("format") {
-                    None | Some(Value::Null) => false,
-                    Some(Value::String(value)) if value == "text" => false,
-                    Some(Value::String(value)) if value == "structured" => true,
-                    _ => return Err(Error::Malformed("record format must be text or structured")),
-                };
-                let reference = arguments["ref"]
-                    .as_str()
-                    .filter(|reference| !reference.trim().is_empty())
-                    .ok_or(Error::Malformed("record needs a result ref"))?;
-                let answer = if hyperconsciousness::search_index::Index::exists(&self.dir) {
-                    let indexed = (|| {
-                        let permissions = self.revocations(&store, &keys)?;
-                        let index = self.search_index(&store, &keys)?;
-                        let index = index
-                            .read()
-                            .unwrap_or_else(|poisoned| poisoned.into_inner());
-                        hyperconsciousness::query::record_by_ref_indexed(
-                            &store,
-                            &keys,
-                            &index,
-                            &permissions,
-                            &call_chain,
-                            identity.grant_authority()?,
-                            now,
-                            reference,
-                        )
-                    })();
-                    match indexed {
-                        Ok(answer) => answer,
-                        Err(_) => hyperconsciousness::query::record_by_ref(
-                            &store,
-                            &keys,
-                            &call_chain,
-                            identity.grant_authority()?,
-                            now,
-                            reference,
-                        )?,
-                    }
-                } else {
-                    let snapshot = self.snapshot(&store, &keys)?;
-                    if let Some(snapshot) = snapshot {
+                // the map, so an agent stops guessing what to search for
+                "overview" => {
+                    let snapshot = if hyperconsciousness::search_index::Index::exists(&self.dir) {
+                        None
+                    } else {
+                        self.snapshot(&store, &keys)?
+                    };
+                    let map = if let Some(snapshot) = snapshot {
                         let cached = snapshot
                             .read()
                             .unwrap_or_else(|poisoned| poisoned.into_inner());
-                        hyperconsciousness::query::record_by_ref_snapshot(
+                        hyperconsciousness::query::overview_snapshot(
                             &store,
                             &keys,
                             &cached,
                             &call_chain,
                             identity.grant_authority()?,
                             now,
-                            reference,
                         )?
                     } else {
-                        hyperconsciousness::query::record_by_ref(
-                            &store,
-                            &keys,
-                            &call_chain,
-                            identity.grant_authority()?,
-                            now,
-                            reference,
-                        )?
+                        let indexed = (|| {
+                            let permissions = self.revocations(&store, &keys)?;
+                            let index = self.search_index(&store, &keys)?;
+                            let index = index
+                                .read()
+                                .unwrap_or_else(|poisoned| poisoned.into_inner());
+                            hyperconsciousness::query::overview_indexed(
+                                &store,
+                                &keys,
+                                &index,
+                                &permissions,
+                                &call_chain,
+                                identity.grant_authority()?,
+                                now,
+                            )
+                        })();
+                        match indexed {
+                            Ok(map) => map,
+                            Err(_) => hyperconsciousness::query::overview(
+                                &store,
+                                &keys,
+                                &call_chain,
+                                identity.grant_authority()?,
+                                now,
+                            )?,
+                        }
+                    };
+
+                    let mut out = String::new();
+                    out.push_str(&format!("{} records this grant can read\n", map.total));
+
+                    if let (Some(first), Some(last)) = (map.first, map.last) {
+                        out.push_str(&format!("from {} to {}\n", day(first), day(last)));
                     }
-                };
-                let max_chars = arguments["max_chars"]
-                    .as_u64()
-                    .unwrap_or(DEFAULT_RECORD_CHARS as u64)
-                    .clamp(1, MAX_RECORD_CHARS as u64) as usize;
-                if structured {
-                    let output_chars = arguments["max_output_chars"]
-                        .as_u64()
-                        .unwrap_or(DEFAULT_RECORD_CHARS as u64)
-                        .clamp(1_024, MAX_RECORD_CHARS as u64)
-                        as usize;
-                    // A point read has no continuation cursor. Preserve line
-                    // breaks so handoffs and procedure candidates can be read
-                    // faithfully without treating them as trusted instructions.
-                    let output = structured_search_page(
-                        std::slice::from_ref(&answer.record),
-                        &hyperconsciousness::query::Filter::default(),
-                        [0; 8],
-                        false,
-                        now,
-                        (output_chars, max_chars, false),
-                        |_| Ok(answer.payload.clone()),
-                    )?;
-                    self.append_record(&identity, &answer.read_receipt)?;
-                    return Ok(output);
-                }
-                let text = shown_text(&answer.payload);
-                let (text, clipped) = clip_text(&text, max_chars);
-                let mut out = format!(
-                    "{}  [{}:{}]\n{}",
-                    day(answer.record.hlc.millis),
-                    answer.record.author.short(),
-                    answer.record.seq,
-                    text,
-                );
-                if clipped {
-                    out.push_str(&format!(
-                        "\n\ncontent clipped at {max_chars} characters; call record again with a larger max_chars"
-                    ));
+
+                    out.push('\n');
+
+                    if !map.kinds.is_empty() {
+                        out.push_str("kinds:\n");
+                        for (kind, count) in &map.kinds {
+                            out.push_str(&format!("  {kind}  {count}\n"));
+                        }
+                    }
+
+                    if !map.tags.is_empty() {
+                        out.push_str("\ntags:\n");
+                        for (tag, count) in &map.tags {
+                            out.push_str(&format!("  {tag}  {count}\n"));
+                        }
+                    }
+
+                    self.append_record(&identity, &map.read_receipt)?;
+                    Ok(out)
                 }
 
-                self.append_record(&identity, &answer.read_receipt)?;
-                Ok(out)
-            }
-
-            // the map, so an agent stops guessing what to search for
-            "overview" => {
-                let snapshot = if hyperconsciousness::search_index::Index::exists(&self.dir) {
-                    None
-                } else {
-                    self.snapshot(&store, &keys)?
-                };
-                let map = if let Some(snapshot) = snapshot {
-                    let cached = snapshot
-                        .read()
-                        .unwrap_or_else(|poisoned| poisoned.into_inner());
-                    hyperconsciousness::query::overview_snapshot(
+                "remember" => {
+                    let return_receipts = crate::capture::wants_receipts(arguments)?;
+                    let input = RememberInput::parse(arguments)?;
+                    if input.change.is_some() {
+                        if !return_receipts {
+                            return Err(Error::Malformed(
+                                "versioned capture requires return_receipts=true",
+                            ));
+                        }
+                        if serde_json::to_vec(arguments)?.len() > MAX_REMEMBER_BATCH_BYTES {
+                            return Err(Error::Malformed("capture payload is too large"));
+                        }
+                        return self.append_capture_changes(&identity, &call_chain, &[input]);
+                    }
+                    let item = input.item(now);
+                    let revoked = self.revocations(&store, &keys)?;
+                    let effective = hyperconsciousness::query::permit_write_indexed(
                         &store,
                         &keys,
-                        &cached,
                         &call_chain,
                         identity.grant_authority()?,
                         now,
-                    )?
-                } else {
-                    let indexed = (|| {
-                        let permissions = self.revocations(&store, &keys)?;
-                        let index = self.search_index(&store, &keys)?;
-                        let index = index
-                            .read()
-                            .unwrap_or_else(|poisoned| poisoned.into_inner());
-                        hyperconsciousness::query::overview_indexed(
-                            &store,
-                            &keys,
-                            &index,
-                            &permissions,
-                            &call_chain,
-                            identity.grant_authority()?,
-                            now,
-                        )
-                    })();
-                    match indexed {
-                        Ok(map) => map,
-                        Err(_) => hyperconsciousness::query::overview(
-                            &store,
-                            &keys,
-                            &call_chain,
-                            identity.grant_authority()?,
-                            now,
-                        )?,
+                        &item,
+                        &revoked,
+                    )?;
+
+                    let payload = input.payload(effective);
+                    if return_receipts {
+                        return self.append_records_receipt(&identity, &[payload]);
                     }
-                };
-
-                let mut out = String::new();
-                out.push_str(&format!("{} records this grant can read\n", map.total));
-
-                if let (Some(first), Some(last)) = (map.first, map.last) {
-                    out.push_str(&format!("from {} to {}\n", day(first), day(last)));
+                    self.append_record(&identity, &payload)?;
+                    Ok("written".to_string())
                 }
 
-                out.push_str(&format!("across {} devices\n\n", map.devices));
-
-                if !map.kinds.is_empty() {
-                    out.push_str("kinds:\n");
-                    for (kind, count) in &map.kinds {
-                        out.push_str(&format!("  {kind}  {count}\n"));
+                "remember_many" => {
+                    let return_receipts = crate::capture::wants_receipts(arguments)?;
+                    let values = arguments["items"]
+                        .as_array()
+                        .filter(|items| !items.is_empty())
+                        .ok_or(Error::Malformed(
+                            "remember_many needs a non-empty items list",
+                        ))?;
+                    if values.len() > MAX_REMEMBER_BATCH_ITEMS {
+                        return Err(Error::Malformed("remember_many has too many items"));
                     }
-                }
-
-                if !map.tags.is_empty() {
-                    out.push_str("\ntags:\n");
-                    for (tag, count) in &map.tags {
-                        out.push_str(&format!("  {tag}  {count}\n"));
+                    if serde_json::to_vec(values)?.len() > MAX_REMEMBER_BATCH_BYTES {
+                        return Err(Error::Malformed("remember_many payload is too large"));
                     }
+                    let inputs = values
+                        .iter()
+                        .map(RememberInput::parse)
+                        .collect::<Result<Vec<_>>>()?;
+                    if inputs.iter().any(|input| input.change.is_some()) {
+                        if !return_receipts || inputs.iter().any(|input| input.change.is_none()) {
+                            return Err(Error::Malformed("versioned batches require change on every item and return_receipts=true"));
+                        }
+                        return self.append_capture_changes(&identity, &call_chain, &inputs);
+                    }
+                    let items = inputs
+                        .iter()
+                        .map(|input| input.item(now))
+                        .collect::<Vec<_>>();
+                    let revoked = self.revocations(&store, &keys)?;
+                    let effective = hyperconsciousness::query::permit_actions_indexed(
+                        &store,
+                        &keys,
+                        &call_chain,
+                        identity.grant_authority()?,
+                        now,
+                        &items,
+                        grant::WRITE,
+                        &revoked,
+                    )?;
+                    let payloads = inputs
+                        .iter()
+                        .map(|input| input.payload(effective))
+                        .collect::<Vec<_>>();
+                    if return_receipts {
+                        return self.append_records_receipt(&identity, &payloads);
+                    }
+                    self.append_records(&identity, &payloads)?;
+                    Ok(format!("written {}", payloads.len()))
                 }
 
-                if map.withheld > 0 {
-                    out.push_str(&format!(
-                        "\n{} more exist outside this grant\n",
-                        map.withheld
-                    ));
+                "use_secret" => {
+                    let name = arguments["secret"]
+                        .as_str()
+                        .filter(|name| !name.trim().is_empty())
+                        .ok_or(Error::Malformed("use_secret needs a secret name"))?;
+                    let operation = arguments["operation"]
+                        .as_str()
+                        .filter(|operation| !operation.trim().is_empty())
+                        .ok_or(Error::Malformed("use_secret needs an operation"))?;
+                    let input = arguments.get("input").cloned().unwrap_or_else(|| json!({}));
+                    let revoked = self.revocations(&store, &keys)?;
+                    let descriptor = revoked
+                        .resolve_secret(name)
+                        .map_err(|_| Error::Denied("secret use is unavailable under this grant"))?;
+                    let item = descriptor
+                        .item(operation, now)
+                        .map_err(|_| Error::Denied("secret use is unavailable under this grant"))?;
+                    let effective = hyperconsciousness::query::permit_action_indexed(
+                        &store,
+                        &keys,
+                        &call_chain,
+                        identity.grant_authority()?,
+                        now,
+                        &item,
+                        grant::USE,
+                        &revoked,
+                    )?;
+                    let use_id = Hash(*hyperconsciousness::crypto::random_key()).hex();
+                    self.append_record(
+                        &identity,
+                        &json!({
+                            "kind": "secret_use_started",
+                            "sensitivity": grant::SECRET,
+                            "use": use_id,
+                            "secret": descriptor.id.hex(),
+                            "adapter": &descriptor.adapter,
+                            "operation": operation,
+                            "grant": effective.id().hex(),
+                            "grantee": effective.to.hex(),
+                        })
+                        .to_string(),
+                    )?;
+
+                    let execution = match secret::execute(&self.dir, &descriptor, operation, &input)
+                    {
+                        Ok(execution) => execution,
+                        Err(error) => {
+                            self.append_record(
+                                &identity,
+                                &json!({
+                                    "kind": "secret_use_finished",
+                                    "sensitivity": grant::SECRET,
+                                    "use": use_id,
+                                    "secret": descriptor.id.hex(),
+                                    "adapter": &descriptor.adapter,
+                                    "operation": operation,
+                                    "status": "failed",
+                                    "grant": effective.id().hex(),
+                                    "grantee": effective.to.hex(),
+                                })
+                                .to_string(),
+                            )?;
+                            return Err(error);
+                        }
+                    };
+                    self.append_record(
+                        &identity,
+                        &json!({
+                            "kind": "secret_use_finished",
+                            "sensitivity": grant::SECRET,
+                            "use": use_id,
+                            "secret": descriptor.id.hex(),
+                            "adapter": &descriptor.adapter,
+                            "operation": operation,
+                            "status": "succeeded",
+                            "grant": effective.id().hex(),
+                            "grantee": effective.to.hex(),
+                        })
+                        .to_string(),
+                    )?;
+                    Ok(serde_json::to_string(&execution.result)?)
                 }
 
-                self.append_record(&identity, &map.read_receipt)?;
-                Ok(out)
-            }
-
-            "remember" => {
-                let return_receipts = crate::capture::wants_receipts(arguments)?;
-                let input = RememberInput::parse(arguments)?;
-                if input.change.is_some() {
-                    if !return_receipts {
-                        return Err(Error::Malformed(
-                            "versioned capture requires return_receipts=true",
+                "request_access" => {
+                    if self.company_access_enabled() {
+                        return Err(Error::Denied(
+                            "company grant changes require an owner-signed policy update",
                         ));
                     }
-                    if serde_json::to_vec(arguments)?.len() > MAX_REMEMBER_BATCH_BYTES {
-                        return Err(Error::Malformed("capture payload is too large"));
-                    }
-                    return self.append_capture_changes(&identity, &call_chain, &[input]);
-                }
-                let item = input.item(now);
-                let revoked = self.revocations(&store, &keys)?;
-                let effective = hyperconsciousness::query::permit_write_indexed(
-                    &store,
-                    &keys,
-                    &call_chain,
-                    identity.grant_authority()?,
-                    now,
-                    &item,
-                    &revoked,
-                )?;
-
-                let payload = input.payload(effective);
-                if return_receipts {
-                    return self.append_records_receipt(&identity, &[payload]);
-                }
-                self.append_record(&identity, &payload)?;
-                Ok("written".to_string())
-            }
-
-            "remember_many" => {
-                let return_receipts = crate::capture::wants_receipts(arguments)?;
-                let values = arguments["items"]
-                    .as_array()
-                    .filter(|items| !items.is_empty())
-                    .ok_or(Error::Malformed(
-                        "remember_many needs a non-empty items list",
+                    let permissions = self.permissions.as_ref().ok_or(Error::Denied(
+                        "permission requests require an HTTP endpoint with an owner inbox",
                     ))?;
-                if values.len() > MAX_REMEMBER_BATCH_ITEMS {
-                    return Err(Error::Malformed("remember_many has too many items"));
-                }
-                if serde_json::to_vec(values)?.len() > MAX_REMEMBER_BATCH_BYTES {
-                    return Err(Error::Malformed("remember_many payload is too large"));
-                }
-                let inputs = values
-                    .iter()
-                    .map(RememberInput::parse)
-                    .collect::<Result<Vec<_>>>()?;
-                if inputs.iter().any(|input| input.change.is_some()) {
-                    if !return_receipts || inputs.iter().any(|input| input.change.is_none()) {
-                        return Err(Error::Malformed("versioned batches require change on every item and return_receipts=true"));
-                    }
-                    return self.append_capture_changes(&identity, &call_chain, &inputs);
-                }
-                let items = inputs
-                    .iter()
-                    .map(|input| input.item(now))
-                    .collect::<Vec<_>>();
-                let revoked = self.revocations(&store, &keys)?;
-                let effective = hyperconsciousness::query::permit_actions_indexed(
-                    &store,
-                    &keys,
-                    &call_chain,
-                    identity.grant_authority()?,
-                    now,
-                    &items,
-                    grant::WRITE,
-                    &revoked,
-                )?;
-                let payloads = inputs
-                    .iter()
-                    .map(|input| input.payload(effective))
-                    .collect::<Vec<_>>();
-                if return_receipts {
-                    return self.append_records_receipt(&identity, &payloads);
-                }
-                self.append_records(&identity, &payloads)?;
-                Ok(format!("written {}", payloads.len()))
-            }
-
-            "use_secret" => {
-                let name = arguments["secret"]
-                    .as_str()
-                    .filter(|name| !name.trim().is_empty())
-                    .ok_or(Error::Malformed("use_secret needs a secret name"))?;
-                let operation = arguments["operation"]
-                    .as_str()
-                    .filter(|operation| !operation.trim().is_empty())
-                    .ok_or(Error::Malformed("use_secret needs an operation"))?;
-                let input = arguments.get("input").cloned().unwrap_or_else(|| json!({}));
-                let revoked = self.revocations(&store, &keys)?;
-                let descriptor = revoked
-                    .resolve_secret(name)
-                    .map_err(|_| Error::Denied("secret use is unavailable under this grant"))?;
-                let item = descriptor
-                    .item(operation, now)
-                    .map_err(|_| Error::Denied("secret use is unavailable under this grant"))?;
-                let effective = hyperconsciousness::query::permit_action_indexed(
-                    &store,
-                    &keys,
-                    &call_chain,
-                    identity.grant_authority()?,
-                    now,
-                    &item,
-                    grant::USE,
-                    &revoked,
-                )?;
-                let use_id = Hash(*hyperconsciousness::crypto::random_key()).hex();
-                self.append_record(
-                    &identity,
-                    &json!({
-                        "kind": "secret_use_started",
-                        "sensitivity": grant::SECRET,
-                        "use": use_id,
-                        "secret": descriptor.id.hex(),
-                        "adapter": &descriptor.adapter,
-                        "operation": operation,
-                        "grant": effective.id().hex(),
-                        "grantee": effective.to.hex(),
-                    })
-                    .to_string(),
-                )?;
-
-                let execution = match secret::execute(&self.dir, &descriptor, operation, &input) {
-                    Ok(execution) => execution,
-                    Err(error) => {
-                        self.append_record(
-                            &identity,
-                            &json!({
-                                "kind": "secret_use_finished",
-                                "sensitivity": grant::SECRET,
-                                "use": use_id,
-                                "secret": descriptor.id.hex(),
-                                "adapter": &descriptor.adapter,
-                                "operation": operation,
-                                "status": "failed",
-                                "grant": effective.id().hex(),
-                                "grantee": effective.to.hex(),
-                            })
-                            .to_string(),
-                        )?;
-                        return Err(error);
-                    }
-                };
-                self.append_record(
-                    &identity,
-                    &json!({
-                        "kind": "secret_use_finished",
-                        "sensitivity": grant::SECRET,
-                        "use": use_id,
-                        "secret": descriptor.id.hex(),
-                        "adapter": &descriptor.adapter,
-                        "operation": operation,
-                        "status": "succeeded",
-                        "grant": effective.id().hex(),
-                        "grantee": effective.to.hex(),
-                    })
-                    .to_string(),
-                )?;
-                Ok(serde_json::to_string(&execution.result)?)
-            }
-
-            "request_access" => {
-                if self.company_access_enabled() {
-                    return Err(Error::Denied(
-                        "company grant changes require an owner-signed policy update",
-                    ));
-                }
-                let permissions = self.permissions.as_ref().ok_or(Error::Denied(
-                    "permission requests require an HTTP endpoint with an owner inbox",
-                ))?;
-                let purpose = arguments["purpose"]
-                    .as_str()
-                    .filter(|purpose| !purpose.trim().is_empty())
-                    .ok_or(Error::Malformed("request_access needs a purpose"))?
-                    .to_string();
-                let target_tool = arguments["target_tool"]
-                    .as_str()
-                    .ok_or(Error::Malformed("request_access needs a target_tool"))?
-                    .to_string();
-                let mut target_arguments = arguments
-                    .get("arguments")
-                    .cloned()
-                    .unwrap_or_else(|| json!({}));
-                let Some(object) = target_arguments.as_object_mut() else {
-                    return Err(Error::Malformed(
-                        "request_access arguments must be an object",
-                    ));
-                };
-                object.remove("access_request_id");
-                let sensitivity = arguments["max_sensitivity"]
-                    .as_str()
-                    .map(level_of)
-                    .transpose()?
-                    .unwrap_or(grant::PERSONAL);
-                let revoked = (target_tool == "use_secret")
-                    .then(|| self.revocations(&store, &keys))
-                    .transpose()?;
-                let scope = requested_scope(
-                    &target_tool,
-                    &target_arguments,
-                    sensitivity,
-                    revoked.as_ref(),
-                )?;
-                let request = permissions.request(purpose, target_tool, target_arguments, scope)?;
-                Ok(json!({
+                    let purpose = arguments["purpose"]
+                        .as_str()
+                        .filter(|purpose| !purpose.trim().is_empty())
+                        .ok_or(Error::Malformed("request_access needs a purpose"))?
+                        .to_string();
+                    let target_tool = arguments["target_tool"]
+                        .as_str()
+                        .ok_or(Error::Malformed("request_access needs a target_tool"))?
+                        .to_string();
+                    let mut target_arguments = arguments
+                        .get("arguments")
+                        .cloned()
+                        .unwrap_or_else(|| json!({}));
+                    let Some(object) = target_arguments.as_object_mut() else {
+                        return Err(Error::Malformed(
+                            "request_access arguments must be an object",
+                        ));
+                    };
+                    object.remove("access_request_id");
+                    let sensitivity = arguments["max_sensitivity"]
+                        .as_str()
+                        .map(level_of)
+                        .transpose()?
+                        .unwrap_or(grant::PERSONAL);
+                    let revoked = (target_tool == "use_secret")
+                        .then(|| self.revocations(&store, &keys))
+                        .transpose()?;
+                    let scope = requested_scope(
+                        &target_tool,
+                        &target_arguments,
+                        sensitivity,
+                        revoked.as_deref(),
+                    )?;
+                    let request =
+                        permissions.request(purpose, target_tool, target_arguments, scope)?;
+                    Ok(json!({
                     "request_id": request.request.id,
                     "state": request.state,
                     "target_tool": request.request.tool,
@@ -1367,179 +1430,194 @@ impl Server {
                     "next_step": "wait for the owner, then call access_status with this request_id. do not call the target tool or reuse any older request id until this exact request is approved",
                 })
                 .to_string())
-            }
+                }
 
-            "access_status" => {
-                let permissions = self.permissions.as_ref().ok_or(Error::Denied(
-                    "permission requests require an HTTP endpoint with an owner inbox",
-                ))?;
-                let id = arguments["request_id"]
-                    .as_str()
-                    .filter(|id| !id.trim().is_empty())
-                    .ok_or(Error::Malformed("access_status needs request_id"))?;
-                let requested = permissions.status(id);
-                let (status, resolved_from_stale_id) = match requested {
-                    Ok(status) if matches!(status.state, "pending" | "approved") => (status, false),
-                    Ok(status) => match permissions.single_active()? {
-                        Some(active) => (active, true),
-                        None => (status, false),
-                    },
-                    Err(error) => match permissions.single_active()? {
-                        Some(active) => (active, true),
-                        None => return Err(error),
-                    },
-                };
-                let next_step = match status.state {
+                "access_status" => {
+                    let permissions = self.permissions.as_ref().ok_or(Error::Denied(
+                        "permission requests require an HTTP endpoint with an owner inbox",
+                    ))?;
+                    let id = arguments["request_id"]
+                        .as_str()
+                        .filter(|id| !id.trim().is_empty())
+                        .ok_or(Error::Malformed("access_status needs request_id"))?;
+                    let requested = permissions.status(id);
+                    let (status, resolved_from_stale_id) = match requested {
+                        Ok(status) if matches!(status.state, "pending" | "approved") => {
+                            (status, false)
+                        }
+                        Ok(status) => match permissions.single_active()? {
+                            Some(active) => (active, true),
+                            None => (status, false),
+                        },
+                        Err(error) => match permissions.single_active()? {
+                            Some(active) => (active, true),
+                            None => return Err(error),
+                        },
+                    };
+                    let next_step = match status.state {
                     "approved" => "call target_tool once with the exact arguments shown here plus this request_id as access_request_id",
                     "pending" => "wait for the owner; do not call target_tool and do not use another request id",
                     "denied" | "expired" | "consumed" => "stop; this request cannot authorize the operation",
                     _ => "stop; the permission state is not recognized",
                 };
-                Ok(json!({
-                    "request_id": status.request.id,
-                    "state": status.state,
-                    "target_tool": status.request.tool,
-                    "arguments": status.request.arguments,
-                    "expires_at": status.not_after.unwrap_or(status.request.expires_at),
-                    "next_step": next_step,
-                    "resolved_from_stale_id": resolved_from_stale_id,
-                    "requested_id": resolved_from_stale_id.then_some(id),
-                })
-                .to_string())
-            }
+                    Ok(json!({
+                        "request_id": status.request.id,
+                        "state": status.state,
+                        "target_tool": status.request.tool,
+                        "arguments": status.request.arguments,
+                        "expires_at": status.not_after.unwrap_or(status.request.expires_at),
+                        "next_step": next_step,
+                        "resolved_from_stale_id": resolved_from_stale_id,
+                        "requested_id": resolved_from_stale_id.then_some(id),
+                    })
+                    .to_string())
+                }
 
-            "files" => {
-                let filter = hyperconsciousness::query::Filter {
-                    kinds: vec!["file".to_string(), "workspace_file".to_string()],
-                    limit: arguments["limit"].as_u64().unwrap_or(200).min(1_000) as usize,
-                    ..Default::default()
-                };
-                let snapshot = if hyperconsciousness::search_index::Index::exists(&self.dir) {
-                    None
-                } else {
-                    self.snapshot(&store, &keys)?
-                };
-                let snapshot_read = snapshot.as_ref().map(|snapshot| {
-                    snapshot
-                        .read()
-                        .unwrap_or_else(|poisoned| poisoned.into_inner())
-                });
-                let answer = if let Some(cached) = snapshot_read.as_deref() {
-                    hyperconsciousness::query::look_snapshot(
-                        &store,
-                        &keys,
-                        cached,
-                        &call_chain,
-                        identity.grant_authority()?,
-                        now,
-                        &filter,
-                    )?
-                } else {
-                    let indexed = (|| {
-                        let permissions = self.revocations(&store, &keys)?;
-                        let index = self.search_index(&store, &keys)?;
-                        let index = index
-                            .read()
-                            .unwrap_or_else(|poisoned| poisoned.into_inner());
-                        hyperconsciousness::query::look_indexed(
-                            &store,
-                            &keys,
-                            &index,
-                            &permissions,
-                            &call_chain,
-                            identity.grant_authority()?,
-                            now,
-                            &filter,
-                        )
-                    })();
-                    match indexed {
-                        Ok(answer) => answer,
-                        Err(_) => hyperconsciousness::query::look(
-                            &store,
-                            &keys,
-                            &call_chain,
-                            identity.grant_authority()?,
-                            now,
-                            &filter,
-                        )?,
-                    }
-                };
-
-                // newest of each, with how many lie behind it. a model that
-                // sees the same name four times assumes four files.
-                let mut latest: Vec<(String, u64, u64, usize, bool)> = Vec::new();
-
-                for record in &answer.records {
-                    let bytes = if let Some(cached) = snapshot_read.as_deref() {
-                        cached.payload(record).map(Vec::from)
+                "files" => {
+                    let filter = hyperconsciousness::query::Filter {
+                        kinds: vec!["file".to_string(), "workspace_file".to_string()],
+                        limit: arguments["limit"].as_u64().unwrap_or(200).min(1_000) as usize,
+                        ..Default::default()
+                    };
+                    let snapshot = if hyperconsciousness::search_index::Index::exists(&self.dir) {
+                        None
                     } else {
-                        keys.open_record(record).ok()
+                        self.snapshot(&store, &keys)?
                     };
-                    let Some(bytes) = bytes else {
-                        continue;
-                    };
-
-                    let Ok(value) = serde_json::from_slice::<Value>(&bytes) else {
-                        continue;
-                    };
-
-                    let name = value["path"]
-                        .as_str()
-                        .or_else(|| value["name"].as_str())
-                        .unwrap_or("?")
-                        .to_string();
-                    let len = value["len"].as_u64().unwrap_or(0);
-                    let deleted = value["deleted"].as_bool().unwrap_or(false);
-                    let at = record.hlc.millis;
-
-                    match latest.iter_mut().find(|(known, _, _, _, _)| known == &name) {
-                        Some(entry) => {
-                            entry.3 += 1;
-                            if at >= entry.1 {
-                                entry.1 = at;
-                                entry.2 = len;
-                                entry.4 = deleted;
-                            }
+                    let snapshot_read = snapshot.as_ref().map(|snapshot| {
+                        snapshot
+                            .read()
+                            .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    });
+                    let answer = if let Some(cached) = snapshot_read.as_deref() {
+                        hyperconsciousness::query::look_snapshot(
+                            &store,
+                            &keys,
+                            cached,
+                            &call_chain,
+                            identity.grant_authority()?,
+                            now,
+                            &filter,
+                        )?
+                    } else {
+                        let indexed = (|| {
+                            let permissions = self.revocations(&store, &keys)?;
+                            let index = self.search_index(&store, &keys)?;
+                            let index = index
+                                .read()
+                                .unwrap_or_else(|poisoned| poisoned.into_inner());
+                            hyperconsciousness::query::look_indexed(
+                                &store,
+                                &keys,
+                                &index,
+                                &permissions,
+                                &call_chain,
+                                identity.grant_authority()?,
+                                now,
+                                &filter,
+                            )
+                        })();
+                        match indexed {
+                            Ok(answer) => answer,
+                            Err(_) => hyperconsciousness::query::look(
+                                &store,
+                                &keys,
+                                &call_chain,
+                                identity.grant_authority()?,
+                                now,
+                                &filter,
+                            )?,
                         }
-                        None => latest.push((name, at, len, 1, deleted)),
-                    }
-                }
+                    };
 
-                let mut out = String::new();
-                for (name, at, len, count, deleted) in &latest {
-                    if *deleted {
-                        continue;
-                    }
-                    out.push_str(&format!("{}  {name}  {len} bytes", day(*at)));
-                    if *count > 1 {
-                        out.push_str(&format!("  ({count} versions)"));
-                    }
-                    out.push('\n');
-                }
+                    // newest of each, with how many lie behind it. a model that
+                    // sees the same name four times assumes four files.
+                    let mut latest: Vec<(String, u64, u64, usize, bool)> = Vec::new();
 
-                if out.is_empty() {
-                    out.push_str("no files in this grant\n");
-                }
+                    for record in &answer.records {
+                        let bytes = if let Some(cached) = snapshot_read.as_deref() {
+                            cached.payload(record).map(Vec::from)
+                        } else {
+                            keys.open_record(record).ok()
+                        };
+                        let Some(bytes) = bytes else {
+                            continue;
+                        };
 
-                if answer.truncated {
-                    out.push_str(
+                        let Ok(value) = serde_json::from_slice::<Value>(&bytes) else {
+                            continue;
+                        };
+
+                        let name = value["path"]
+                            .as_str()
+                            .or_else(|| value["name"].as_str())
+                            .unwrap_or("?")
+                            .to_string();
+                        let len = value["len"].as_u64().unwrap_or(0);
+                        let deleted = value["deleted"].as_bool().unwrap_or(false);
+                        let at = record.hlc.millis;
+
+                        match latest.iter_mut().find(|(known, _, _, _, _)| known == &name) {
+                            Some(entry) => {
+                                entry.3 += 1;
+                                if at >= entry.1 {
+                                    entry.1 = at;
+                                    entry.2 = len;
+                                    entry.4 = deleted;
+                                }
+                            }
+                            None => latest.push((name, at, len, 1, deleted)),
+                        }
+                    }
+
+                    let mut out = String::new();
+                    for (name, at, len, count, deleted) in &latest {
+                        if *deleted {
+                            continue;
+                        }
+                        out.push_str(&format!("{}  {name}  {len} bytes", day(*at)));
+                        if *count > 1 {
+                            out.push_str(&format!("  ({count} versions)"));
+                        }
+                        out.push('\n');
+                    }
+
+                    if out.is_empty() {
+                        out.push_str("no files in this grant\n");
+                    }
+
+                    if answer.truncated {
+                        out.push_str(
                         "\nmore matching file records exist; narrow the request or raise limit\n",
                     );
-                }
-                if answer.withheld > 0 {
-                    out.push_str(&format!(
-                        "\n{} records exist that this grant does not cover\n",
-                        answer.withheld
-                    ));
+                    }
+
+                    drop(snapshot_read);
+                    self.append_record(&identity, &answer.read_receipt)?;
+                    Ok(out)
                 }
 
-                drop(snapshot_read);
-                self.append_record(&identity, &answer.read_receipt)?;
-                Ok(out)
+                _ => Err(Error::Malformed("no such tool")),
             }
-
-            _ => Err(Error::Malformed("no such tool")),
+        })()?;
+        if let Some(heads) = read_heads {
+            let fresh = RuntimeKeys::open(&self.dir, &identity)?;
+            if fresh.cache_fingerprint() != keys.cache_fingerprint() {
+                return Err(Error::Denied("runtime key view changed during read"));
+            }
+            grant::verify_chain(
+                &call_chain,
+                identity.grant_authority()?,
+                Clock::new().now().millis,
+            )?;
+            hyperconsciousness::search_index::validate_read_tail(
+                &store,
+                &fresh,
+                &heads,
+                &call_chain,
+            )?;
         }
+        Ok(result)
     }
 
     fn call_chain(&self, name: &str, arguments: &Value) -> Result<(Vec<Grant>, Value)> {
@@ -2257,7 +2335,7 @@ fn tools() -> Value {
         {
             "name": "overview",
             "description": "start here. how much is in this person's brain, over what dates, \
-                            in what kinds, under what tags, across how many devices. counts \
+                            in what kinds and under what tags. counts \
                             and labels only, no content, so it is cheap and safe to call first \
                             rather than guessing what to search for.",
             "inputSchema": {"type": "object", "properties": {}},
@@ -3504,7 +3582,7 @@ mod tests {
 
         let output = server.call("files", &json!({})).unwrap();
         assert!(!output.contains("private-tax-return.pdf"));
-        assert!(output.contains("does not cover"));
+        assert!(!output.contains("does not cover"));
 
         let store = Store::open(dir.path()).unwrap();
         let records = store.log(identity.device()).unwrap().read_all().unwrap();

@@ -176,8 +176,10 @@ vault. These changes do not migrate existing keys or alter AWS IAM. A broker wit
 access to every integration remains a large compromise boundary; provision
 separate adapter credentials and least-privilege workload roles.
 
-Revocation stops new admissions. An operation already admitted may finish; data
-already returned and copied credentials cannot be recalled. Rotate exposed
+Revocation stops new admissions. Read responses also recheck the signed policy
+and current membership at release without consuming a proof twice; a policy
+generation change denies the in-flight read. An already admitted write or secret
+operation may finish. Data already returned and copied credentials cannot be recalled. Rotate exposed
 provider secrets and affected compartment generations after a compromise.
 
 Policy delivery between gateways, Google/other SSO, a graphical member directory,

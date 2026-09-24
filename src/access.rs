@@ -449,8 +449,8 @@ pub fn sign_request(
 }
 
 /// Verify exact request, current membership, grant binding and fresh proof.
-/// Consume durably before dispatch. Already admitted operations may finish
-/// after a policy update; a crash never makes their proof retryable.
+/// Consume durably before dispatch. Reads recheck policy at release; already
+/// admitted mutations may finish. A crash never makes a proof retryable.
 pub fn authorize(
     dir: &Path,
     request: &Value,
@@ -513,6 +513,27 @@ pub fn authorize(
         grant: proof.grant,
         generation: proof.generation,
     })
+}
+
+/// Recheck an already admitted read at response release without consuming its
+/// proof twice. Policy generation, membership and device expiry remain live.
+pub fn revalidate_read(dir: &Path, request: &Value, authority: DeviceId, now: u64) -> Result<()> {
+    let proof: Proof = serde_json::from_value(
+        request
+            .get("hc_auth")
+            .cloned()
+            .ok_or(Error::Denied("signed hc_auth device proof is required"))?,
+    )?;
+    let policy = current(dir, authority, now)?;
+    verify(
+        fixed::<32>(&proof.device)?,
+        &request_bytes(request, &proof)?,
+        &proof.signature,
+    )?;
+    if proof.authority != authority.hex() || !policy.policy.permits(&proof, now) {
+        return Err(Error::Denied("company access changed during read"));
+    }
+    Ok(())
 }
 
 /// Key-only enrollment for a worker: creates no brain, owner or recovery key.

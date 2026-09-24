@@ -83,11 +83,42 @@ bodies, labels, record ids or gram postings without a usable brain key. Search
 temporarily decrypts bounded metadata shards, only route-filter candidate
 postings shards, and exact candidate records. The authenticated filter may
 cause extra shard reads but must never suppress a real candidate. Authenticated
-time/sensitivity summaries skip metadata only for a decisive all/none grant
-outcome; kind/tag and overlapping scopes stay on the conservative path. A
+time/sensitivity and bounded kind/tag summaries skip metadata only for a decisive
+all/none grant outcome; incomplete summaries and overlapping scopes stay on the
+conservative path. A
 process compromise on that trusted node can still observe those live queries
 and results; the disk fold narrows storage and restart cost, not the
 trusted-node threat boundary.
+
+An owner can launch MCP/HTTP with `HC_RESIDENT_CACHE=off` to avoid retaining
+snapshot, search and permission views between calls. Missing means enabled;
+`on`, `1` and `true` enable it, and any other value disables it. This trades
+latency for lower resident plaintext/metadata retention. It does not zeroize
+returned text, hide process memory during a request, disable encrypted disk
+indexes, or erase history. The setting is not an agent tool argument.
+
+Search format v7 retains at most two encrypted directory generations, each with
+at most 128 one-MiB pages. The decoded directory still lives in memory; encrypted
+postings and metadata on disk still grow with history. The resident managed
+capture fold has a 50,000-record and conservative 16 MiB accounting budget;
+oversized folds remain transient and can still be expensive. Permission folds
+retain the existing 100,000-grant/1,000,000-revocation limits. These are local
+resource limits, not measured production capacity or unlimited multi-tenancy.
+
+Read release checks tolerate ordinary append-only writes but fail closed for
+corrections/retractions, relevant revocations, changed key views or company
+membership. Tail catch-up is capped at three passes, 10,000 records and 64 MiB.
+A busy control stream or repeated index cleanup can still force retry/fallback.
+Small in-memory/streaming reads retain their conservative head-equality checks.
+Use independent keys, stores, OS identities and workload budgets per trust domain;
+a shared trusted process is not a tenant-isolation boundary. No remote traffic
+padding, hidden ciphertext sizes, constant-time access, SSO or new hosted service
+is implied by these improvements.
+
+MCP omits global device counts and hidden-record counts, including from newly
+written read receipts. Historical append-only receipts keep their original
+content. Owner-side library diagnostics still exist and must not be forwarded
+to narrow-grant agents. Explicit exports remain copies that owners control.
 
 ## limits we state rather than soften
 

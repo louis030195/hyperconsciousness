@@ -81,6 +81,12 @@ pub(crate) struct ArchivedEpoch {
 /// can keep passing their original key, while a personal brain can resolve the
 /// authenticated epoch carried by each record or blob through `Keyring`.
 pub trait DataKeys {
+    /// Opt in to resident derived views only with a fingerprint covering every
+    /// usable key and author cutoff. Custom key providers default to no reuse.
+    fn cache_identity(&self) -> Option<Hash> {
+        None
+    }
+
     fn current_epoch(&self) -> u32;
     fn key(&self, epoch: u32) -> Result<&[u8; 32]>;
 
@@ -570,6 +576,10 @@ impl Admission<'_> {
 }
 
 impl DataKeys for RuntimeKeys {
+    fn cache_identity(&self) -> Option<Hash> {
+        Some(self.cache_fingerprint())
+    }
+
     fn current_epoch(&self) -> u32 {
         match self {
             RuntimeKeys::Epochs { keys, .. } => keys.current_epoch(),

@@ -75,3 +75,84 @@ fn machine_inventory_errors_are_structured_and_do_not_create_a_brain() {
     assert_eq!(error["error"]["code"], "malformed_request");
     assert_eq!(error["error"]["retryable"], false);
 }
+
+#[test]
+fn scoped_ask_hides_outside_counts_and_releases_nothing_when_audit_is_locked() {
+    use hyperconsciousness::grant::{NORMAL, READ, SECRET};
+    use hyperconsciousness::keyring::{DataKeys, RuntimeKeys};
+    use hyperconsciousness::{Clock, Grant, Identity, Record, Scope, Store};
+    use serde_json::{json, Value};
+
+    std::env::set_var("BRAINMESH_NO_KEYSTORE", "1");
+    let root = tempfile::tempdir().unwrap();
+    let mut identity = Identity::load_or_create(root.path()).unwrap();
+    identity.create_brain().unwrap();
+    let keys = RuntimeKeys::open(root.path(), &identity).unwrap();
+    let grant = Grant::issue(
+        &identity.grant_authority_signing().unwrap(),
+        identity.device(),
+        Scope {
+            max_sensitivity: NORMAL,
+            ..Scope::default()
+        },
+        READ,
+        u64::MAX,
+    )
+    .unwrap();
+    let blob: String = grant.encode().iter().map(|b| format!("{b:02x}")).collect();
+    let store = Store::open(root.path()).unwrap();
+    {
+        let log = store.log_for_write(identity.device()).unwrap();
+        let mut cursor = log.cache_head().unwrap();
+        for payload in [
+            json!({"kind":"grant","id":grant.id().hex(),"blob":blob,"sensitivity":SECRET}),
+            json!({"kind":"note","text":"visible-canary","sensitivity":NORMAL}),
+            json!({"kind":"note","text":"hidden-canary","sensitivity":SECRET}),
+        ] {
+            let record = Record::create(
+                &identity.signing,
+                if cursor.empty { 0 } else { cursor.seq + 1 },
+                cursor.id,
+                Clock::new().now(),
+                keys.current_epoch(),
+                keys.current_key().unwrap(),
+                payload.to_string().as_bytes(),
+            )
+            .unwrap();
+            log.append_new_batch(&[record], &mut cursor).unwrap();
+        }
+    }
+    let ask = || {
+        Command::new(binary())
+            .args(["ask", &grant.id().hex(), "--dir"])
+            .arg(root.path())
+            .env("BRAINMESH_NO_KEYSTORE", "1")
+            .output()
+            .unwrap()
+    };
+    let output = ask();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let text = String::from_utf8(output.stdout).unwrap();
+    assert!(text.contains("visible-canary"));
+    assert!(!text.contains("hidden-canary"));
+    assert!(!text.contains("outside this grant"));
+    let log = store.log_for_write(identity.device()).unwrap();
+    let receipts: Vec<Value> = log
+        .read_all()
+        .unwrap()
+        .iter()
+        .filter_map(|r| serde_json::from_slice(&keys.open_record(r).ok()?).ok())
+        .filter(|v: &Value| v["kind"] == "read")
+        .collect();
+    assert_eq!(receipts.len(), 1);
+    assert!(receipts[0].get("withheld").is_none());
+    let denied = ask();
+    assert!(!denied.status.success());
+    assert!(String::from_utf8_lossy(&denied.stderr).contains("another process holds the log"));
+    assert!(!String::from_utf8_lossy(&denied.stdout).contains("visible-canary"));
+    drop(log);
+}

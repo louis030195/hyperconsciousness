@@ -44,7 +44,7 @@ impl Server {
             &keys,
             fingerprint,
         )?;
-        let mut state = index.capture_state(&keys)?;
+        let mut state = index.capture_state_shared(&keys)?;
         let permissions = self.revocations(&store, &keys)?;
         let now = Clock::new().now().millis;
         let items: Vec<_> = inputs.iter().map(|input| input.item(now)).collect();
@@ -117,7 +117,7 @@ impl Server {
                     id: record.id(),
                     empty: false,
                 };
-                state.observe(meta.clone(), stamp.clone());
+                Arc::make_mut(&mut state).observe(meta.clone(), stamp.clone());
                 new_records.push(record);
                 payloads.push(payload);
                 (stamp, false)

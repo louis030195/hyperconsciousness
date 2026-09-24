@@ -6348,6 +6348,8 @@ fn run() -> Result<()> {
                 limit,
             )?;
 
+            // A failed durable audit append must release no result text.
+            append(&target_dir, &answer.read_receipt)?;
             for record in &answer.records {
                 let body = match keys.open_record(record) {
                     Ok(bytes) => String::from_utf8_lossy(&bytes).to_string(),
@@ -6362,18 +6364,6 @@ fn run() -> Result<()> {
                     .unwrap_or(body);
 
                 println!("{}  {}  {}", record.author.short(), record.seq, shown);
-            }
-
-            // the receipt goes in the log before we say a word about what was
-            // withheld, so a read can never happen without leaving a trace
-            append(&target_dir, &answer.read_receipt)?;
-
-            if answer.withheld > 0 {
-                println!();
-                println!(
-                    "{} records were outside this grant and not shown",
-                    answer.withheld
-                );
             }
 
             println!("logged. see `hc audit`");

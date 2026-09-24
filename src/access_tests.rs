@@ -316,3 +316,36 @@ fn secret_adapter_never_runs_for_unsigned_tampered_or_replayed_requests() {
         .any(|s| s.contains("access_admitted") && s.contains(&f.grant.to.hex())));
     assert!(bodies.iter().all(|s| !s.contains("never-log-input")));
 }
+
+#[test]
+fn admitted_read_rechecks_membership_without_making_proof_replayable() {
+    let mut f = Fixture::new(hyperconsciousness::grant::READ);
+    let request = f.request("search", json!({"query":"anything"}));
+    let authority = f.owner.grant_authority().unwrap();
+    let now = Clock::new().now().millis;
+    access::authorize(
+        f.dir.path(),
+        &request,
+        authority,
+        f.owner.device(),
+        &f.grant,
+        true,
+        now,
+    )
+    .unwrap();
+    access::revalidate_read(f.dir.path(), &request, authority, now).unwrap();
+    assert!(access::authorize(
+        f.dir.path(),
+        &request,
+        authority,
+        f.owner.device(),
+        &f.grant,
+        true,
+        now
+    )
+    .is_err());
+    f.policy.generation += 1;
+    f.policy.members.clear();
+    f.install();
+    assert!(access::revalidate_read(f.dir.path(), &request, authority, now).is_err());
+}

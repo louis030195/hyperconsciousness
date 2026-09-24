@@ -126,17 +126,42 @@ impl Stamp {
     }
 }
 
-#[derive(Default)]
+#[derive(Clone, Debug, Default)]
 pub struct State {
     sources: BTreeMap<Hash, BTreeMap<u64, Version>>,
     records: BTreeMap<Hash, (Hash, u64)>,
 }
+#[derive(Clone, Debug)]
 struct Version {
     meta: Meta,
     stamps: BTreeMap<Hash, Stamp>,
     conflicted: bool,
 }
 impl State {
+    /// Conservative resident-cache accounting, including tree/node overhead.
+    /// This is a retention budget, not a claim about allocator RSS.
+    pub(crate) fn cache_bytes(&self) -> usize {
+        self.records.len().saturating_mul(1024).saturating_add(
+            self.sources
+                .values()
+                .flat_map(|v| v.values())
+                .flat_map(|v| v.stamps.values())
+                .map(|stamp| {
+                    stamp.item.kind.capacity().saturating_add(
+                        stamp
+                            .item
+                            .tags
+                            .capacity()
+                            .saturating_mul(std::mem::size_of::<String>())
+                            .saturating_add(
+                                stamp.item.tags.iter().map(String::capacity).sum::<usize>(),
+                            ),
+                    )
+                })
+                .fold(0usize, usize::saturating_add),
+        )
+    }
+
     pub fn is_empty(&self) -> bool {
         self.records.is_empty()
     }
