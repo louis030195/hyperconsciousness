@@ -1956,3 +1956,51 @@ tbody tr:hover {
     flex-wrap: wrap;
   }
 }
+
+/* Authenticated record previews share the existing dashboard palette. */
+.records-panel {
+  padding: 28px;
+}
+.records-search {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  align-items: center;
+  margin: 24px 0 12px;
+}
+.records-search .search-field {
+  flex: 1;
+  min-width: 180px;
+}
+.record-card {
+  padding: 24px 0;
+  border-bottom: 1px solid var(--border, #dfe3d5);
+}
+.record-meta {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  font-size: 11px;
+  color: #758269;
+}
+.record-card h3 {
+  margin: 12px 0;
+  overflow-wrap: anywhere;
+}
+.record-excerpt {
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  font-size: 14px;
+}
+.record-body {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  padding: 20px;
+  background: #f0f1e8;
+  font-size: 12px;
+  line-height: 1.7;
+  max-height: 65vh;
+  overflow: auto;
+}

@@ -18,10 +18,10 @@ particular model, or a required hosted service.
 - CLI/MCP/HTTP interfaces, operating skills, and thin source/transport adapters.
   Screenpipe, files and harness handoffs use generic storage contracts.
 - Tests, evals, documentation and packaging that make those capabilities reliable.
-- The optional `dashboard/` local, read-only metadata inspector. It consumes the
-  existing CLI contracts and has its own package and dependencies. It is not
-  bundled into the engine, CLI releases or npm wrapper. This is a narrow
-  repository exception for the HC dashboard requested by the maintainer; it
+- The optional `dashboard/` local, read-only inspector. It consumes the
+  existing CLI and authenticated MCP contracts and has its own package and
+  dependencies. It is not bundled into the engine, CLI releases or npm wrapper.
+  This is a narrow repository exception for the HC dashboard requested by the maintainer; it
   does not admit hosted/team clients or a second authorization layer.
 
 ## What stays outside this repository

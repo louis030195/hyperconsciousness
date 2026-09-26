@@ -40,12 +40,14 @@ import { ImpossibleAtlas, Mark, Tessellation } from "./geometry";
 import { SidebarResizer } from "./sidebar-resizer";
 import { InventoryProgress } from "./inventory-progress";
 import { CommandMenu, type DashboardCommand } from "./command-menu";
-type View = "overview" | "files" | "topology" | "access";
+import { Records } from "./records";
+type View = "overview" | "files" | "topology" | "access" | "records";
 const nav = [
   { id: "overview", title: "Overview", icon: Grid2X2, n: "01" },
   { id: "files", title: "Stored files", icon: Database, n: "02" },
   { id: "topology", title: "Your topology", icon: Network, n: "03" },
   { id: "access", title: "Identity & access", icon: Fingerprint, n: "04" },
+  { id: "records", title: "Records", icon: File, n: "05" },
 ] as const;
 const number = (n: number) => n.toLocaleString("en-US");
 const bytes = (n: number) => {
@@ -114,6 +116,7 @@ export default function Dashboard() {
   );
   const [activeRow, setActiveRow] = useState(0);
   const [sidebarWidth, setSidebarWidth] = useState(238);
+  const [recordsRevision, setRecordsRevision] = useState(0);
   const [view, setView] = useState<View>("overview");
   const [data, setData] = useState<Overview>();
   const [loading, setLoading] = useState(true);
@@ -200,8 +203,10 @@ export default function Dashboard() {
   }, [selected]);
   useEffect(() => {
     if (!pendingFocus) return;
-    if (pendingFocus === "search") searchInput.current?.focus();
-    else mainContent.current?.focus();
+    if (pendingFocus === "search") {
+      if (view === "records") document.getElementById("record-search")?.focus();
+      else searchInput.current?.focus();
+    } else mainContent.current?.focus();
     setPendingFocus(null);
   }, [view, pendingFocus]);
   useEffect(() => {
@@ -230,12 +235,17 @@ export default function Dashboard() {
     rows[next].scrollIntoView({ block: "nearest" });
   }
   function focusSearch() {
+    if (view === "records") {
+      document.getElementById("record-search")?.focus();
+      return;
+    }
     if (view !== "files" && view !== "access") navigate("files");
     setPendingFocus("search");
   }
   function refreshCurrent() {
     if (loading) return;
     void load();
+    if (view === "records") setRecordsRevision((n) => n + 1);
     if (
       (view === "files" || view === "access") &&
       !busy[view] &&
@@ -267,7 +277,12 @@ export default function Dashboard() {
     })),
     {
       id: "search",
-      label: view === "access" ? "Filter grants" : "Find stored files",
+      label:
+        view === "access"
+          ? "Filter grants"
+          : view === "records"
+            ? "Search records"
+            : "Find stored files",
       keys: ["/"],
       hint: "/",
       run: focusSearch,
@@ -424,7 +439,8 @@ export default function Dashboard() {
           <div className="topbar-right">
             <CommandMenu commands={commands} blocked={Boolean(selected)} />
             <span className="local-label">
-              <span className="tiny-dot on" /> {data?.location || "On this device"}
+              <span className="tiny-dot on" />{" "}
+              {data?.location || "On this device"}
             </span>
             <span className="topbar-divider" />
             <button
@@ -475,7 +491,7 @@ export default function Dashboard() {
                   </p>
                   <button
                     className="primary-button"
-                    onClick={() => navigate("files")}
+                    onClick={() => navigate("records")}
                   >
                     Explore your memory <ArrowUpRight size={17} />
                   </button>
@@ -741,7 +757,8 @@ export default function Dashboard() {
               </section>
             </>
           )}
-          {view !== "overview" && (
+          {view === "records" && <Records revision={recordsRevision} />}
+          {view !== "overview" && view !== "records" && (
             <>
               <div className="page-heading">
                 <span className="eyebrow">
@@ -1120,9 +1137,17 @@ export default function Dashboard() {
                             {query || filter !== "all"
                               ? "Nothing matches these filters."
                               : view === "files"
-                                ? "No stored file manifests were reported. Your brain may still contain notes and other records."
+                                ? "No stored files were reported. Imported company data and notes appear under Records."
                                 : "No issued grants were reported."}
                           </p>
+                        )}
+                        {view === "files" && !inventory.files?.length && (
+                          <button
+                            className="primary-button"
+                            onClick={() => navigate("records")}
+                          >
+                            Browse records <ArrowUpRight size={17} />
+                          </button>
                         )}
                         <div className="table-footer">
                           <span>

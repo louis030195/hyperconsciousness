@@ -21,7 +21,7 @@ cargo package --locked
 ```
 
 This repository ships the Rust engine, CLI, and agent skills. Client apps are
-maintained separately, with the optional local metadata dashboard described in
+maintained separately, with the optional local read-only dashboard described in
 MISSION.md as the sole exception. For dashboard changes, run `bun install
 --frozen-lockfile`, `bun run check`, `bun test tests`, `bun run build`, and
 `bun run test:e2e` from `dashboard/`, plus the root scope and packaging checks.

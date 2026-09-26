@@ -3,11 +3,12 @@
 A general HC dashboard with original Escher-inspired geometry: impossible stairs,
 isometric tessellations, orbital diagrams, and a green-and-parchment palette.
 
-**[UI guide and screenshots](docs/ui/README.md)** covers the four views, file
+**[UI guide and screenshots](docs/ui/README.md)** covers the dashboard views, file
 inspection, keyboard shortcuts, sidebar resizing, and loading behavior.
 
 This is an optional, independently packaged Next.js client in the HC repository. HC's Rust core, storage format, access rules,
-and release remain unchanged. The client renders metadata from HC's existing CLI;
+and release remain unchanged. The client renders metadata from HC's existing
+CLI and can browse records through an authenticated HC reader;
 it does not implement another storage engine or authority layer.
 
 ## Run locally
@@ -45,10 +46,39 @@ Optional server environment variables, set before starting:
 | `HC_DASHBOARD_NAME` | `My brain` | Workspace display label |
 | `HC_DASHBOARD_LOCATION` | `On this device` | Display label for the server/store location, not authentication |
 
+## Optional record reader
+
+The Records view browses notes and imported source records through an existing
+HC MCP reader. Set these server-side variables to enable it:
+
+| Variable | Purpose |
+| --- | --- |
+| `HC_DASHBOARD_MCP_URL` | Existing HTTPS MCP endpoint |
+| `HC_DASHBOARD_MCP_TOKEN_FILE` | Regular file containing that reader's bearer token |
+| `HC_DASHBOARD_MCP_CA_FILE` | Optional PEM trust certificate for a private endpoint |
+
+Keep the token file private and outside the repository. The token stays on the
+server. The endpoint must support HC’s text `search` response and `record`.
+The dashboard consumes filtered text only, preserving source withdrawal and
+version notices from company readers. It never falls back to structured excerpts.
+Reads use its existing grant; this setting does not create
+access or make the local dashboard a multi-user service. The reader may audit
+requests. Browser callers can invoke only these two read operations, with bounded
+arguments and responses. Local request checks apply to record requests too.
+
+Records opens recent results, searches within the reader's scope, and follows
+opaque cursors for older results. Previews may be clipped. Ingestion dates are
+not source event dates, and historical results are not proof of a current source
+version. The storage overview can describe a broader store than this reader can
+access. Without reader configuration, the other views still work.
+Temporary reader outages retry at most three times, with a 55-second browser
+deadline. Access denials are not retried. No record content is cached on disk.
+
 ## Views and interpretation
 
 - **Overview:** signed record counts, allocated local storage, device identity,
   device histories, and configured peers. Counts include policy and audit records.
+- **Records:** authenticated search, recent records, pagination, and text previews.
 - **Stored files:** newest file manifest metadata, filename filtering, versions,
   logical size, chunk availability, and a keyboard-accessible metadata dialog.
 - **Your topology:** locally held author histories and configured replication
@@ -84,7 +114,7 @@ unavailable. Opening an absent or empty store does not initialize it.
 
 Both launch scripts bind to loopback. Metadata routes validate the local Host,
 same-origin browser context, and a custom request header, reject unsupported
-operations, and return `Cache-Control: no-store`. There are no content downloads,
+operations, and return `Cache-Control: no-store`. There are no file downloads,
 analytics, third-party assets, or browser-persisted inventories. HC performs its
 own key handling; key bytes are never returned by this app.
 
@@ -109,6 +139,7 @@ for filtering, dialog keyboard behavior, failures, and responsive layout, plus
 real HTTP checks for blocked requests. They do not change a real brain.
 
 Code is grouped into `lib/hc.ts` (bounded CLI adapter), `lib/model.ts` (contracts
-and parsing), one API route, the React dashboard, original SVG geometry, and CSS.
-There are no new sync jobs, cloud credentials, permission mutations, or ingestion
+and parsing), `lib/records.ts` (authenticated read adapter), two API routes,
+the React dashboard, original SVG geometry, and CSS.
+There are no new sync jobs, provider credentials, permission mutations, or ingestion
 providers in this client.

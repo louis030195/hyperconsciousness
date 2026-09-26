@@ -144,3 +144,18 @@ preview with **Ctrl+C** afterward.
 
 Keep example data clearly synthetic. Do not replace these documentation images
 with screenshots of personal filenames, device identities, or production grants.
+
+## Records
+
+Press **5** or choose **Records** to browse notes and imported source records.
+This view uses an existing authenticated HC reader configured on the dashboard
+server; see [reader setup](../../README.md#optional-record-reader). It shows
+recent results, supports **/** to focus search, and pages through older results.
+**Read record** expands a text preview. Returned text is displayed as text, never
+executed as HTML. Access failures appear as errors rather than an empty store.
+
+Stored files covers file manifests only. An empty file inventory can coexist
+with many company records; its **Browse records** button takes you to this view.
+The overview's **Explore your memory** button also opens Records. Reader scope
+may be narrower than the storage overview. Search can return historical source
+versions, and dates show ingestion rather than source events.

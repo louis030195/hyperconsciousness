@@ -20,7 +20,9 @@ using it for important data. The package is `hyperconsciousness`; run it with `h
 Use the optional [HC Atlas dashboard](dashboard/README.md) to inspect storage,
 file metadata, identity, grants, and configured peers. You can navigate with the
 keyboard or use its command menu. The [UI guide and screenshots](dashboard/docs/ui/README.md)
-show each view.
+show each view. With an existing authenticated HC reader configured, Records
+also lets you search notes and imported source records, page through older
+results, and open text previews.
 
 The dashboard runs locally and requires an existing HC installation. Install it
 separately from the CLI. Agents can start it when a visual inspection would help;

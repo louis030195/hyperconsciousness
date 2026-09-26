@@ -69,7 +69,7 @@ test("navigation, availability filters and keyboard file inspection", async ({
   page.on("pageerror", (error) => errors.push(error.message));
   await page.goto("/");
   await expect(page.getByText("READING YOUR LOCAL BRAIN")).toBeVisible();
-  await page.getByRole("button", { name: "Explore your memory" }).click();
+  await page.getByRole("button", { name: "Stored files", exact: true }).click();
   await expect(
     page.getByRole("button", { name: "handbook.md", exact: true }),
   ).toBeVisible();
@@ -112,7 +112,7 @@ test("failed inspection remains an error, never an empty inventory", async ({
     }),
   );
   await page.goto("/");
-  await page.getByRole("button", { name: "Explore your memory" }).click();
+  await page.getByRole("button", { name: "Stored files", exact: true }).click();
   await expect(page.getByText("Inspection unavailable.")).toBeVisible();
   await expect(page.getByText("HC inspection timed out.")).toBeVisible();
   await expect(page.getByText(/No stored file manifests/)).toHaveCount(0);
@@ -297,4 +297,118 @@ test("single-key shortcuts can be disabled without losing the command menu", asy
   await expect(
     page.getByRole("button", { name: "Stored files", exact: true }),
   ).toHaveAttribute("aria-current", "page");
+});
+
+test("company records are discoverable from empty files and support search, paging and safe previews", async ({
+  page,
+}) => {
+  await page.route("**/api/overview*", (route) => {
+    const section = new URL(route.request().url()).searchParams.get("section");
+    return route.fulfill({
+      json:
+        section === "files"
+          ? { state: "ready", checkedAt, total: 0, files: [] }
+          : overview,
+    });
+  });
+  const requests: any[] = [];
+  await page.route("**/api/records", (route) => {
+    const input = route.request().postDataJSON();
+    requests.push(input);
+    if (requests.length === 1)
+      return route.fulfill({
+        status: 503,
+        json: { error: "Backup in progress", retryable: true },
+      });
+    if (input.query === "denied")
+      return route.fulfill({
+        status: 503,
+        json: { error: "Reader access expired" },
+      });
+    if (input.ref)
+      return route.fulfill({
+        json: {
+          text: "<img src=x onerror=alert(1)> Historical record body",
+          ref: input.ref,
+        },
+      });
+    return route.fulfill({
+      json: {
+        items: [
+          {
+            ref: input.cursor ? "abcdef123456:1" : "abcdef123456:2",
+            text: input.query
+              ? "Google Ads sample"
+              : "Source: slack/messages Source ID: fixture Example company discussion",
+            ingestedDay: "2026-09-25",
+            clipped: true,
+          },
+        ],
+        hasMore: !input.cursor,
+        nextCursor: input.cursor ? undefined : "opaque-next",
+      },
+    });
+  });
+  await page.goto("/");
+  await page.getByRole("button", { name: "Stored files", exact: true }).click();
+  await page.getByRole("button", { name: "Browse records" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Recent records" }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Read record", exact: true }).click();
+  await expect(page.locator(".record-body")).toContainText("<img src=x");
+  await expect(page.locator(".record-body img")).toHaveCount(0);
+  await page.getByRole("button", { name: "Older results" }).click();
+  await expect(page.getByText("abcdef123456:1", { exact: true })).toBeVisible();
+  expect(requests.some((r) => r.cursor === "opaque-next")).toBe(true);
+  await page.keyboard.press("/");
+  await expect(
+    page.getByRole("textbox", { name: "Search records" }),
+  ).toBeFocused();
+  await page
+    .getByRole("textbox", { name: "Search records" })
+    .fill("google ads");
+  await page.getByRole("textbox", { name: "Search records" }).press("Enter");
+  await expect(
+    page.getByText("Google Ads sample", { exact: false }),
+  ).toBeVisible();
+  expect(requests.at(-1)).toEqual({ query: "google ads" });
+  await page.getByRole("textbox", { name: "Search records" }).fill("denied");
+  await page.getByRole("textbox", { name: "Search records" }).press("Enter");
+  await expect(page.locator(".records-panel [role=alert]")).toContainText(
+    "Reader access expired",
+  );
+  await expect(
+    page.getByText("Google Ads sample", { exact: false }),
+  ).toHaveCount(0);
+});
+
+test("record route rejects cross-origin, oversized and arbitrary tool requests", async ({
+  request,
+}) => {
+  expect((await request.post("/api/records", { data: {} })).status()).toBe(403);
+  expect(
+    (
+      await request.post("/api/records", {
+        headers: { "X-HC-Dashboard": "1", Origin: "https://example.com" },
+        data: {},
+      })
+    ).status(),
+  ).toBe(403);
+  expect(
+    (
+      await request.post("/api/records", {
+        headers: { "X-HC-Dashboard": "1" },
+        data: { tool: "remember", text: "no" },
+      })
+    ).status(),
+  ).toBe(400);
+  expect(
+    (
+      await request.post("/api/records", {
+        headers: { "X-HC-Dashboard": "1" },
+        data: { query: "x".repeat(5000) },
+      })
+    ).status(),
+  ).toBe(413);
 });
