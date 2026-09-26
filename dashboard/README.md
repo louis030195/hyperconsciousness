@@ -43,6 +43,7 @@ Optional server environment variables, set before starting:
 | `HC_DASHBOARD_DIR` | `~/.brain` | Existing local store, an absolute path is recommended |
 | `HC_DASHBOARD_BINARY` | `hc` | Existing CLI executable |
 | `HC_DASHBOARD_NAME` | `My brain` | Workspace display label |
+| `HC_DASHBOARD_LOCATION` | `On this device` | Display label for the server/store location, not authentication |
 
 ## Views and interpretation
 

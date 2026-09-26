@@ -12,6 +12,7 @@ export type Overview = {
   state: "ready" | "unavailable";
   checkedAt: string;
   name: string;
+  location?: string;
   path: string;
   version: string;
   device: string;

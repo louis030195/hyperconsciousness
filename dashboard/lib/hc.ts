@@ -71,6 +71,7 @@ async function collectOverview(): Promise<Overview> {
     state: "unavailable",
     checkedAt: new Date().toISOString(),
     name: label,
+    location: process.env.HC_DASHBOARD_LOCATION || "On this device",
     path: directory,
     version: "Unknown",
     device: "",

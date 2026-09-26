@@ -382,7 +382,7 @@ export default function Dashboard() {
           <span className="brain-symbol">◈</span>
           <div>
             <strong>{data?.name ?? "My brain"}</strong>
-            <span>LOCAL WORKSPACE</span>
+            <span>{data?.location || "Local workspace"}</span>
           </div>
           <LockKeyhole size={14} />
         </div>
@@ -424,7 +424,7 @@ export default function Dashboard() {
           <div className="topbar-right">
             <CommandMenu commands={commands} blocked={Boolean(selected)} />
             <span className="local-label">
-              <span className="tiny-dot on" /> ON THIS DEVICE
+              <span className="tiny-dot on" /> {data?.location || "On this device"}
             </span>
             <span className="topbar-divider" />
             <button
