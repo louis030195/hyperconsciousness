@@ -1,0 +1,22 @@
+{
+  "overview": {
+    "state": "ready", "checkedAt": "2026-09-25T16:00:00Z", "name": "Example brain", "path": "/example/brain", "version": "hc demo", "device": "a1b2c3d4e5f6", "joined": true, "authority": "device owner", "keyStorage": "file, 0600",
+    "devices": [{"id":"a1b2c3d4e5f6","records":8420,"local":true,"frozen":false},{"id":"b2c3d4e5f6a1","records":3210,"local":false,"frozen":false},{"id":"c3d4e5f6a1b2","records":850,"local":false,"frozen":false}], "records":12480,
+    "storage":[{"name":"log","bytes":805306368},{"name":"blobs","bytes":2147483648},{"name":"cache","bytes":100663296}], "peers":["archive.example","laptop.example"], "issues":[], "storageMeasured":true,"peersMeasured":true
+  },
+  "files": {
+    "state":"ready","checkedAt":"2026-09-25T16:00:00Z","total":4,"truncated":false,"refreshing":false,
+    "files":[
+      {"name":"handbook.md","contentId":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","bytes":18432,"chunks":1,"missing":0,"versions":7,"state":"here"},
+      {"name":"research/field-notes.pdf","contentId":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","bytes":2621440,"chunks":3,"missing":1,"versions":2,"state":"elsewhere"},
+      {"name":"projects/atlas/sketches.png","contentId":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","bytes":786432,"chunks":1,"missing":0,"versions":3,"state":"here"},
+      {"name":"notes/weekly-review.md","contentId":"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","bytes":6144,"chunks":1,"missing":0,"versions":5,"state":"here"}
+    ]
+  },
+  "access": {
+    "state":"ready","checkedAt":"2026-09-25T16:00:00Z","total":2,"grants":[
+      {"id":"abcdef123456","to":"b2c3d4e5f6a1","expires":"2030-09-25 16:00","actions":1,"sensitivity":0,"kinds":"note, file","expired":false},
+      {"id":"123456abcdef","to":"c3d4e5f6a1b2","expires":"2025-09-25 16:00","actions":1,"sensitivity":0,"kinds":"note","expired":true}
+    ]
+  }
+}

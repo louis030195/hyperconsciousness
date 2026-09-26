@@ -76,3 +76,27 @@ jobs:
           "$RUNNER_TEMP/hc/bin/hc" --version
       - name: Verify Cargo archive
         run: cargo package --locked
+
+  dashboard:
+    name: local dashboard
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: dashboard
+    env:
+      # No real brain or HC credentials are used by the UI fixtures.
+      HC_DASHBOARD_DIR: /tmp/hc-dashboard-ci-absent
+      HC_DASHBOARD_BINARY: /nonexistent/hc
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - name: Install dashboard toolchain
+        run: npm install --global bun@1.4.2
+      - run: bun install --frozen-lockfile
+      - run: bun run check
+      - run: bun test tests
+      - run: bun run build
+      - run: bunx playwright install --with-deps chromium
+      - run: bun run test:e2e

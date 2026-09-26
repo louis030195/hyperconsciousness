@@ -14,6 +14,24 @@ and agent orchestration are maintained separately.
 is claimed. Read the [security limits](docs/CONSTRAINTS.md) before entrusting
 important data to it. The package is `hyperconsciousness`; its executable is `hc`.
 
+## Local dashboard
+
+The optional [HC Atlas dashboard](dashboard/README.md) shows local storage,
+file metadata, identity and access, and configured peers. It includes keyboard
+navigation and a command menu. See the [UI guide and screenshots](dashboard/docs/ui/README.md).
+It runs locally using an existing HC installation and is installed separately
+from the CLI.
+
+```sh
+cd dashboard
+bun install --frozen-lockfile
+bun run build
+bun run start
+```
+
+Open <http://127.0.0.1:3217>. This is a local metadata inspector, not a hosted
+team access portal.
+
 ## Install from source
 
 Install Rust with `rustup`; this checkout pins Rust 1.88.0. Linux builds also

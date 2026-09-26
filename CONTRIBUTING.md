@@ -21,7 +21,11 @@ cargo package --locked
 ```
 
 This repository ships the Rust engine, CLI, and agent skills. Client apps are
-maintained separately. HTTP changes must preserve grant and OAuth boundaries.
+maintained separately, with the optional local metadata dashboard described in
+MISSION.md as the sole exception. For dashboard changes, run `bun install
+--frozen-lockfile`, `bun run check`, `bun test tests`, `bun run build`, and
+`bun run test:e2e` from `dashboard/`, plus the root scope and packaging checks.
+Keep its dependencies out of the engine and npm wrapper. HTTP changes must preserve grant and OAuth boundaries.
 
 ## Mission and scope review
 
