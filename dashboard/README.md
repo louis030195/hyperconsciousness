@@ -15,13 +15,24 @@ it does not implement another storage engine or authority layer.
 Requires an existing HC installation on PATH, a file-backed local brain, Node.js
 22 or later, Bun for the checked-in lockfile/test runner, and the system `du` utility.
 
+Run from the repository’s `dashboard/` directory. Check
+<http://127.0.0.1:3217> first and reuse an existing dashboard if it is already
+running. For first use:
+
 ```sh
 bun install --frozen-lockfile
 bun run build
 bun run start
 ```
 
-Open <http://127.0.0.1:3217>. For development, use `bun run dev`.
+Open <http://127.0.0.1:3217>. On later starts, run `bun run start`; rebuild after
+source changes. Keep the terminal/server process running while using the UI.
+Stop it with Ctrl+C in that terminal. Closing the browser only closes the view.
+For development, use `bun run dev`.
+
+The dashboard does not start at login, during HC setup, or when an agent runs
+HC commands. An agent or user starts it explicitly when useful. There is no
+`hc dashboard` subcommand or automatic browser opening.
 There is no new login: the server runs under your local OS account and uses that
 account's existing HC identity. This is not a hosted team access portal.
 

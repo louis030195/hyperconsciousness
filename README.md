@@ -20,7 +20,10 @@ The optional [HC Atlas dashboard](dashboard/README.md) shows local storage,
 file metadata, identity and access, and configured peers. It includes keyboard
 navigation and a command menu. See the [UI guide and screenshots](dashboard/docs/ui/README.md).
 It runs locally using an existing HC installation and is installed separately
-from the CLI.
+from the CLI. Agents can run it when a visual inspection is useful; see the
+[agent startup notes](AGENTS.md#optional-local-dashboard).
+
+From this repository’s root (see [prerequisites](dashboard/README.md#run-locally)):
 
 ```sh
 cd dashboard
@@ -30,7 +33,9 @@ bun run start
 ```
 
 Open <http://127.0.0.1:3217>. This is a local metadata inspector, not a hosted
-team access portal.
+team access portal. Reuse an already-running dashboard at that address. The
+server runs until its process stops; closing the browser does not stop it.
+HC setup and CLI commands do not launch it or open a browser automatically.
 
 ## Install from source
 
