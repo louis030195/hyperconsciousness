@@ -1,0 +1,619 @@
+{
+  "schema": 1,
+  "basis": "executed_hc_core",
+  "command": "npm run eval:recall",
+  "expected_exit": 1,
+  "run": "2026-09-27T18-03-03-562Z",
+  "created_at": "2026-09-27T18:03:03.562Z",
+  "source_commit": "d2152ce2154affccc47f35a34876b066740d52ad",
+  "core_inputs_sha256": "425d4b270654445258c52c0ec03c9ef8e3d984dad79fcbde48ddf537d047652d",
+  "suite_sha256": "6d8a1766039a529a05f701ac5754051c72567f8f0b424287939918956b844fa1",
+  "collector_sha256": "bb13bbf1445d946836b7490dedf37c01324f5090eb98c892740e4a3139f6d871",
+  "evaluator_sha256": "8dfcb2c457ad7c7beae4a5a898744e90cad272e40c78b934b15c136f88f70a66",
+  "evidence_sha256": "4fe9013e4eeebb87fad79cb147db7a8250346b9c2d0762e913b550c7917e1149",
+  "toolchain": {
+    "rustc": "rustc 1.88.0 (6b00bc388 2025-06-23)",
+    "node": "v24.20.0",
+    "platform": "darwin/arm64"
+  },
+  "summary": {
+    "contract": {
+      "pass": 19,
+      "fail": 0,
+      "infrastructure_error": 0
+    },
+    "capability": {
+      "pass": 0,
+      "fail": 7,
+      "infrastructure_error": 0
+    }
+  },
+  "cases": [
+    {
+      "id": "literal_recall",
+      "group": "contract",
+      "status": "pass",
+      "paths": {
+        "scan": {
+          "status": "pass",
+          "returned_ids": [
+            "answer"
+          ]
+        },
+        "snapshot": {
+          "status": "pass",
+          "returned_ids": [
+            "answer"
+          ]
+        },
+        "indexed": {
+          "status": "pass",
+          "returned_ids": [
+            "answer"
+          ]
+        }
+      }
+    },
+    {
+      "id": "ascii_case",
+      "group": "contract",
+      "status": "pass",
+      "paths": {
+        "scan": {
+          "status": "pass",
+          "returned_ids": [
+            "answer"
+          ]
+        },
+        "snapshot": {
+          "status": "pass",
+          "returned_ids": [
+            "answer"
+          ]
+        },
+        "indexed": {
+          "status": "pass",
+          "returned_ids": [
+            "answer"
+          ]
+        }
+      }
+    },
+    {
+      "id": "unicode_case",
+      "group": "contract",
+      "status": "pass",
+      "paths": {
+        "scan": {
+          "status": "pass",
+          "returned_ids": [
+            "answer"
+          ]
+        },
+        "snapshot": {
+          "status": "pass",
+          "returned_ids": [
+            "answer"
+          ]
+        },
+        "indexed": {
+          "status": "pass",
+          "returned_ids": [
+            "answer"
+          ]
+        }
+      }
+    },
+    {
+      "id": "no_match",
+      "group": "contract",
+      "status": "pass",
+      "paths": {
+        "scan": {
+          "status": "pass",
+          "returned_ids": []
+        },
+        "snapshot": {
+          "status": "pass",
+          "returned_ids": []
+        },
+        "indexed": {
+          "status": "pass",
+          "returned_ids": []
+        }
+      }
+    },
+    {
+      "id": "recent_order",
+      "group": "contract",
+      "status": "pass",
+      "paths": {
+        "scan": {
+          "status": "pass",
+          "returned_ids": [
+            "new",
+            "old"
+          ]
+        },
+        "snapshot": {
+          "status": "pass",
+          "returned_ids": [
+            "new",
+            "old"
+          ]
+        },
+        "indexed": {
+          "status": "pass",
+          "returned_ids": [
+            "new",
+            "old"
+          ]
+        }
+      }
+    },
+    {
+      "id": "bounded_page",
+      "group": "contract",
+      "status": "pass",
+      "paths": {
+        "scan": {
+          "status": "pass",
+          "returned_ids": [
+            "c"
+          ]
+        },
+        "snapshot": {
+          "status": "pass",
+          "returned_ids": [
+            "c"
+          ]
+        },
+        "indexed": {
+          "status": "pass",
+          "returned_ids": [
+            "c"
+          ]
+        }
+      }
+    },
+    {
+      "id": "tag_filter",
+      "group": "contract",
+      "status": "pass",
+      "paths": {
+        "scan": {
+          "status": "pass",
+          "returned_ids": [
+            "answer"
+          ]
+        },
+        "snapshot": {
+          "status": "pass",
+          "returned_ids": [
+            "answer"
+          ]
+        },
+        "indexed": {
+          "status": "pass",
+          "returned_ids": [
+            "answer"
+          ]
+        }
+      }
+    },
+    {
+      "id": "date_filter",
+      "group": "contract",
+      "status": "pass",
+      "paths": {
+        "scan": {
+          "status": "pass",
+          "returned_ids": [
+            "answer"
+          ]
+        },
+        "snapshot": {
+          "status": "pass",
+          "returned_ids": [
+            "answer"
+          ]
+        },
+        "indexed": {
+          "status": "pass",
+          "returned_ids": [
+            "answer"
+          ]
+        }
+      }
+    },
+    {
+      "id": "correction",
+      "group": "contract",
+      "status": "pass",
+      "paths": {
+        "scan": {
+          "status": "pass",
+          "returned_ids": [
+            "answer"
+          ]
+        },
+        "snapshot": {
+          "status": "pass",
+          "returned_ids": [
+            "answer"
+          ]
+        },
+        "indexed": {
+          "status": "pass",
+          "returned_ids": [
+            "answer"
+          ]
+        }
+      }
+    },
+    {
+      "id": "old_wording",
+      "group": "contract",
+      "status": "pass",
+      "paths": {
+        "scan": {
+          "status": "pass",
+          "returned_ids": []
+        },
+        "snapshot": {
+          "status": "pass",
+          "returned_ids": []
+        },
+        "indexed": {
+          "status": "pass",
+          "returned_ids": []
+        }
+      }
+    },
+    {
+      "id": "retraction",
+      "group": "contract",
+      "status": "pass",
+      "paths": {
+        "scan": {
+          "status": "pass",
+          "returned_ids": []
+        },
+        "snapshot": {
+          "status": "pass",
+          "returned_ids": []
+        },
+        "indexed": {
+          "status": "pass",
+          "returned_ids": []
+        }
+      }
+    },
+    {
+      "id": "private_replacement",
+      "group": "contract",
+      "status": "pass",
+      "paths": {
+        "scan": {
+          "status": "pass",
+          "returned_ids": []
+        },
+        "snapshot": {
+          "status": "pass",
+          "returned_ids": []
+        },
+        "indexed": {
+          "status": "pass",
+          "returned_ids": []
+        }
+      }
+    },
+    {
+      "id": "secret_boundary",
+      "group": "contract",
+      "status": "pass",
+      "paths": {
+        "scan": {
+          "status": "pass",
+          "returned_ids": []
+        },
+        "snapshot": {
+          "status": "pass",
+          "returned_ids": []
+        },
+        "indexed": {
+          "status": "pass",
+          "returned_ids": []
+        }
+      }
+    },
+    {
+      "id": "grant_tag_boundary",
+      "group": "contract",
+      "status": "pass",
+      "paths": {
+        "scan": {
+          "status": "pass",
+          "returned_ids": [
+            "answer"
+          ]
+        },
+        "snapshot": {
+          "status": "pass",
+          "returned_ids": [
+            "answer"
+          ]
+        },
+        "indexed": {
+          "status": "pass",
+          "returned_ids": [
+            "answer"
+          ]
+        }
+      }
+    },
+    {
+      "id": "expired_grant",
+      "group": "contract",
+      "status": "pass",
+      "paths": {
+        "scan": {
+          "status": "pass",
+          "returned_ids": []
+        },
+        "snapshot": {
+          "status": "pass",
+          "returned_ids": []
+        },
+        "indexed": {
+          "status": "pass",
+          "returned_ids": []
+        }
+      }
+    },
+    {
+      "id": "revoked_grant",
+      "group": "contract",
+      "status": "pass",
+      "paths": {
+        "scan": {
+          "status": "pass",
+          "returned_ids": []
+        },
+        "snapshot": {
+          "status": "pass",
+          "returned_ids": []
+        },
+        "indexed": {
+          "status": "pass",
+          "returned_ids": []
+        }
+      }
+    },
+    {
+      "id": "conflicting_observations",
+      "group": "contract",
+      "status": "pass",
+      "paths": {
+        "scan": {
+          "status": "pass",
+          "returned_ids": [
+            "second",
+            "first"
+          ]
+        },
+        "snapshot": {
+          "status": "pass",
+          "returned_ids": [
+            "second",
+            "first"
+          ]
+        },
+        "indexed": {
+          "status": "pass",
+          "returned_ids": [
+            "second",
+            "first"
+          ]
+        }
+      }
+    },
+    {
+      "id": "reopen_continuity",
+      "group": "contract",
+      "status": "pass",
+      "paths": {
+        "scan": {
+          "status": "pass",
+          "returned_ids": [
+            "answer"
+          ]
+        },
+        "snapshot": {
+          "status": "pass",
+          "returned_ids": [
+            "answer"
+          ]
+        },
+        "indexed": {
+          "status": "pass",
+          "returned_ids": [
+            "answer"
+          ]
+        }
+      }
+    },
+    {
+      "id": "stale_correction_cache",
+      "group": "contract",
+      "status": "pass",
+      "paths": {
+        "scan": {
+          "status": "pass",
+          "returned_ids": [
+            "answer"
+          ]
+        },
+        "snapshot": {
+          "status": "pass",
+          "returned_ids": []
+        },
+        "indexed": {
+          "status": "pass",
+          "returned_ids": []
+        }
+      }
+    },
+    {
+      "id": "ranking_over_recency",
+      "group": "capability",
+      "status": "fail",
+      "paths": {
+        "scan": {
+          "status": "fail",
+          "returned_ids": [
+            "noise3"
+          ]
+        },
+        "snapshot": {
+          "status": "fail",
+          "returned_ids": [
+            "noise3"
+          ]
+        },
+        "indexed": {
+          "status": "fail",
+          "returned_ids": [
+            "noise3"
+          ]
+        }
+      }
+    },
+    {
+      "id": "rank_exact_answer",
+      "group": "capability",
+      "status": "fail",
+      "paths": {
+        "scan": {
+          "status": "fail",
+          "returned_ids": [
+            "noise"
+          ]
+        },
+        "snapshot": {
+          "status": "fail",
+          "returned_ids": [
+            "noise"
+          ]
+        },
+        "indexed": {
+          "status": "fail",
+          "returned_ids": [
+            "noise"
+          ]
+        }
+      }
+    },
+    {
+      "id": "paraphrase_workout",
+      "group": "capability",
+      "status": "fail",
+      "paths": {
+        "scan": {
+          "status": "fail",
+          "returned_ids": []
+        },
+        "snapshot": {
+          "status": "fail",
+          "returned_ids": []
+        },
+        "indexed": {
+          "status": "fail",
+          "returned_ids": []
+        }
+      }
+    },
+    {
+      "id": "paraphrase_decision",
+      "group": "capability",
+      "status": "fail",
+      "paths": {
+        "scan": {
+          "status": "fail",
+          "returned_ids": []
+        },
+        "snapshot": {
+          "status": "fail",
+          "returned_ids": []
+        },
+        "indexed": {
+          "status": "fail",
+          "returned_ids": []
+        }
+      }
+    },
+    {
+      "id": "entity_alias",
+      "group": "capability",
+      "status": "fail",
+      "paths": {
+        "scan": {
+          "status": "fail",
+          "returned_ids": []
+        },
+        "snapshot": {
+          "status": "fail",
+          "returned_ids": []
+        },
+        "indexed": {
+          "status": "fail",
+          "returned_ids": []
+        }
+      }
+    },
+    {
+      "id": "commitment_direction",
+      "group": "capability",
+      "status": "fail",
+      "paths": {
+        "scan": {
+          "status": "fail",
+          "returned_ids": []
+        },
+        "snapshot": {
+          "status": "fail",
+          "returned_ids": []
+        },
+        "indexed": {
+          "status": "fail",
+          "returned_ids": []
+        }
+      }
+    },
+    {
+      "id": "multi_record_recall",
+      "group": "capability",
+      "status": "fail",
+      "paths": {
+        "scan": {
+          "status": "fail",
+          "returned_ids": []
+        },
+        "snapshot": {
+          "status": "fail",
+          "returned_ids": []
+        },
+        "indexed": {
+          "status": "fail",
+          "returned_ids": []
+        }
+      }
+    }
+  ],
+  "limitations": [
+    "Synthetic fixtures, not personal production records.",
+    "Direct query inputs, no model-driven reformulation or context assembly.",
+    "Core citation round trips, not an evaluation of LLM claim support.",
+    "No model trials, performance measurements, runtime changes or scheduled loops."
+  ]
+}

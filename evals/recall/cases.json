@@ -1,0 +1,687 @@
+{
+  "schema": 1,
+  "description": "Synthetic, finite HC retrieval evals. No models, scheduling, or runtime agent loops.",
+  "cases": [
+    {
+      "id": "literal_recall",
+      "group": "contract",
+      "task": "Find the recorded project code.",
+      "records": [
+        {
+          "id": "answer",
+          "text": "Project code: ORCHID-42."
+        },
+        {
+          "id": "noise",
+          "text": "Bring an umbrella."
+        }
+      ],
+      "query": "ORCHID-42",
+      "limit": 3,
+      "expect": {
+        "ids": [
+          "answer"
+        ],
+        "denied": false
+      }
+    },
+    {
+      "id": "ascii_case",
+      "group": "contract",
+      "task": "Recall a code despite different casing.",
+      "records": [
+        {
+          "id": "answer",
+          "text": "Project code: ORCHID-42."
+        }
+      ],
+      "query": "orchid-42",
+      "limit": 3,
+      "expect": {
+        "ids": [
+          "answer"
+        ],
+        "denied": false
+      }
+    },
+    {
+      "id": "unicode_case",
+      "group": "contract",
+      "task": "Find the caf\u00e9 meeting record.",
+      "records": [
+        {
+          "id": "answer",
+          "text": "Meet at CAF\u00c9 \u00c9TOILE at noon."
+        }
+      ],
+      "query": "caf\u00e9 \u00e9toile",
+      "limit": 3,
+      "expect": {
+        "ids": [
+          "answer"
+        ],
+        "denied": false
+      }
+    },
+    {
+      "id": "no_match",
+      "group": "contract",
+      "task": "Return no evidence for an absent topic.",
+      "records": [
+        {
+          "id": "noise",
+          "text": "The build passed."
+        }
+      ],
+      "query": "giraffe migration",
+      "limit": 3,
+      "expect": {
+        "ids": [],
+        "denied": false
+      }
+    },
+    {
+      "id": "recent_order",
+      "group": "contract",
+      "task": "Return recent notes in newest-first order.",
+      "records": [
+        {
+          "id": "old",
+          "text": "First note."
+        },
+        {
+          "id": "new",
+          "text": "Second note."
+        }
+      ],
+      "query": null,
+      "limit": 3,
+      "expect": {
+        "ids": [
+          "new",
+          "old"
+        ],
+        "denied": false
+      }
+    },
+    {
+      "id": "bounded_page",
+      "group": "contract",
+      "task": "Bound a page and report that more matching evidence exists.",
+      "records": [
+        {
+          "id": "a",
+          "text": "Release note one."
+        },
+        {
+          "id": "b",
+          "text": "Release note two."
+        },
+        {
+          "id": "c",
+          "text": "Release note three."
+        }
+      ],
+      "query": "Release note",
+      "limit": 1,
+      "expect": {
+        "ids": [
+          "c"
+        ],
+        "denied": false,
+        "truncated": true
+      }
+    },
+    {
+      "id": "tag_filter",
+      "group": "contract",
+      "task": "Only return fitness-tagged evidence.",
+      "records": [
+        {
+          "id": "answer",
+          "text": "Session completed.",
+          "tags": [
+            "fitness"
+          ]
+        },
+        {
+          "id": "noise",
+          "text": "Session completed.",
+          "tags": [
+            "work"
+          ]
+        }
+      ],
+      "query": "Session",
+      "limit": 3,
+      "expect": {
+        "ids": [
+          "answer"
+        ],
+        "denied": false
+      },
+      "tags": [
+        "fitness"
+      ]
+    },
+    {
+      "id": "date_filter",
+      "group": "contract",
+      "task": "Return only evidence ingested during the requested interval.",
+      "records": [
+        {
+          "id": "old",
+          "text": "Session completed.",
+          "at": 1000
+        },
+        {
+          "id": "answer",
+          "text": "Session completed.",
+          "at": 2000
+        },
+        {
+          "id": "new",
+          "text": "Session completed.",
+          "at": 3000
+        }
+      ],
+      "query": "Session",
+      "limit": 3,
+      "expect": {
+        "ids": [
+          "answer"
+        ],
+        "denied": false
+      },
+      "since": 2000,
+      "until": 3000
+    },
+    {
+      "id": "correction",
+      "group": "contract",
+      "task": "Use the explicitly corrected host, not the old version.",
+      "records": [
+        {
+          "id": "old",
+          "text": "Deployment host: cedar.",
+          "source": "host",
+          "version": 1
+        },
+        {
+          "id": "answer",
+          "text": "Deployment host: birch.",
+          "source": "host",
+          "version": 2
+        }
+      ],
+      "query": "Deployment host",
+      "limit": 3,
+      "expect": {
+        "ids": [
+          "answer"
+        ],
+        "denied": false,
+        "inaccessible_refs": [
+          "old"
+        ]
+      }
+    },
+    {
+      "id": "old_wording",
+      "group": "contract",
+      "task": "Searching old wording must not resurrect a corrected record.",
+      "records": [
+        {
+          "id": "old",
+          "text": "Deployment host: cedar.",
+          "source": "host",
+          "version": 1
+        },
+        {
+          "id": "answer",
+          "text": "Deployment host: birch.",
+          "source": "host",
+          "version": 2
+        }
+      ],
+      "query": "cedar",
+      "limit": 3,
+      "expect": {
+        "ids": [],
+        "denied": false,
+        "inaccessible_refs": [
+          "old"
+        ]
+      }
+    },
+    {
+      "id": "retraction",
+      "group": "contract",
+      "task": "Retracted evidence must not be returned or dereferenced.",
+      "records": [
+        {
+          "id": "old",
+          "text": "The launch is Tuesday.",
+          "source": "launch",
+          "version": 1
+        },
+        {
+          "id": "tombstone",
+          "text": "",
+          "source": "launch",
+          "version": 2,
+          "operation": "retract"
+        }
+      ],
+      "query": "launch",
+      "limit": 3,
+      "expect": {
+        "ids": [],
+        "denied": false,
+        "inaccessible_refs": [
+          "old",
+          "tombstone"
+        ]
+      }
+    },
+    {
+      "id": "private_replacement",
+      "group": "contract",
+      "task": "A private correction must suppress the public old version.",
+      "records": [
+        {
+          "id": "old",
+          "text": "Deployment host: cedar.",
+          "source": "host",
+          "version": 1
+        },
+        {
+          "id": "secret",
+          "text": "Deployment host: birch.",
+          "source": "host",
+          "version": 2,
+          "sensitivity": 3
+        }
+      ],
+      "query": "Deployment",
+      "limit": 3,
+      "expect": {
+        "ids": [],
+        "denied": false,
+        "inaccessible_refs": [
+          "old",
+          "secret"
+        ]
+      }
+    },
+    {
+      "id": "secret_boundary",
+      "group": "contract",
+      "task": "Exact knowledge of secret wording does not authorize retrieval.",
+      "records": [
+        {
+          "id": "secret",
+          "text": "Vault code: amber kiwi.",
+          "sensitivity": 3
+        },
+        {
+          "id": "public",
+          "text": "Vault instructions are restricted."
+        }
+      ],
+      "query": "amber kiwi",
+      "limit": 3,
+      "expect": {
+        "ids": [],
+        "denied": false,
+        "inaccessible_refs": [
+          "secret"
+        ]
+      }
+    },
+    {
+      "id": "grant_tag_boundary",
+      "group": "contract",
+      "task": "A query cannot widen the grant to another tag.",
+      "records": [
+        {
+          "id": "secret",
+          "text": "Review completed.",
+          "tags": [
+            "finance"
+          ]
+        },
+        {
+          "id": "answer",
+          "text": "Review completed.",
+          "tags": [
+            "work"
+          ]
+        }
+      ],
+      "query": "Review",
+      "limit": 3,
+      "expect": {
+        "ids": [
+          "answer"
+        ],
+        "denied": false,
+        "inaccessible_refs": [
+          "secret"
+        ]
+      },
+      "grant_tags": [
+        "work"
+      ]
+    },
+    {
+      "id": "expired_grant",
+      "group": "contract",
+      "task": "An expired grant denies both search and point reads.",
+      "records": [
+        {
+          "id": "answer",
+          "text": "Project code: ORCHID-42."
+        }
+      ],
+      "query": "ORCHID",
+      "limit": 3,
+      "expect": {
+        "ids": [],
+        "denied": true,
+        "inaccessible_refs": [
+          "answer"
+        ]
+      },
+      "expired": true
+    },
+    {
+      "id": "revoked_grant",
+      "group": "contract",
+      "task": "Revocation invalidates search and already known references.",
+      "records": [
+        {
+          "id": "answer",
+          "text": "Project code: ORCHID-42."
+        }
+      ],
+      "query": "ORCHID",
+      "limit": 3,
+      "expect": {
+        "ids": [],
+        "denied": true,
+        "inaccessible_refs": [
+          "answer"
+        ]
+      },
+      "revoked": true
+    },
+    {
+      "id": "conflicting_observations",
+      "group": "contract",
+      "task": "Preserve conflicting independent observations instead of inventing resolution.",
+      "records": [
+        {
+          "id": "first",
+          "text": "Orion launch is Tuesday."
+        },
+        {
+          "id": "second",
+          "text": "Orion launch is Friday."
+        }
+      ],
+      "query": "Orion launch",
+      "limit": 3,
+      "expect": {
+        "ids": [
+          "second",
+          "first"
+        ],
+        "denied": false
+      }
+    },
+    {
+      "id": "reopen_continuity",
+      "group": "contract",
+      "task": "A new reader can retrieve evidence after closing and reopening storage.",
+      "records": [
+        {
+          "id": "answer",
+          "text": "The chosen database is SQLite."
+        }
+      ],
+      "query": "chosen database",
+      "limit": 3,
+      "expect": {
+        "ids": [
+          "answer"
+        ],
+        "denied": false
+      },
+      "reopen": true
+    },
+    {
+      "id": "stale_correction_cache",
+      "group": "contract",
+      "task": "A stale cached view must not return superseded evidence.",
+      "records": [
+        {
+          "id": "old",
+          "text": "Deployment host: cedar.",
+          "source": "host",
+          "version": 1
+        },
+        {
+          "id": "answer",
+          "text": "Deployment host: birch.",
+          "source": "host",
+          "version": 2,
+          "after_cache": true
+        }
+      ],
+      "query": "Deployment host",
+      "limit": 3,
+      "expect": {
+        "ids": [
+          "answer"
+        ],
+        "denied": false,
+        "inaccessible_refs": [
+          "old"
+        ],
+        "by_path": {
+          "snapshot": {
+            "ids": [],
+            "denied": true,
+            "inaccessible_refs": [
+              "old",
+              "answer"
+            ]
+          },
+          "indexed": {
+            "ids": [],
+            "denied": true,
+            "inaccessible_refs": [
+              "old",
+              "answer"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "ranking_over_recency",
+      "group": "capability",
+      "task": "Prefer the actual rollout decision to newer incidental mentions.",
+      "records": [
+        {
+          "id": "answer",
+          "text": "Orion rollout decision: enable the feature on Friday."
+        },
+        {
+          "id": "noise1",
+          "text": "Orion rollout: meeting room booked."
+        },
+        {
+          "id": "noise2",
+          "text": "Orion rollout: logo color discussion."
+        },
+        {
+          "id": "noise3",
+          "text": "Orion rollout: lunch delivery arrived."
+        }
+      ],
+      "query": "Orion rollout",
+      "limit": 1,
+      "expect": {
+        "ids": [
+          "answer"
+        ],
+        "denied": false
+      }
+    },
+    {
+      "id": "rank_exact_answer",
+      "group": "capability",
+      "task": "Put the actual budget value ahead of newer mentions without a value.",
+      "records": [
+        {
+          "id": "answer",
+          "text": "Atlas budget is 500 credits."
+        },
+        {
+          "id": "noise",
+          "text": "Atlas budget is being mentioned in a design document."
+        }
+      ],
+      "query": "Atlas budget",
+      "limit": 1,
+      "expect": {
+        "ids": [
+          "answer"
+        ],
+        "denied": false
+      }
+    },
+    {
+      "id": "paraphrase_workout",
+      "group": "capability",
+      "task": "Retrieve the previous lifting session using different wording.",
+      "records": [
+        {
+          "id": "answer",
+          "text": "Strength session: back squat, three sets of five at 60 kg."
+        },
+        {
+          "id": "noise",
+          "text": "Tomorrow is a rest day."
+        }
+      ],
+      "query": "what did I lift last time",
+      "limit": 3,
+      "expect": {
+        "ids": [
+          "answer"
+        ],
+        "denied": false
+      }
+    },
+    {
+      "id": "paraphrase_decision",
+      "group": "capability",
+      "task": "Recall the selected database from a natural-language question.",
+      "records": [
+        {
+          "id": "answer",
+          "text": "Decision: use SQLite for local persistence."
+        },
+        {
+          "id": "noise",
+          "text": "The API returns JSON."
+        }
+      ],
+      "query": "which database did we choose",
+      "limit": 3,
+      "expect": {
+        "ids": [
+          "answer"
+        ],
+        "denied": false
+      }
+    },
+    {
+      "id": "entity_alias",
+      "group": "capability",
+      "task": "Resolve a person through an explicitly recorded alias.",
+      "records": [
+        {
+          "id": "alias",
+          "text": "Alexandra Chen is also called Lex."
+        },
+        {
+          "id": "answer",
+          "text": "Alexandra Chen owns the Orion release checklist."
+        }
+      ],
+      "query": "what does Lex own",
+      "limit": 3,
+      "expect": {
+        "ids": [
+          "answer"
+        ],
+        "denied": false
+      }
+    },
+    {
+      "id": "commitment_direction",
+      "group": "capability",
+      "task": "Find the commitment owed by Maya rather than one owed to Maya.",
+      "records": [
+        {
+          "id": "answer",
+          "text": "Maya owes Robin the signed review by Friday."
+        },
+        {
+          "id": "noise",
+          "text": "Robin owes Maya the slide deck by Tuesday."
+        }
+      ],
+      "query": "what does Maya owe Robin",
+      "limit": 3,
+      "expect": {
+        "ids": [
+          "answer"
+        ],
+        "denied": false
+      }
+    },
+    {
+      "id": "multi_record_recall",
+      "group": "capability",
+      "task": "Retrieve both constraints needed for a workout plan.",
+      "records": [
+        {
+          "id": "a",
+          "text": "Available equipment: dumbbells only."
+        },
+        {
+          "id": "b",
+          "text": "Training session time limit: twenty minutes."
+        },
+        {
+          "id": "noise",
+          "text": "Favorite dinner: noodles."
+        }
+      ],
+      "query": "equipment and time constraints for my workout",
+      "limit": 3,
+      "expect": {
+        "ids": [
+          "b",
+          "a"
+        ],
+        "denied": false
+      }
+    }
+  ]
+}

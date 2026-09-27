@@ -39,7 +39,9 @@
     "postinstall": "node npm/scripts/install.js",
     "prepack": "node npm/scripts/verify-package.js",
     "test": "node npm/scripts/verify-package.js",
-    "eval:scope": "node --test evals/scope/run.test.mjs && node evals/scope/run.mjs check"
+    "eval:scope": "node --test evals/scope/run.test.mjs && node evals/scope/run.mjs check",
+    "eval:recall:check": "node --test evals/recall/run.test.mjs && node evals/recall/run.mjs check",
+    "eval:recall": "node --test evals/recall/run.test.mjs && node evals/recall/run.mjs run"
   },
   "engines": {
     "node": ">=18"
