@@ -42,6 +42,10 @@ struct Case {
     revoked: bool,
     #[serde(default)]
     reopen: bool,
+    #[serde(default)]
+    mode: String,
+    #[serde(default)]
+    reverse_records: bool,
 }
 
 #[derive(Deserialize)]
@@ -146,12 +150,11 @@ impl Fixture {
 
 fn collect(case: &Case) -> Result<Value, Box<dyn std::error::Error>> {
     let mut fixture = Fixture::new(case)?;
-    for (position, note) in case
-        .records
-        .iter()
-        .enumerate()
-        .filter(|(_, n)| !n.after_cache)
-    {
+    let mut seed: Vec<_> = case.records.iter().filter(|n| !n.after_cache).collect();
+    if case.reverse_records {
+        seed.reverse();
+    }
+    for (position, note) in seed.into_iter().enumerate() {
         fixture.note(note, position)?;
     }
     if case.revoked {
@@ -191,10 +194,19 @@ fn collect(case: &Case) -> Result<Value, Box<dyn std::error::Error>> {
         ..query::Filter::default()
     };
     let mut paths = BTreeMap::new();
+    let ranked = case.mode == "relevance";
     for path in ["scan", "snapshot", "indexed"] {
         let answer = match path {
-            "scan" => query::look(&fixture.store, &KEY, chain, authority, NOW, &filter),
-            "snapshot" => query::look_snapshot(
+            "scan" => (if ranked {
+                query::ranked::look
+            } else {
+                query::look
+            })(&fixture.store, &KEY, chain, authority, NOW, &filter),
+            "snapshot" => (if ranked {
+                query::ranked::look_snapshot
+            } else {
+                query::look_snapshot
+            })(
                 &fixture.store,
                 &KEY,
                 &snapshot,
@@ -203,7 +215,11 @@ fn collect(case: &Case) -> Result<Value, Box<dyn std::error::Error>> {
                 NOW,
                 &filter,
             ),
-            _ => query::look_indexed(
+            _ => (if ranked {
+                query::ranked::look_indexed
+            } else {
+                query::look_indexed
+            })(
                 &fixture.store,
                 &KEY,
                 &index,

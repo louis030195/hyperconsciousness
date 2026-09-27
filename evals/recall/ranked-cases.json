@@ -1,0 +1,1359 @@
+{
+  "schema": 1,
+  "description": "Opt-in relevance evals: unchanged original capability oracles, explicit lexical contracts, insertion perturbations, and permission checks. Original cases.json and baseline.json are preserved.",
+  "cases": [
+    {
+      "id": "literal_recall",
+      "group": "contract",
+      "task": "Find the recorded project code.",
+      "records": [
+        {
+          "id": "answer",
+          "text": "Project code: ORCHID-42."
+        },
+        {
+          "id": "noise",
+          "text": "Bring an umbrella."
+        }
+      ],
+      "query": "ORCHID-42",
+      "limit": 3,
+      "expect": {
+        "ids": [
+          "answer"
+        ],
+        "denied": false
+      },
+      "mode": "relevance"
+    },
+    {
+      "id": "ascii_case",
+      "group": "contract",
+      "task": "Recall a code despite different casing.",
+      "records": [
+        {
+          "id": "answer",
+          "text": "Project code: ORCHID-42."
+        }
+      ],
+      "query": "orchid-42",
+      "limit": 3,
+      "expect": {
+        "ids": [
+          "answer"
+        ],
+        "denied": false
+      },
+      "mode": "relevance"
+    },
+    {
+      "id": "unicode_case",
+      "group": "contract",
+      "task": "Find the café meeting record.",
+      "records": [
+        {
+          "id": "answer",
+          "text": "Meet at CAFÉ ÉTOILE at noon."
+        }
+      ],
+      "query": "café étoile",
+      "limit": 3,
+      "expect": {
+        "ids": [
+          "answer"
+        ],
+        "denied": false
+      },
+      "mode": "relevance"
+    },
+    {
+      "id": "no_match",
+      "group": "contract",
+      "task": "Return no evidence for an absent topic.",
+      "records": [
+        {
+          "id": "noise",
+          "text": "The build passed."
+        }
+      ],
+      "query": "giraffe migration",
+      "limit": 3,
+      "expect": {
+        "ids": [],
+        "denied": false
+      },
+      "mode": "relevance"
+    },
+    {
+      "id": "tag_filter",
+      "group": "contract",
+      "task": "Only return fitness-tagged evidence.",
+      "records": [
+        {
+          "id": "answer",
+          "text": "Session completed.",
+          "tags": [
+            "fitness"
+          ]
+        },
+        {
+          "id": "noise",
+          "text": "Session completed.",
+          "tags": [
+            "work"
+          ]
+        }
+      ],
+      "query": "Session",
+      "limit": 3,
+      "expect": {
+        "ids": [
+          "answer"
+        ],
+        "denied": false
+      },
+      "tags": [
+        "fitness"
+      ],
+      "mode": "relevance"
+    },
+    {
+      "id": "date_filter",
+      "group": "contract",
+      "task": "Return only evidence ingested during the requested interval.",
+      "records": [
+        {
+          "id": "old",
+          "text": "Session completed.",
+          "at": 1000
+        },
+        {
+          "id": "answer",
+          "text": "Session completed.",
+          "at": 2000
+        },
+        {
+          "id": "new",
+          "text": "Session completed.",
+          "at": 3000
+        }
+      ],
+      "query": "Session",
+      "limit": 3,
+      "expect": {
+        "ids": [
+          "answer"
+        ],
+        "denied": false
+      },
+      "since": 2000,
+      "until": 3000,
+      "mode": "relevance"
+    },
+    {
+      "id": "correction",
+      "group": "contract",
+      "task": "Use the explicitly corrected host, not the old version.",
+      "records": [
+        {
+          "id": "old",
+          "text": "Deployment host: cedar.",
+          "source": "host",
+          "version": 1
+        },
+        {
+          "id": "answer",
+          "text": "Deployment host: birch.",
+          "source": "host",
+          "version": 2
+        }
+      ],
+      "query": "Deployment host",
+      "limit": 3,
+      "expect": {
+        "ids": [
+          "answer"
+        ],
+        "denied": false,
+        "inaccessible_refs": [
+          "old"
+        ]
+      },
+      "mode": "relevance"
+    },
+    {
+      "id": "old_wording",
+      "group": "contract",
+      "task": "Searching old wording must not resurrect a corrected record.",
+      "records": [
+        {
+          "id": "old",
+          "text": "Deployment host: cedar.",
+          "source": "host",
+          "version": 1
+        },
+        {
+          "id": "answer",
+          "text": "Deployment host: birch.",
+          "source": "host",
+          "version": 2
+        }
+      ],
+      "query": "cedar",
+      "limit": 3,
+      "expect": {
+        "ids": [],
+        "denied": false,
+        "inaccessible_refs": [
+          "old"
+        ]
+      },
+      "mode": "relevance"
+    },
+    {
+      "id": "retraction",
+      "group": "contract",
+      "task": "Retracted evidence must not be returned or dereferenced.",
+      "records": [
+        {
+          "id": "old",
+          "text": "The launch is Tuesday.",
+          "source": "launch",
+          "version": 1
+        },
+        {
+          "id": "tombstone",
+          "text": "",
+          "source": "launch",
+          "version": 2,
+          "operation": "retract"
+        }
+      ],
+      "query": "launch",
+      "limit": 3,
+      "expect": {
+        "ids": [],
+        "denied": false,
+        "inaccessible_refs": [
+          "old",
+          "tombstone"
+        ]
+      },
+      "mode": "relevance"
+    },
+    {
+      "id": "private_replacement",
+      "group": "contract",
+      "task": "A private correction must suppress the public old version.",
+      "records": [
+        {
+          "id": "old",
+          "text": "Deployment host: cedar.",
+          "source": "host",
+          "version": 1
+        },
+        {
+          "id": "secret",
+          "text": "Deployment host: birch.",
+          "source": "host",
+          "version": 2,
+          "sensitivity": 3
+        }
+      ],
+      "query": "Deployment",
+      "limit": 3,
+      "expect": {
+        "ids": [],
+        "denied": false,
+        "inaccessible_refs": [
+          "old",
+          "secret"
+        ]
+      },
+      "mode": "relevance"
+    },
+    {
+      "id": "secret_boundary",
+      "group": "contract",
+      "task": "Exact knowledge of secret wording does not authorize retrieval.",
+      "records": [
+        {
+          "id": "secret",
+          "text": "Vault code: amber kiwi.",
+          "sensitivity": 3
+        },
+        {
+          "id": "public",
+          "text": "Vault instructions are restricted."
+        }
+      ],
+      "query": "amber kiwi",
+      "limit": 3,
+      "expect": {
+        "ids": [],
+        "denied": false,
+        "inaccessible_refs": [
+          "secret"
+        ]
+      },
+      "mode": "relevance"
+    },
+    {
+      "id": "grant_tag_boundary",
+      "group": "contract",
+      "task": "A query cannot widen the grant to another tag.",
+      "records": [
+        {
+          "id": "secret",
+          "text": "Review completed.",
+          "tags": [
+            "finance"
+          ]
+        },
+        {
+          "id": "answer",
+          "text": "Review completed.",
+          "tags": [
+            "work"
+          ]
+        }
+      ],
+      "query": "Review",
+      "limit": 3,
+      "expect": {
+        "ids": [
+          "answer"
+        ],
+        "denied": false,
+        "inaccessible_refs": [
+          "secret"
+        ]
+      },
+      "grant_tags": [
+        "work"
+      ],
+      "mode": "relevance"
+    },
+    {
+      "id": "expired_grant",
+      "group": "contract",
+      "task": "An expired grant denies both search and point reads.",
+      "records": [
+        {
+          "id": "answer",
+          "text": "Project code: ORCHID-42."
+        }
+      ],
+      "query": "ORCHID",
+      "limit": 3,
+      "expect": {
+        "ids": [],
+        "denied": true,
+        "inaccessible_refs": [
+          "answer"
+        ]
+      },
+      "expired": true,
+      "mode": "relevance"
+    },
+    {
+      "id": "revoked_grant",
+      "group": "contract",
+      "task": "Revocation invalidates search and already known references.",
+      "records": [
+        {
+          "id": "answer",
+          "text": "Project code: ORCHID-42."
+        }
+      ],
+      "query": "ORCHID",
+      "limit": 3,
+      "expect": {
+        "ids": [],
+        "denied": true,
+        "inaccessible_refs": [
+          "answer"
+        ]
+      },
+      "revoked": true,
+      "mode": "relevance"
+    },
+    {
+      "id": "reopen_continuity",
+      "group": "contract",
+      "task": "A new reader can retrieve evidence after closing and reopening storage.",
+      "records": [
+        {
+          "id": "answer",
+          "text": "The chosen database is SQLite."
+        }
+      ],
+      "query": "chosen database",
+      "limit": 3,
+      "expect": {
+        "ids": [
+          "answer"
+        ],
+        "denied": false
+      },
+      "reopen": true,
+      "mode": "relevance"
+    },
+    {
+      "id": "stale_correction_cache",
+      "group": "contract",
+      "task": "A stale cached view must not return superseded evidence.",
+      "records": [
+        {
+          "id": "old",
+          "text": "Deployment host: cedar.",
+          "source": "host",
+          "version": 1
+        },
+        {
+          "id": "answer",
+          "text": "Deployment host: birch.",
+          "source": "host",
+          "version": 2,
+          "after_cache": true
+        }
+      ],
+      "query": "Deployment host",
+      "limit": 3,
+      "expect": {
+        "ids": [
+          "answer"
+        ],
+        "denied": false,
+        "inaccessible_refs": [
+          "old"
+        ],
+        "by_path": {
+          "snapshot": {
+            "ids": [],
+            "denied": true,
+            "inaccessible_refs": [
+              "old",
+              "answer"
+            ]
+          },
+          "indexed": {
+            "ids": [],
+            "denied": true,
+            "inaccessible_refs": [
+              "old",
+              "answer"
+            ]
+          }
+        }
+      },
+      "mode": "relevance"
+    },
+    {
+      "id": "ranking_over_recency",
+      "group": "capability",
+      "task": "Prefer the actual rollout decision to newer incidental mentions.",
+      "records": [
+        {
+          "id": "answer",
+          "text": "Orion rollout decision: enable the feature on Friday."
+        },
+        {
+          "id": "noise1",
+          "text": "Orion rollout: meeting room booked."
+        },
+        {
+          "id": "noise2",
+          "text": "Orion rollout: logo color discussion."
+        },
+        {
+          "id": "noise3",
+          "text": "Orion rollout: lunch delivery arrived."
+        }
+      ],
+      "query": "Orion rollout",
+      "limit": 1,
+      "expect": {
+        "ids": [
+          "answer"
+        ],
+        "denied": false
+      },
+      "mode": "relevance"
+    },
+    {
+      "id": "ranking_over_recency__reversed",
+      "group": "capability",
+      "task": "Prefer the actual rollout decision to newer incidental mentions.",
+      "records": [
+        {
+          "id": "answer",
+          "text": "Orion rollout decision: enable the feature on Friday."
+        },
+        {
+          "id": "noise1",
+          "text": "Orion rollout: meeting room booked."
+        },
+        {
+          "id": "noise2",
+          "text": "Orion rollout: logo color discussion."
+        },
+        {
+          "id": "noise3",
+          "text": "Orion rollout: lunch delivery arrived."
+        }
+      ],
+      "query": "Orion rollout",
+      "limit": 1,
+      "expect": {
+        "ids": [
+          "answer"
+        ],
+        "denied": false
+      },
+      "mode": "relevance",
+      "reverse_records": true,
+      "same_order_as": "ranking_over_recency"
+    },
+    {
+      "id": "rank_exact_answer",
+      "group": "capability",
+      "task": "Put the actual budget value ahead of newer mentions without a value.",
+      "records": [
+        {
+          "id": "answer",
+          "text": "Atlas budget is 500 credits."
+        },
+        {
+          "id": "noise",
+          "text": "Atlas budget is being mentioned in a design document."
+        }
+      ],
+      "query": "Atlas budget",
+      "limit": 1,
+      "expect": {
+        "ids": [
+          "answer"
+        ],
+        "denied": false
+      },
+      "mode": "relevance"
+    },
+    {
+      "id": "rank_exact_answer__reversed",
+      "group": "capability",
+      "task": "Put the actual budget value ahead of newer mentions without a value.",
+      "records": [
+        {
+          "id": "answer",
+          "text": "Atlas budget is 500 credits."
+        },
+        {
+          "id": "noise",
+          "text": "Atlas budget is being mentioned in a design document."
+        }
+      ],
+      "query": "Atlas budget",
+      "limit": 1,
+      "expect": {
+        "ids": [
+          "answer"
+        ],
+        "denied": false
+      },
+      "mode": "relevance",
+      "reverse_records": true,
+      "same_order_as": "rank_exact_answer"
+    },
+    {
+      "id": "paraphrase_workout",
+      "group": "capability",
+      "task": "Retrieve the previous lifting session using different wording.",
+      "records": [
+        {
+          "id": "answer",
+          "text": "Strength session: back squat, three sets of five at 60 kg."
+        },
+        {
+          "id": "noise",
+          "text": "Tomorrow is a rest day."
+        }
+      ],
+      "query": "what did I lift last time",
+      "limit": 3,
+      "expect": {
+        "ids": [
+          "answer"
+        ],
+        "denied": false
+      },
+      "mode": "relevance"
+    },
+    {
+      "id": "paraphrase_workout__reversed",
+      "group": "capability",
+      "task": "Retrieve the previous lifting session using different wording.",
+      "records": [
+        {
+          "id": "answer",
+          "text": "Strength session: back squat, three sets of five at 60 kg."
+        },
+        {
+          "id": "noise",
+          "text": "Tomorrow is a rest day."
+        }
+      ],
+      "query": "what did I lift last time",
+      "limit": 3,
+      "expect": {
+        "ids": [
+          "answer"
+        ],
+        "denied": false
+      },
+      "mode": "relevance",
+      "reverse_records": true,
+      "same_order_as": "paraphrase_workout"
+    },
+    {
+      "id": "paraphrase_decision",
+      "group": "capability",
+      "task": "Recall the selected database from a natural-language question.",
+      "records": [
+        {
+          "id": "answer",
+          "text": "Decision: use SQLite for local persistence."
+        },
+        {
+          "id": "noise",
+          "text": "The API returns JSON."
+        }
+      ],
+      "query": "which database did we choose",
+      "limit": 3,
+      "expect": {
+        "ids": [
+          "answer"
+        ],
+        "denied": false
+      },
+      "mode": "relevance"
+    },
+    {
+      "id": "paraphrase_decision__reversed",
+      "group": "capability",
+      "task": "Recall the selected database from a natural-language question.",
+      "records": [
+        {
+          "id": "answer",
+          "text": "Decision: use SQLite for local persistence."
+        },
+        {
+          "id": "noise",
+          "text": "The API returns JSON."
+        }
+      ],
+      "query": "which database did we choose",
+      "limit": 3,
+      "expect": {
+        "ids": [
+          "answer"
+        ],
+        "denied": false
+      },
+      "mode": "relevance",
+      "reverse_records": true,
+      "same_order_as": "paraphrase_decision"
+    },
+    {
+      "id": "entity_alias",
+      "group": "capability",
+      "task": "Resolve a person through an explicitly recorded alias.",
+      "records": [
+        {
+          "id": "alias",
+          "text": "Alexandra Chen is also called Lex."
+        },
+        {
+          "id": "answer",
+          "text": "Alexandra Chen owns the Orion release checklist."
+        }
+      ],
+      "query": "what does Lex own",
+      "limit": 3,
+      "expect": {
+        "ids": [
+          "answer"
+        ],
+        "denied": false
+      },
+      "mode": "relevance"
+    },
+    {
+      "id": "entity_alias__reversed",
+      "group": "capability",
+      "task": "Resolve a person through an explicitly recorded alias.",
+      "records": [
+        {
+          "id": "alias",
+          "text": "Alexandra Chen is also called Lex."
+        },
+        {
+          "id": "answer",
+          "text": "Alexandra Chen owns the Orion release checklist."
+        }
+      ],
+      "query": "what does Lex own",
+      "limit": 3,
+      "expect": {
+        "ids": [
+          "answer"
+        ],
+        "denied": false
+      },
+      "mode": "relevance",
+      "reverse_records": true,
+      "same_order_as": "entity_alias"
+    },
+    {
+      "id": "commitment_direction",
+      "group": "capability",
+      "task": "Find the commitment owed by Maya rather than one owed to Maya.",
+      "records": [
+        {
+          "id": "answer",
+          "text": "Maya owes Robin the signed review by Friday."
+        },
+        {
+          "id": "noise",
+          "text": "Robin owes Maya the slide deck by Tuesday."
+        }
+      ],
+      "query": "what does Maya owe Robin",
+      "limit": 3,
+      "expect": {
+        "ids": [
+          "answer"
+        ],
+        "denied": false
+      },
+      "mode": "relevance"
+    },
+    {
+      "id": "commitment_direction__reversed",
+      "group": "capability",
+      "task": "Find the commitment owed by Maya rather than one owed to Maya.",
+      "records": [
+        {
+          "id": "answer",
+          "text": "Maya owes Robin the signed review by Friday."
+        },
+        {
+          "id": "noise",
+          "text": "Robin owes Maya the slide deck by Tuesday."
+        }
+      ],
+      "query": "what does Maya owe Robin",
+      "limit": 3,
+      "expect": {
+        "ids": [
+          "answer"
+        ],
+        "denied": false
+      },
+      "mode": "relevance",
+      "reverse_records": true,
+      "same_order_as": "commitment_direction"
+    },
+    {
+      "id": "multi_record_recall",
+      "group": "capability",
+      "task": "Retrieve both constraints needed for a workout plan.",
+      "records": [
+        {
+          "id": "a",
+          "text": "Available equipment: dumbbells only."
+        },
+        {
+          "id": "b",
+          "text": "Training session time limit: twenty minutes."
+        },
+        {
+          "id": "noise",
+          "text": "Favorite dinner: noodles."
+        }
+      ],
+      "query": "equipment and time constraints for my workout",
+      "limit": 3,
+      "expect": {
+        "ids": [
+          "b",
+          "a"
+        ],
+        "denied": false
+      },
+      "mode": "relevance"
+    },
+    {
+      "id": "multi_record_recall__reversed",
+      "group": "capability",
+      "task": "Retrieve both constraints needed for a workout plan.",
+      "records": [
+        {
+          "id": "a",
+          "text": "Available equipment: dumbbells only."
+        },
+        {
+          "id": "b",
+          "text": "Training session time limit: twenty minutes."
+        },
+        {
+          "id": "noise",
+          "text": "Favorite dinner: noodles."
+        }
+      ],
+      "query": "equipment and time constraints for my workout",
+      "limit": 3,
+      "expect": {
+        "ids": [
+          "b",
+          "a"
+        ],
+        "denied": false
+      },
+      "mode": "relevance",
+      "reverse_records": true,
+      "same_order_as": "multi_record_recall"
+    },
+    {
+      "id": "all_terms_before_recent_mentions",
+      "group": "contract",
+      "task": "Put evidence covering every requested word first.",
+      "mode": "relevance",
+      "query": "aurora safety deadline",
+      "records": [
+        {
+          "id": "answer",
+          "text": "Aurora safety deadline is Monday."
+        },
+        {
+          "id": "noise",
+          "text": "Aurora safety meeting has snacks."
+        }
+      ],
+      "limit": 1,
+      "expect": {
+        "ids": [
+          "answer"
+        ],
+        "denied": false,
+        "order": "exact"
+      }
+    },
+    {
+      "id": "all_terms_before_recent_mentions__reversed",
+      "group": "contract",
+      "task": "Put evidence covering every requested word first.",
+      "mode": "relevance",
+      "query": "aurora safety deadline",
+      "records": [
+        {
+          "id": "answer",
+          "text": "Aurora safety deadline is Monday."
+        },
+        {
+          "id": "noise",
+          "text": "Aurora safety meeting has snacks."
+        }
+      ],
+      "limit": 1,
+      "expect": {
+        "ids": [
+          "answer"
+        ],
+        "denied": false,
+        "order": "exact"
+      },
+      "reverse_records": true,
+      "same_order_as": "all_terms_before_recent_mentions"
+    },
+    {
+      "id": "ordered_relationship_words",
+      "group": "contract",
+      "task": "Prioritize the requested lexical word order.",
+      "mode": "relevance",
+      "query": "Nora owes Jules",
+      "records": [
+        {
+          "id": "answer",
+          "text": "Nora owes Jules the report."
+        },
+        {
+          "id": "noise",
+          "text": "Jules owes Nora the report."
+        }
+      ],
+      "limit": 1,
+      "expect": {
+        "ids": [
+          "answer"
+        ],
+        "denied": false,
+        "order": "exact"
+      }
+    },
+    {
+      "id": "ordered_relationship_words__reversed",
+      "group": "contract",
+      "task": "Prioritize the requested lexical word order.",
+      "mode": "relevance",
+      "query": "Nora owes Jules",
+      "records": [
+        {
+          "id": "answer",
+          "text": "Nora owes Jules the report."
+        },
+        {
+          "id": "noise",
+          "text": "Jules owes Nora the report."
+        }
+      ],
+      "limit": 1,
+      "expect": {
+        "ids": [
+          "answer"
+        ],
+        "denied": false,
+        "order": "exact"
+      },
+      "reverse_records": true,
+      "same_order_as": "ordered_relationship_words"
+    },
+    {
+      "id": "multiple_constraints_unordered",
+      "group": "contract",
+      "task": "Retrieve both independent constraints, without requiring arbitrary order.",
+      "mode": "relevance",
+      "query": "equipment time",
+      "records": [
+        {
+          "id": "a",
+          "text": "Available equipment: dumbbells only."
+        },
+        {
+          "id": "b",
+          "text": "Training time: twenty minutes."
+        },
+        {
+          "id": "noise",
+          "text": "Dinner: noodles."
+        }
+      ],
+      "limit": 3,
+      "expect": {
+        "ids": [
+          "a",
+          "b"
+        ],
+        "denied": false,
+        "order": "any"
+      }
+    },
+    {
+      "id": "multiple_constraints_unordered__reversed",
+      "group": "contract",
+      "task": "Retrieve both independent constraints, without requiring arbitrary order.",
+      "mode": "relevance",
+      "query": "equipment time",
+      "records": [
+        {
+          "id": "a",
+          "text": "Available equipment: dumbbells only."
+        },
+        {
+          "id": "b",
+          "text": "Training time: twenty minutes."
+        },
+        {
+          "id": "noise",
+          "text": "Dinner: noodles."
+        }
+      ],
+      "limit": 3,
+      "expect": {
+        "ids": [
+          "a",
+          "b"
+        ],
+        "denied": false,
+        "order": "any"
+      },
+      "reverse_records": true,
+      "same_order_as": "multiple_constraints_unordered"
+    },
+    {
+      "id": "prefix_inflection",
+      "group": "contract",
+      "task": "A word-prefix query can retrieve an inflection.",
+      "mode": "relevance",
+      "query": "approve invoice",
+      "records": [
+        {
+          "id": "answer",
+          "text": "Approved invoices are in the cabinet."
+        },
+        {
+          "id": "noise",
+          "text": "The report is in the cabinet."
+        }
+      ],
+      "limit": 3,
+      "expect": {
+        "ids": [
+          "answer"
+        ],
+        "denied": false,
+        "order": "exact"
+      }
+    },
+    {
+      "id": "prefix_inflection__reversed",
+      "group": "contract",
+      "task": "A word-prefix query can retrieve an inflection.",
+      "mode": "relevance",
+      "query": "approve invoice",
+      "records": [
+        {
+          "id": "answer",
+          "text": "Approved invoices are in the cabinet."
+        },
+        {
+          "id": "noise",
+          "text": "The report is in the cabinet."
+        }
+      ],
+      "limit": 3,
+      "expect": {
+        "ids": [
+          "answer"
+        ],
+        "denied": false,
+        "order": "exact"
+      },
+      "reverse_records": true,
+      "same_order_as": "prefix_inflection"
+    },
+    {
+      "id": "zero_overlap",
+      "group": "contract",
+      "task": "Do not emit unrelated material when no query token matches.",
+      "mode": "relevance",
+      "query": "orbital mechanics",
+      "records": [
+        {
+          "id": "noise",
+          "text": "Inventory closes tomorrow."
+        }
+      ],
+      "limit": 3,
+      "expect": {
+        "ids": [],
+        "denied": false,
+        "order": "exact"
+      }
+    },
+    {
+      "id": "zero_overlap__reversed",
+      "group": "contract",
+      "task": "Do not emit unrelated material when no query token matches.",
+      "mode": "relevance",
+      "query": "orbital mechanics",
+      "records": [
+        {
+          "id": "noise",
+          "text": "Inventory closes tomorrow."
+        }
+      ],
+      "limit": 3,
+      "expect": {
+        "ids": [],
+        "denied": false,
+        "order": "exact"
+      },
+      "reverse_records": true,
+      "same_order_as": "zero_overlap"
+    },
+    {
+      "id": "negation_preserved",
+      "group": "contract",
+      "task": "Retrieve both conflicting claims as evidence; do not infer truth.",
+      "mode": "relevance",
+      "query": "cache enabled",
+      "records": [
+        {
+          "id": "a",
+          "text": "The cache is enabled."
+        },
+        {
+          "id": "b",
+          "text": "The cache is not enabled."
+        }
+      ],
+      "limit": 3,
+      "expect": {
+        "ids": [
+          "a",
+          "b"
+        ],
+        "denied": false,
+        "order": "any"
+      }
+    },
+    {
+      "id": "negation_preserved__reversed",
+      "group": "contract",
+      "task": "Retrieve both conflicting claims as evidence; do not infer truth.",
+      "mode": "relevance",
+      "query": "cache enabled",
+      "records": [
+        {
+          "id": "a",
+          "text": "The cache is enabled."
+        },
+        {
+          "id": "b",
+          "text": "The cache is not enabled."
+        }
+      ],
+      "limit": 3,
+      "expect": {
+        "ids": [
+          "a",
+          "b"
+        ],
+        "denied": false,
+        "order": "any"
+      },
+      "reverse_records": true,
+      "same_order_as": "negation_preserved"
+    },
+    {
+      "id": "numeric_token_boundary",
+      "group": "contract",
+      "task": "Short numeric terms are exact tokens, not substrings.",
+      "mode": "relevance",
+      "query": "42",
+      "records": [
+        {
+          "id": "answer",
+          "text": "Ticket 42 is closed."
+        },
+        {
+          "id": "noise",
+          "text": "Ticket 142 is open."
+        }
+      ],
+      "limit": 3,
+      "expect": {
+        "ids": [
+          "answer"
+        ],
+        "denied": false,
+        "order": "exact"
+      }
+    },
+    {
+      "id": "numeric_token_boundary__reversed",
+      "group": "contract",
+      "task": "Short numeric terms are exact tokens, not substrings.",
+      "mode": "relevance",
+      "query": "42",
+      "records": [
+        {
+          "id": "answer",
+          "text": "Ticket 42 is closed."
+        },
+        {
+          "id": "noise",
+          "text": "Ticket 142 is open."
+        }
+      ],
+      "limit": 3,
+      "expect": {
+        "ids": [
+          "answer"
+        ],
+        "denied": false,
+        "order": "exact"
+      },
+      "reverse_records": true,
+      "same_order_as": "numeric_token_boundary"
+    },
+    {
+      "id": "hidden_terms_do_not_rank",
+      "group": "contract",
+      "task": "Put evidence covering every requested word first.",
+      "mode": "relevance",
+      "query": "aurora safety deadline",
+      "records": [
+        {
+          "id": "answer",
+          "text": "Aurora safety deadline is Monday."
+        },
+        {
+          "id": "noise",
+          "text": "Aurora safety meeting has snacks."
+        },
+        {
+          "id": "secret",
+          "text": "Aurora safety deadline Aurora safety deadline Aurora safety deadline Aurora safety deadline Aurora safety deadline Aurora safety deadline Aurora safety deadline Aurora safety deadline Aurora safety deadline Aurora safety deadline Aurora safety deadline Aurora safety deadline Aurora safety deadline Aurora safety deadline Aurora safety deadline Aurora safety deadline Aurora safety deadline Aurora safety deadline Aurora safety deadline Aurora safety deadline Aurora safety deadline Aurora safety deadline Aurora safety deadline Aurora safety deadline Aurora safety deadline Aurora safety deadline Aurora safety deadline Aurora safety deadline Aurora safety deadline Aurora safety deadline ",
+          "sensitivity": 3
+        }
+      ],
+      "limit": 1,
+      "expect": {
+        "ids": [
+          "answer"
+        ],
+        "denied": false,
+        "order": "exact",
+        "inaccessible_refs": [
+          "secret"
+        ]
+      }
+    },
+    {
+      "id": "metadata_is_not_note_text",
+      "group": "contract",
+      "task": "Use the explicitly corrected host, not the old version.",
+      "records": [
+        {
+          "id": "old",
+          "text": "Deployment host: cedar.",
+          "source": "host",
+          "version": 1
+        },
+        {
+          "id": "answer",
+          "text": "Deployment host: birch.",
+          "source": "host",
+          "version": 2
+        }
+      ],
+      "query": "synthetic",
+      "limit": 3,
+      "expect": {
+        "ids": [],
+        "denied": false,
+        "inaccessible_refs": [
+          "old"
+        ]
+      },
+      "mode": "relevance"
+    },
+    {
+      "id": "tie_order_independent_of_insertion",
+      "group": "contract",
+      "task": "Equal lexical scores must have a stable content-based order.",
+      "mode": "relevance",
+      "query": "Aurora approved",
+      "records": [
+        {
+          "id": "a",
+          "text": "Aurora draft approved."
+        },
+        {
+          "id": "b",
+          "text": "Aurora plan approved."
+        }
+      ],
+      "limit": 3,
+      "expect": {
+        "ids": [
+          "a",
+          "b"
+        ],
+        "denied": false,
+        "order": "any"
+      }
+    },
+    {
+      "id": "tie_order_independent_of_insertion__reversed",
+      "group": "contract",
+      "task": "Equal lexical scores must have a stable content-based order.",
+      "mode": "relevance",
+      "query": "Aurora approved",
+      "records": [
+        {
+          "id": "a",
+          "text": "Aurora draft approved."
+        },
+        {
+          "id": "b",
+          "text": "Aurora plan approved."
+        }
+      ],
+      "limit": 3,
+      "expect": {
+        "ids": [
+          "a",
+          "b"
+        ],
+        "denied": false,
+        "order": "any"
+      },
+      "reverse_records": true,
+      "same_order_as": "tie_order_independent_of_insertion"
+    },
+    {
+      "id": "numeric_prefix_is_not_a_number_match",
+      "group": "contract",
+      "task": "A number must match exactly instead of matching a longer number prefix.",
+      "mode": "relevance",
+      "records": [
+        {
+          "id": "answer",
+          "text": "Reference 123 applies."
+        },
+        {
+          "id": "noise",
+          "text": "Reference 1234 applies."
+        }
+      ],
+      "query": "123",
+      "limit": 3,
+      "expect": {
+        "ids": [
+          "answer"
+        ],
+        "denied": false
+      }
+    },
+    {
+      "id": "numeric_prefix_is_not_a_number_match__reversed",
+      "group": "contract",
+      "task": "A number must match exactly instead of matching a longer number prefix.",
+      "mode": "relevance",
+      "records": [
+        {
+          "id": "answer",
+          "text": "Reference 123 applies."
+        },
+        {
+          "id": "noise",
+          "text": "Reference 1234 applies."
+        }
+      ],
+      "query": "123",
+      "limit": 3,
+      "expect": {
+        "ids": [
+          "answer"
+        ],
+        "denied": false
+      },
+      "reverse_records": true,
+      "same_order_as": "numeric_prefix_is_not_a_number_match"
+    }
+  ]
+}

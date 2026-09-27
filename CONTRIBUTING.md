@@ -46,7 +46,10 @@ For retrieval or record-context changes, run `npm run eval:recall:check` and
 `npm run eval:recall -- --gate=contracts`. The latter executes isolated synthetic
 HC cases and gates existing contracts; unmet richer-recall capabilities remain
 visible. Run `npm run eval:recall` to gate every desired outcome, including the
-currently missing relevance and semantic-recall capabilities. See
+richer ranking and semantic-recall capabilities. Also run
+`npm run eval:ranked -- --gate=contracts` when changing retrieval; this executes
+the opt-in [lexical relevance](docs/RANKED_RECALL.md) contracts and keeps unmet
+capabilities visible. See
 [the recall evals](evals/recall/README.md) for the frozen baseline, evidence
 artifacts and limits. These are finite development-time evals, not agent loops,
 model trials or performance measurements.

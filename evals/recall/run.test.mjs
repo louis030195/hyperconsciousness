@@ -147,3 +147,56 @@ test('invalid and contradictory gold cannot silently change the target', () => {
     assert.throws(() => validateSuite(s));
   }
 });
+
+test('unordered oracle is explicit and cannot excuse omissions or duplicate sources', () => {
+  const c = find('recent_order');
+  const o = good(c);
+  o.paths.scan.items.reverse();
+  assert.equal(gradeCase(c, o).status, 'fail');
+  c.expect.order = 'any';
+  assert.equal(gradeCase(c, o).status, 'pass');
+  o.paths.scan.items.pop();
+  assert.equal(gradeCase(c, o).status, 'fail');
+  c.expect.order = 'made-up';
+  const s = copy(suite);
+  s.cases[0] = c;
+  assert.throws(() => validateSuite(s));
+});
+
+test('ranked suite keeps unchanged capability expectations and exercises reversed insertion', () => {
+  const ranked = JSON.parse(readFileSync(new URL('./ranked-cases.json', import.meta.url)));
+  validateSuite(ranked);
+  for (const c of suite.cases.filter(c => c.group === 'capability')) {
+    for (const suffix of ['', '__reversed']) {
+      const candidate = ranked.cases.find(r => r.id === c.id + suffix);
+      assert.deepEqual(candidate.expect, c.expect);
+      assert.deepEqual(candidate.records, c.records);
+      assert.equal(candidate.query, c.query);
+      assert.equal(candidate.mode, 'relevance');
+    }
+  }
+});
+
+test('ordering metamorphism catches a tie flip even when both unordered oracles pass', () => {
+  const c = find('recent_order');
+  c.expect.order = 'any';
+  const reversed = { ...copy(c), id: 'reversed', same_order_as: c.id };
+  const s = {schema:1, cases:[c, reversed, find('ranking_over_recency')]};
+  const observations = s.cases.map(good);
+  observations[1].paths.scan.items.reverse();
+  const r = grade(s, {schema:1, basis:'executed_hc_core', suite_hash:'fixture', cases:observations}, 'fixture');
+  assert.equal(r.results[1].status, 'fail');
+  assert.equal(r.results[1].ordering_stable, false);
+});
+
+
+test('evidence coverage cannot excuse a larger-than-requested result window', () => {
+  const c = find('ranking_over_recency');
+  const o = good(c);
+  const point = o.paths.scan.point_reads.noise1;
+  o.paths.scan.items.push({id:'noise1', ...point, text:c.records.find(r => r.id === 'noise1').text});
+  const r = gradeCase(c, o);
+  assert.equal(r.status, 'fail');
+  assert.equal(r.paths.scan.evidence_present, false);
+  assert.ok(r.paths.scan.reasons.includes('result limit exceeded'));
+});

@@ -118,6 +118,10 @@ your HC executable and the store you chose:
 }
 ```
 
+MCP search supports an opt-in [lexical relevance mode](docs/RANKED_RECALL.md)
+for multiword queries. Literal search and chronological pagination remain the
+default. Relevance mode requires no model or external service.
+
 MCP exposes `overview`, `request_access`, `access_status`, `search`, `recent`,
 `record`, `remember`, `remember_many`, `use_secret`, and `files`. A tool's
 presence does not grant permission to use it. Add `--write` only when the agent

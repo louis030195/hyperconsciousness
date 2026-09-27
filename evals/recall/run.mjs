@@ -23,6 +23,7 @@ export function validateSuite(suite) {
     assert.ok(!seen.has(c.id), `duplicate case ${c.id}`);
     seen.add(c.id);
     assert.ok(['contract', 'capability'].includes(c.group));
+    assert.ok([undefined, 'literal', 'relevance'].includes(c.mode));
     assert.ok(typeof c.task === 'string' && c.task.length > 0);
     assert.ok(c.query === null || typeof c.query === 'string');
     assert.ok(Number.isInteger(c.limit) && c.limit > 0 && c.limit <= 200);
@@ -46,12 +47,21 @@ export function validateSuite(suite) {
     for (const [p, e] of Object.entries({ base: c.expect, ...c.expect.by_path })) {
       assert.ok(p === 'base' || paths.includes(p), 'unknown path oracle');
       assert.equal(typeof e.denied, 'boolean');
+      assert.ok([undefined, 'exact', 'any'].includes(e.order));
       assert.ok(Array.isArray(e.ids) && new Set(e.ids).size === e.ids.length);
       assert.ok(!e.denied || e.ids.length === 0, 'denied query cannot have expected evidence');
       assert.ok(e.ids.length <= c.limit);
       for (const id of [...e.ids, ...(e.inaccessible_refs ?? [])]) assert.ok(ids.has(id), `unknown gold id ${id}`);
       assert.ok(!e.ids.some(id => (e.inaccessible_refs ?? []).includes(id)), 'gold cannot require inaccessible evidence');
     }
+  }
+  for (const c of suite.cases.filter(c => c.same_order_as)) {
+    const peer = suite.cases.find(p => p.id === c.same_order_as);
+    assert.ok(peer && peer.id !== c.id, 'ordering check needs an existing peer');
+    assert.deepEqual(c.records, peer.records, 'ordering peers must have the same corpus');
+    assert.equal(c.query, peer.query);
+    assert.equal(c.limit, peer.limit);
+    assert.equal(c.mode, peer.mode);
   }
   assert.ok(suite.cases.some(c => c.group === 'contract'));
   assert.ok(suite.cases.some(c => c.group === 'capability'));
@@ -72,8 +82,10 @@ export function gradeCase(c, observed) {
     const reasons = [];
     const ids = o.items.map(item => item.id);
     if ((o.status === 'denied') !== e.denied) reasons.push('wrong access outcome');
-    if (!equal(ids, e.ids)) reasons.push('wrong evidence or order');
+    const correct = e.order === 'any' ? equal([...ids].sort(), [...e.ids].sort()) : equal(ids, e.ids);
+    if (!correct) reasons.push('wrong evidence or order');
     if (new Set(ids).size !== ids.length) reasons.push('duplicate evidence');
+    if (ids.length > c.limit) reasons.push('result limit exceeded');
     if (e.truncated !== undefined && o.truncated !== e.truncated) reasons.push('wrong continuation flag');
     for (const item of o.items) {
       const point = o.point_reads[item.id];
@@ -94,7 +106,9 @@ export function gradeCase(c, observed) {
     if (c.records.some(r => !['ok', 'denied'].includes(o.point_reads[r.id]?.status))) {
       result[path] = { status: 'infrastructure_error', reasons: ['incomplete point-read evidence'] };
     } else {
-      result[path] = { status: reasons.length ? 'fail' : 'pass', reasons, returned_ids: ids };
+      result[path] = { status: reasons.length ? 'fail' : 'pass', reasons, returned_ids: ids,
+        evidence_present: !e.denied && ids.length <= c.limit && o.status === 'ok' && (e.ids.length ? e.ids.every(id => ids.includes(id)) : ids.length === 0)
+          && !reasons.some(r => r.includes('citation') || r.includes('source text') || r.includes('inaccessible') || r.includes('duplicate')) };
     }
   }
   const statuses = Object.values(result).map(r => r.status);
@@ -111,6 +125,21 @@ export function grade(suite, evidence, suiteHash) {
   assert.equal(new Set(ids).size, ids.length, 'duplicate evidence case');
   assert.ok(ids.every(id => suite.cases.some(c => c.id === id)), 'unknown evidence case');
   const results = suite.cases.map(c => gradeCase(c, evidence.cases.find(o => o.id === c.id)));
+  for (const c of suite.cases.filter(c => c.same_order_as)) {
+    const row = results.find(r => r.id === c.id);
+    const peer = results.find(r => r.id === c.same_order_as);
+    if ([row.status, peer.status].includes('infrastructure_error')) continue;
+    row.ordering_stable = paths.every(p => equal(row.paths[p].returned_ids, peer.paths[p].returned_ids));
+    if (!row.ordering_stable) {
+      row.status = 'fail';
+      for (const p of paths) {
+        if (!equal(row.paths[p].returned_ids, peer.paths[p].returned_ids)) {
+          row.paths[p].status = 'fail';
+          row.paths[p].reasons.push('insertion order changed ranking');
+        }
+      }
+    }
+  }
   const summary = {};
   for (const group of ['contract', 'capability']) {
     const rows = results.filter(r => r.group === group);
@@ -126,9 +155,11 @@ function command(program, args, options = {}) {
 }
 
 function main(args) {
-  assert.ok(args.length <= 2 && ['check', 'run'].includes(args[0]), 'usage: node evals/recall/run.mjs check|run [--gate=contracts]');
-  assert.ok(!args[1] || args[1] === '--gate=contracts');
-  const bytes = readFileSync(join(root, 'evals/recall/cases.json'));
+  assert.ok(['check', 'run'].includes(args[0]), 'usage: check|run [--gate=contracts] [--suite=ranked]');
+  assert.ok(args.slice(1).every(a => ['--gate=contracts', '--suite=ranked'].includes(a)));
+  const contractsOnly = args.includes('--gate=contracts');
+  const suiteFile = args.includes('--suite=ranked') ? 'ranked-cases.json' : 'cases.json';
+  const bytes = readFileSync(join(root, 'evals/recall', suiteFile));
   const suite = JSON.parse(bytes);
   validateSuite(suite);
   if (args[0] === 'check') {
@@ -143,7 +174,7 @@ function main(args) {
   // The collector gets the corpus and query, never the grading oracle.
   write('input.json', { suite_hash: suiteHash, cases: suite.cases.map(({ expect, group, ...input }) => input) });
   const provenance = {
-    started_at: started,
+    started_at: started, suite_file: suiteFile,
     commit: command('git', ['rev-parse', 'HEAD']),
     worktree_status: command('git', ['status', '--porcelain']),
     rustc: command('rustc', ['--version']), node: process.version,
@@ -151,7 +182,7 @@ function main(args) {
     evaluator_sha256: hash(readFileSync(fileURLToPath(import.meta.url))),
     collector_sha256: hash(readFileSync(join(root, 'tests/recall_evals.rs'))),
     // Bind the actual compiled core inputs, including local edits, not just HEAD.
-    core_inputs_sha256: hash(command('git', ['ls-files', '-z', 'src', 'Cargo.toml', 'Cargo.lock', 'rust-toolchain.toml'])
+    core_inputs_sha256: hash(command('git', ['ls-files', '--cached', '--others', '--exclude-standard', '-z', 'src', 'Cargo.toml', 'Cargo.lock', 'rust-toolchain.toml'])
       .split('\0').filter(Boolean).sort().map(p => `${p}\0${hash(readFileSync(join(root, p)))}`).join('\n')),
   };
   write('provenance.json', provenance);
@@ -161,14 +192,14 @@ function main(args) {
     });
     const evidenceBytes = readFileSync(join(output, 'evidence.json'));
     const report = { ...grade(suite, JSON.parse(evidenceBytes), suiteHash), provenance,
-      evidence_sha256: hash(evidenceBytes), gate: args[1] ? 'contracts' : 'all' };
+      evidence_sha256: hash(evidenceBytes), gate: contractsOnly ? 'contracts' : 'all' };
     write('report.json', report);
     for (const [group, counts] of Object.entries(report.summary)) {
       console.log(`${group}: ${counts.pass} pass, ${counts.fail} fail, ${counts.infrastructure_error} infrastructure errors`);
     }
     for (const r of report.results.filter(r => r.status !== 'pass')) console.log(`${r.status}: ${r.id}`);
     console.log(`Report: ${join(output, 'report.json')}`);
-    const gated = report.results.filter(r => !args[1] || r.group === 'contract' || r.status === 'infrastructure_error');
+    const gated = report.results.filter(r => !contractsOnly || r.group === 'contract' || r.status === 'infrastructure_error');
     process.exitCode = gated.some(r => r.status !== 'pass') ? 1 : 0;
   } catch (error) {
     write('infrastructure-error.json', { schema: 1, suite_hash: suiteHash, error: String(error), provenance });

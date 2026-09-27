@@ -24,8 +24,9 @@ npm run eval:recall
 npm run eval:recall -- --gate=contracts
 ```
 
-The default command is expected to exit 1 on the initial baseline: HC does not
-yet implement ranked or semantic recall. Exit 0 means the selected gate passed;
+The default command is expected to exit 1 on the initial baseline: the default literal search does not
+implement ranked or semantic recall. The opt-in lexical relevance mode has its
+own suite described below. Exit 0 means the selected gate passed;
 exit 1 means an evaluated outcome did not pass; exit 2 means the runner could
 not complete. Per-case infrastructure errors are also explicit in reports and
 fail either gate. A Rust collector test passing means evidence was collected,
@@ -75,6 +76,17 @@ reads, always-empty/always-deny behavior, invalid continuation, missing executio
 duplicate observations and mismatched suites. Calibration observations are
 fabricated and are not counted as HC trials.
 
+## Relevance retrieval
+
+`npm run eval:ranked -- --gate=contracts` executes the separate
+`ranked-cases.json` suite through all three real retrieval paths. It keeps the
+seven original capability queries and oracles, adds reversed-insertion cases,
+and checks explicit lexical contracts, stable ordering, metadata exclusion and
+access/lifecycle boundaries. `npm run eval:ranked` gates all outcomes, including
+the still-unmet capabilities. See [relevance search](../../docs/RANKED_RECALL.md)
+for the API, resource limits and interpretation. The frozen literal suite and
+first baseline are unchanged.
+
 ## Adjacent context contracts
 
 Run the existing MCP context and capture-projection tests alongside these evals:
@@ -120,10 +132,10 @@ No agent trials are implemented or claimed by this suite.
 
 ## Mission fit
 
-Changes are limited to development-time cases, an evidence collector, a grader
-and documentation. No runtime dependency, library module, model integration,
-storage protocol, authority rule or scope-eval policy changes are necessary.
-Future relevance retrieval belongs in generic HC retrieval when justified;
+The eval runner, evidence collector and grader run only during development.
+The opt-in lexical endpoint belongs in generic HC retrieval; it adds no runtime
+dependency, model integration, storage protocol, authority rule or scope-eval
+policy change.
 context assembly and domain workflows stay outside the core. Capability cases
 describe desired outcomes without prescribing an implementation or weakening
 existing search contracts.

@@ -809,6 +809,21 @@ impl Server {
         let result = (|| {
             match name {
                 "search" | "recent" => {
+                    let ranked = match arguments.get("mode") {
+                        None | Some(Value::Null) => false,
+                        Some(Value::String(mode)) if mode == "literal" => false,
+                        Some(Value::String(mode)) if mode == "relevance" && name == "search" => {
+                            true
+                        }
+                        _ => {
+                            return Err(Error::Malformed(
+                                "search mode must be literal or relevance; recent is chronological",
+                            ))
+                        }
+                    };
+                    if ranked && arguments.get("cursor").is_some_and(|v| !v.is_null()) {
+                        return Err(Error::Malformed("relevance search has no chronological cursor; refine query or increase limit"));
+                    }
                     let structured = match arguments.get("format") {
                         None | Some(Value::Null) => false,
                         Some(Value::String(value)) if value == "text" => false,
@@ -878,7 +893,11 @@ impl Server {
                             .unwrap_or_else(|poisoned| poisoned.into_inner())
                     });
                     let answer = if let Some(cached) = snapshot_read.as_deref() {
-                        hyperconsciousness::query::look_snapshot(
+                        (if ranked {
+                            hyperconsciousness::query::ranked::look_snapshot
+                        } else {
+                            hyperconsciousness::query::look_snapshot
+                        })(
                             &store,
                             &keys,
                             cached,
@@ -894,7 +913,11 @@ impl Server {
                             let index = index
                                 .read()
                                 .unwrap_or_else(|poisoned| poisoned.into_inner());
-                            hyperconsciousness::query::look_indexed(
+                            (if ranked {
+                                hyperconsciousness::query::ranked::look_indexed
+                            } else {
+                                hyperconsciousness::query::look_indexed
+                            })(
                                 &store,
                                 &keys,
                                 &index,
@@ -907,6 +930,9 @@ impl Server {
                         })();
                         match indexed {
                             Ok(answer) => answer,
+                            // A bounded ranked query must not retry an expensive
+                            // full scan after a resource or permission refusal.
+                            Err(error) if ranked => return Err(error),
                             Err(_) => hyperconsciousness::query::look(
                                 &store,
                                 &keys,
@@ -930,7 +956,7 @@ impl Server {
                             cursor_binding,
                             answer.truncated,
                             now,
-                            (output_chars, match_chars, true),
+                            (output_chars, match_chars, true, ranked),
                             |record| {
                                 if let Some(cached) = snapshot_read.as_deref() {
                                     cached
@@ -957,7 +983,12 @@ impl Server {
                     let mut clipped = 0usize;
                     let total_records = answer.records.len();
                     let content_chars = output_chars.saturating_sub(SEARCH_FOOTER_RESERVE);
-                    for (index, record) in answer.records.iter().enumerate() {
+                    let displayed: Vec<_> = if ranked {
+                        answer.records.iter().rev().collect()
+                    } else {
+                        answer.records.iter().collect()
+                    };
+                    for (index, record) in displayed.into_iter().enumerate() {
                         let bytes = if let Some(cached) = snapshot_read.as_deref() {
                             cached.payload(record).map(Vec::from)
                         } else {
@@ -1006,7 +1037,9 @@ impl Server {
                         "\nresponse budget limited this call to {effective_limit} results; raise max_output_chars for more\n"
                     ));
                     }
-                    if answer.truncated {
+                    if answer.truncated && ranked {
+                        out.push_str("\nmore lexical matches exist; refine query or increase limit (no chronological cursor)\n");
+                    } else if answer.truncated {
                         if let Some(record) = answer.records.first() {
                             out.push_str(&format!(
                                 "\nnext_cursor: {}\n",
@@ -1110,7 +1143,7 @@ impl Server {
                             [0; 8],
                             false,
                             now,
-                            (output_chars, max_chars, false),
+                            (output_chars, max_chars, false, false),
                             |_| Ok(answer.payload.clone()),
                         )?;
                         self.append_record(&identity, &answer.read_receipt)?;
@@ -2011,7 +2044,7 @@ fn structured_search_page(
     binding: [u8; 8],
     truncated: bool,
     now: u64,
-    (budget, max_excerpt, compact): (usize, usize, bool),
+    (budget, max_excerpt, compact, ranked): (usize, usize, bool, bool),
     payload: impl Fn(&Record) -> Result<Vec<u8>>,
 ) -> Result<String> {
     let mut page = json!({
@@ -2020,11 +2053,15 @@ fn structured_search_page(
         "content_role": "untrusted_evidence",
         "retrieved_at_ms": now,
         "remote_sync": "not_checked",
-        "order": "newest_first",
+        "order": if ranked { "relevance" } else { "newest_first" },
         "items": [],
         "has_more": false,
         "next_cursor": null,
     });
+    if ranked {
+        page["ranking"] = json!("bounded_lexical_bm25_v1");
+        page["continuation"] = json!("refine_query_or_increase_limit");
+    }
     for (index, record) in records.iter().rev().enumerate() {
         let bytes = payload(record)?;
         let text = shown_text(&bytes);
@@ -2073,7 +2110,7 @@ fn structured_search_page(
                 }
             }
             candidate["has_more"] = json!(more);
-            candidate["next_cursor"] = if more {
+            candidate["next_cursor"] = if more && !ranked {
                 json!(encode_search_cursor(record, filter, binding))
             } else {
                 Value::Null
@@ -2386,10 +2423,13 @@ fn tools() -> Value {
                             grant covers and says how much it did not cover. every line carries \
                             its date and an id you can quote back. when next_cursor is present, \
                             pass it unchanged with the same filters for older results. every call \
-                            rechecks access and is logged.",
+                            rechecks access and is logged. For multiword discovery, use mode \
+                            relevance: bounded lexical ranking over record text, without a model. \
+                            Omit mode for the existing literal search and chronological cursors.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
+                    "mode": {"type":"string", "enum":["literal","relevance"], "description":"Default literal preserves exact substring/chronological search. Use relevance for ranked word-prefix discovery over authorized note text, with stable ties and no model. No cursor; narrow filters if bounded candidate limits are exceeded."},
                     "query": {"type": "string", "description": "words to match, omit for the most recent"},
                     "kind": {"type": "string", "description": "for example note, file, meeting"},
                     "tags": {"type": "array", "items": {"type": "string"}, "description": "any of these"},

@@ -307,3 +307,155 @@ fn owner_can_disable_resident_views_without_disabling_authorization() {
     .unwrap();
     assert!(server.call("search", &json!({})).is_err());
 }
+
+#[test]
+fn relevance_search_is_opt_in_bounded_and_has_no_chronological_cursor() {
+    let (_dir, identity, server) = setup();
+    note(
+        &server,
+        &identity,
+        "Aurora safety deadline is Monday.",
+        PERSONAL,
+    );
+    note(
+        &server,
+        &identity,
+        "Aurora safety meeting has snacks.",
+        PERSONAL,
+    );
+    let args = json!({"query":"aurora safety deadline", "mode":"relevance", "format":"structured", "limit":1, "max_output_chars":1024});
+    let output = server.call("search", &args).unwrap();
+    let page: Value = serde_json::from_str(&output).unwrap();
+    assert!(output.chars().count() <= 1024);
+    assert_eq!(page["order"], "relevance");
+    assert_eq!(page["ranking"], "bounded_lexical_bm25_v1");
+    assert_eq!(page["content_role"], "untrusted_evidence");
+    assert!(page["items"][0]["text"]
+        .as_str()
+        .unwrap()
+        .contains("Monday"));
+    assert_eq!(page["has_more"], true);
+    assert!(page["next_cursor"].is_null());
+    let reference = page["items"][0]["ref"].as_str().unwrap();
+    assert!(server
+        .call("record", &json!({"ref":reference}))
+        .unwrap()
+        .contains("Monday"));
+    let text = server
+        .call(
+            "search",
+            &json!({"query":"aurora safety deadline", "mode":"relevance", "limit":1}),
+        )
+        .unwrap();
+    assert!(text.contains("Monday"));
+    assert!(!text.contains("next_cursor:"));
+    // Literal is still substring matching, with the original cursor contract.
+    let literal: Value = serde_json::from_str(
+        &server
+            .call(
+                "search",
+                &json!({"query":"aurora safety deadline", "format":"structured"}),
+            )
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(literal["order"], "newest_first");
+    assert_eq!(literal["items"].as_array().unwrap().len(), 1);
+    assert!(literal.get("ranking").is_none());
+}
+
+#[test]
+fn relevance_statistics_and_results_ignore_hidden_records_and_check_revocation() {
+    let (_dir, identity, server) = setup();
+    note(
+        &server,
+        &identity,
+        "Aurora safety deadline is Monday.",
+        PERSONAL,
+    );
+    note(
+        &server,
+        &identity,
+        "Aurora safety meeting has snacks.",
+        PERSONAL,
+    );
+    let args = json!({"query":"aurora safety deadline", "mode":"relevance", "format":"structured"});
+    let mut before: Value = serde_json::from_str(&server.call("search", &args).unwrap()).unwrap();
+    note(
+        &server,
+        &identity,
+        &"Aurora safety deadline ".repeat(100),
+        grant::SECRET,
+    );
+    let mut after: Value = serde_json::from_str(&server.call("search", &args).unwrap()).unwrap();
+    before["retrieved_at_ms"] = Value::Null;
+    after["retrieved_at_ms"] = Value::Null;
+    assert_eq!(before, after);
+    append(
+        &server.dir,
+        &identity,
+        &json!({"kind":"revoke","grant":server.chain[0].id().hex()}).to_string(),
+    )
+    .unwrap();
+    assert!(server.call("search", &args).is_err());
+}
+
+#[test]
+fn relevance_rejects_ambiguous_modes_and_chronological_continuations() {
+    let (_dir, _identity, server) = setup();
+    for args in [
+        json!({"query":"budget", "mode":"unknown"}),
+        json!({"query":"budget", "mode":true}),
+        json!({"query":"budget", "mode":"relevance", "cursor":"old-cursor"}),
+        json!({"query":"what is the", "mode":"relevance"}),
+        json!({"query":"x".repeat(4097), "mode":"relevance"}),
+    ] {
+        assert!(server.call("search", &args).is_err());
+    }
+    assert!(server.call("recent", &json!({"mode":"relevance"})).is_err());
+}
+
+#[test]
+fn relevance_context_respects_small_budgets_with_long_evidence() {
+    let (_dir, identity, server) = setup();
+    for i in 0..8 {
+        note(
+            &server,
+            &identity,
+            &format!("evidence {i} {}", "\"\\ café 家族 ".repeat(500)),
+            PERSONAL,
+        );
+    }
+    let output = server.call("search", &json!({"query":"evidence café", "mode":"relevance", "format":"structured", "max_output_chars":1024, "limit":8})).unwrap();
+    assert!(output.chars().count() <= 1024);
+    let page: Value = serde_json::from_str(&output).unwrap();
+    assert!(!page["items"].as_array().unwrap().is_empty());
+    assert!(page["next_cursor"].is_null());
+    assert_eq!(page["items"][0]["clipped"], true);
+}
+
+#[test]
+fn relevance_resource_exhaustion_is_explicit_and_does_not_return_a_partial_answer() {
+    for oversized in [
+        "evidence ".repeat(250_001),
+        format!("{}evidence", "filler ".repeat(250_002)),
+    ] {
+        let (_dir, identity, server) = setup();
+        note(&server, &identity, "evidence small", PERSONAL);
+        note(&server, &identity, &oversized, PERSONAL);
+        let error = server
+            .call(
+                "search",
+                &json!({"query":"evidence", "mode":"relevance", "format":"structured"}),
+            )
+            .unwrap_err();
+        assert!(error.to_string().contains("budget exceeded"));
+        // The old literal endpoint remains available and is not silently redefined.
+        assert!(server
+            .call(
+                "search",
+                &json!({"query":"evidence small", "format":"structured"})
+            )
+            .is_ok());
+    }
+}
