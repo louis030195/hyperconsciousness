@@ -57,10 +57,18 @@ fn last_check(exe: &Path) -> u64 {
     if !regular(&path) {
         return 0;
     }
-    fs::read_to_string(path)
+    File::open(path)
+        .and_then(|mut file| read_check(&mut file))
+        .unwrap_or(0)
+}
+
+fn read_check(file: &mut File) -> io::Result<u64> {
+    file.rewind()?;
+    let bytes = bounded(file, 64)?;
+    Ok(std::str::from_utf8(&bytes)
         .ok()
         .and_then(|s| s.trim().parse().ok())
-        .unwrap_or(0)
+        .unwrap_or(0))
 }
 
 /// Network work happens in a detached, quiet child, never on the MCP/CLI path.
@@ -182,7 +190,7 @@ pub(crate) fn run(args: &[String], background: bool) -> io::Result<()> {
         );
         return Ok(());
     }
-    if background && (!enabled(&exe) || !due(last_check(&exe), now())) {
+    if background && (!enabled(&exe) || !due(read_check(&mut guard)?, now())) {
         return Ok(());
     }
     // Back off even after an offline/rate-limited attempt. No busy retry loop.
