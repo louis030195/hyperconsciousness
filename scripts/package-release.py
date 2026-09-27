@@ -11,7 +11,12 @@ actual = subprocess.check_output([str(binary), '--version'], text=True).strip()
 assert actual == 'hc ' + version, (actual, version)
 subprocess.run([str(binary), '--help'], check=True, stdout=subprocess.DEVNULL)
 # Prove the compiled TLS backend can reach the real public update feed.
-subprocess.run([str(binary), 'update', '--check'], check=True, timeout=75)
+feed = subprocess.run([str(binary), 'update', '--check'], capture_output=True, text=True, timeout=75)
+print(feed.stdout, end=''); print(feed.stderr, end='', file=sys.stderr)
+# Shared runner IPs can exhaust GitHub's anonymous quota. This exact response
+# still proves verified HTTPS reached GitHub; transport/TLS/other HTTP errors fail.
+if feed.returncode and 'GitHub API rate limit reached; existing HC kept' not in feed.stderr:
+    feed.check_returncode()
 out = pathlib.Path('dist'); out.mkdir(exist_ok=True)
 # Raw executables let the native updater avoid an archive extraction dependency.
 shutil.copy2(binary, out / ('hc-' + target + ('.exe' if windows else '')))

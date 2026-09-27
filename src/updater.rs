@@ -211,10 +211,21 @@ pub(crate) fn run(args: &[String], background: bool) -> io::Result<()> {
         .user_agent(concat!("hc-updater/", env!("CARGO_PKG_VERSION")))
         .build();
     let fetch = |url: &str, cap| -> io::Result<Vec<u8>> {
-        let response = client
-            .get(url)
-            .call()
-            .map_err(|_| fail("GitHub update request failed; existing HC kept"))?;
+        let response = client.get(url).call().map_err(|error| match error {
+            ureq::Error::Status(403, response)
+                if response.header("X-RateLimit-Remaining") == Some("0") =>
+            {
+                fail("GitHub API rate limit reached; existing HC kept")
+            }
+            ureq::Error::Status(429, _) => fail("GitHub API rate limit reached; existing HC kept"),
+            ureq::Error::Status(status, _) => {
+                fail(&format!("GitHub update HTTP {status}; existing HC kept"))
+            }
+            ureq::Error::Transport(error) => fail(&format!(
+                "GitHub update transport {:?}; existing HC kept",
+                error.kind()
+            )),
+        })?;
         bounded(response.into_reader(), cap)
     };
     let current = Version::parse(VERSION).map_err(|_| fail("invalid current version"))?;
