@@ -87,6 +87,13 @@ the still-unmet capabilities. See [relevance search](../../docs/RANKED_RECALL.md
 for the API, resource limits and interpretation. The frozen literal suite and
 first baseline are unchanged.
 
+## Post-implementation challenge set
+
+Run `npm run eval:challenge -- --gate=contracts` for 32 larger synthetic cases
+with ambiguity, distractors, paraphrases, and source instructions. See
+[CHALLENGE.md](CHALLENGE.md) for the frozen first run and limits. Category reports
+separate strict selection from evidence availability.
+
 ## Adjacent context contracts
 
 Run the existing MCP context and capture-projection tests alongside these evals:
@@ -136,6 +143,6 @@ The eval runner, evidence collector and grader run only during development.
 The opt-in lexical endpoint belongs in generic HC retrieval; it adds no runtime
 dependency, model integration, storage protocol, authority rule or scope-eval
 policy change.
-context assembly and domain workflows stay outside the core. Capability cases
+Context assembly and domain workflows stay outside the core. Capability cases
 describe desired outcomes without prescribing an implementation or weakening
 existing search contracts.

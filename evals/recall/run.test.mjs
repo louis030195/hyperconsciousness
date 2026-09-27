@@ -200,3 +200,33 @@ test('evidence coverage cannot excuse a larger-than-requested result window', ()
   assert.equal(r.paths.scan.evidence_present, false);
   assert.ok(r.paths.scan.reasons.includes('result limit exceeded'));
 });
+
+
+test('challenge suite remains frozen at its first executed baseline', () => {
+  const bytes = readFileSync(new URL('./challenge-cases.json', import.meta.url));
+  const baseline = JSON.parse(readFileSync(new URL('./challenge-baseline.json', import.meta.url)));
+  assert.equal(hash(bytes), baseline.suite_sha256);
+  const challenge = JSON.parse(bytes);
+  validateSuite(challenge);
+  assert.equal(challenge.cases.length, 32);
+  assert.ok(challenge.cases.every(c => c.records.length >= 25));
+});
+
+test('category diagnostics do not turn noisy retrieval into strict success', () => {
+  const c = find('entity_alias');
+  c.category = 'alias';
+  const o = good(c);
+  const point = o.paths.scan.point_reads.alias;
+  o.paths.scan.items.push({id:'alias', ...point, text:c.records.find(r => r.id === 'alias').text});
+  const contract = find('literal_recall');
+  const r = grade({schema:1, cases:[contract,c]}, {schema:1,basis:'executed_hc_core',suite_hash:'fixture',cases:[good(contract),o]}, 'fixture');
+  assert.equal(r.categories.alias.fail, 1);
+  assert.equal(r.categories.alias.complete_evidence_cases, 1);
+  assert.equal(r.summary.capability.pass, 0);
+});
+
+test('insertion comparisons cannot change the access or filtering conditions', () => {
+  const c = find('recent_order');
+  const peer = {...copy(c),id:'reversed',same_order_as:c.id,tags:['different']};
+  assert.throws(() => validateSuite({schema:1,cases:[c,peer,find('ranking_over_recency')]}), /changed tags/);
+});

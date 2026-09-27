@@ -1,0 +1,1125 @@
+{
+  "schema": 1,
+  "basis": "executed_hc_core",
+  "command": "npm run eval:challenge -- --gate=contracts",
+  "gate": "contracts",
+  "run": "2026-09-27T19:11:47.290Z",
+  "source_commit": "15da2463f28b0f7c62bd73e12ff0075b3ceea672",
+  "suite_sha256": "ca0229f66eca1b8bb662348b68f900788a135a5682d99fde0130354f331cac6c",
+  "core_inputs_sha256": "e6acdd8e8e250f41b91626d5f1bcc564bcf635cc8c74fa34a84e109ad102d706",
+  "collector_sha256": "0f121296e0563f3b843ef44a54689c51b5aeda30950d7081a0534109c226f08b",
+  "evaluator_sha256": "efb680c67d731b9adc5068ec5068e458c39f818fa3b1f603e407ed8a7ae60f69",
+  "evidence_sha256": "daff11da2a12be923adee23eb2ee9ace9461d559d64b7aa9ff369d1bf8687471",
+  "summary": {
+    "contract": {
+      "pass": 14,
+      "fail": 0,
+      "infrastructure_error": 0
+    },
+    "capability": {
+      "pass": 4,
+      "fail": 14,
+      "infrastructure_error": 0
+    }
+  },
+  "cases": [
+    {
+      "id": "specific_decision",
+      "group": "capability",
+      "status": "pass",
+      "paths": {
+        "scan": {
+          "status": "pass",
+          "reasons": [],
+          "returned_ids": [
+            "r0"
+          ],
+          "evidence_present": true
+        },
+        "snapshot": {
+          "status": "pass",
+          "reasons": [],
+          "returned_ids": [
+            "r0"
+          ],
+          "evidence_present": true
+        },
+        "indexed": {
+          "status": "pass",
+          "reasons": [],
+          "returned_ids": [
+            "r0"
+          ],
+          "evidence_present": true
+        }
+      }
+    },
+    {
+      "id": "approved_amount",
+      "group": "capability",
+      "status": "pass",
+      "paths": {
+        "scan": {
+          "status": "pass",
+          "reasons": [],
+          "returned_ids": [
+            "r0"
+          ],
+          "evidence_present": true
+        },
+        "snapshot": {
+          "status": "pass",
+          "reasons": [],
+          "returned_ids": [
+            "r0"
+          ],
+          "evidence_present": true
+        },
+        "indexed": {
+          "status": "pass",
+          "reasons": [],
+          "returned_ids": [
+            "r0"
+          ],
+          "evidence_present": true
+        }
+      }
+    },
+    {
+      "id": "voice_paraphrase",
+      "group": "capability",
+      "status": "fail",
+      "paths": {
+        "scan": {
+          "status": "fail",
+          "reasons": [
+            "wrong evidence or order"
+          ],
+          "returned_ids": [],
+          "evidence_present": false
+        },
+        "snapshot": {
+          "status": "fail",
+          "reasons": [
+            "wrong evidence or order"
+          ],
+          "returned_ids": [],
+          "evidence_present": false
+        },
+        "indexed": {
+          "status": "fail",
+          "reasons": [
+            "wrong evidence or order"
+          ],
+          "returned_ids": [],
+          "evidence_present": false
+        }
+      }
+    },
+    {
+      "id": "storage_paraphrase",
+      "group": "capability",
+      "status": "fail",
+      "paths": {
+        "scan": {
+          "status": "fail",
+          "reasons": [
+            "wrong evidence or order"
+          ],
+          "returned_ids": [],
+          "evidence_present": false
+        },
+        "snapshot": {
+          "status": "fail",
+          "reasons": [
+            "wrong evidence or order"
+          ],
+          "returned_ids": [],
+          "evidence_present": false
+        },
+        "indexed": {
+          "status": "fail",
+          "reasons": [
+            "wrong evidence or order"
+          ],
+          "returned_ids": [],
+          "evidence_present": false
+        }
+      }
+    },
+    {
+      "id": "alias_chain",
+      "group": "capability",
+      "status": "fail",
+      "paths": {
+        "scan": {
+          "status": "fail",
+          "reasons": [
+            "wrong evidence or order"
+          ],
+          "returned_ids": [
+            "r0",
+            "r2",
+            "r1"
+          ],
+          "evidence_present": true
+        },
+        "snapshot": {
+          "status": "fail",
+          "reasons": [
+            "wrong evidence or order"
+          ],
+          "returned_ids": [
+            "r0",
+            "r2",
+            "r1"
+          ],
+          "evidence_present": true
+        },
+        "indexed": {
+          "status": "fail",
+          "reasons": [
+            "wrong evidence or order"
+          ],
+          "returned_ids": [
+            "r0",
+            "r2",
+            "r1"
+          ],
+          "evidence_present": true
+        }
+      }
+    },
+    {
+      "id": "direction",
+      "group": "capability",
+      "status": "fail",
+      "paths": {
+        "scan": {
+          "status": "fail",
+          "reasons": [
+            "wrong evidence or order"
+          ],
+          "returned_ids": [
+            "r0",
+            "r1"
+          ],
+          "evidence_present": true
+        },
+        "snapshot": {
+          "status": "fail",
+          "reasons": [
+            "wrong evidence or order"
+          ],
+          "returned_ids": [
+            "r0",
+            "r1"
+          ],
+          "evidence_present": true
+        },
+        "indexed": {
+          "status": "fail",
+          "reasons": [
+            "wrong evidence or order"
+          ],
+          "returned_ids": [
+            "r0",
+            "r1"
+          ],
+          "evidence_present": true
+        }
+      }
+    },
+    {
+      "id": "no_asserted_code",
+      "group": "capability",
+      "status": "fail",
+      "paths": {
+        "scan": {
+          "status": "fail",
+          "reasons": [
+            "wrong evidence or order"
+          ],
+          "returned_ids": [
+            "r0",
+            "r1"
+          ],
+          "evidence_present": true
+        },
+        "snapshot": {
+          "status": "fail",
+          "reasons": [
+            "wrong evidence or order"
+          ],
+          "returned_ids": [
+            "r0",
+            "r1"
+          ],
+          "evidence_present": true
+        },
+        "indexed": {
+          "status": "fail",
+          "reasons": [
+            "wrong evidence or order"
+          ],
+          "returned_ids": [
+            "r0",
+            "r1"
+          ],
+          "evidence_present": true
+        }
+      }
+    },
+    {
+      "id": "source_instruction",
+      "group": "capability",
+      "status": "fail",
+      "paths": {
+        "scan": {
+          "status": "fail",
+          "reasons": [
+            "wrong evidence or order"
+          ],
+          "returned_ids": [
+            "r0",
+            "r1"
+          ],
+          "evidence_present": true
+        },
+        "snapshot": {
+          "status": "fail",
+          "reasons": [
+            "wrong evidence or order"
+          ],
+          "returned_ids": [
+            "r0",
+            "r1"
+          ],
+          "evidence_present": true
+        },
+        "indexed": {
+          "status": "fail",
+          "reasons": [
+            "wrong evidence or order"
+          ],
+          "returned_ids": [
+            "r0",
+            "r1"
+          ],
+          "evidence_present": true
+        }
+      }
+    },
+    {
+      "id": "two_constraints",
+      "group": "capability",
+      "status": "fail",
+      "paths": {
+        "scan": {
+          "status": "fail",
+          "reasons": [
+            "wrong evidence or order"
+          ],
+          "returned_ids": [
+            "r0",
+            "r1",
+            "r2"
+          ],
+          "evidence_present": true
+        },
+        "snapshot": {
+          "status": "fail",
+          "reasons": [
+            "wrong evidence or order"
+          ],
+          "returned_ids": [
+            "r0",
+            "r1",
+            "r2"
+          ],
+          "evidence_present": true
+        },
+        "indexed": {
+          "status": "fail",
+          "reasons": [
+            "wrong evidence or order"
+          ],
+          "returned_ids": [
+            "r0",
+            "r1",
+            "r2"
+          ],
+          "evidence_present": true
+        }
+      }
+    },
+    {
+      "id": "explicit_conflict",
+      "group": "contract",
+      "status": "pass",
+      "paths": {
+        "scan": {
+          "status": "pass",
+          "reasons": [],
+          "returned_ids": [
+            "r1",
+            "r0"
+          ],
+          "evidence_present": true
+        },
+        "snapshot": {
+          "status": "pass",
+          "reasons": [],
+          "returned_ids": [
+            "r1",
+            "r0"
+          ],
+          "evidence_present": true
+        },
+        "indexed": {
+          "status": "pass",
+          "reasons": [],
+          "returned_ids": [
+            "r1",
+            "r0"
+          ],
+          "evidence_present": true
+        }
+      }
+    },
+    {
+      "id": "ambiguous_project",
+      "group": "contract",
+      "status": "pass",
+      "paths": {
+        "scan": {
+          "status": "pass",
+          "reasons": [],
+          "returned_ids": [
+            "r1",
+            "r0"
+          ],
+          "evidence_present": true
+        },
+        "snapshot": {
+          "status": "pass",
+          "reasons": [],
+          "returned_ids": [
+            "r1",
+            "r0"
+          ],
+          "evidence_present": true
+        },
+        "indexed": {
+          "status": "pass",
+          "reasons": [],
+          "returned_ids": [
+            "r1",
+            "r0"
+          ],
+          "evidence_present": true
+        }
+      }
+    },
+    {
+      "id": "negation_pair",
+      "group": "contract",
+      "status": "pass",
+      "paths": {
+        "scan": {
+          "status": "pass",
+          "reasons": [],
+          "returned_ids": [
+            "r0",
+            "r1"
+          ],
+          "evidence_present": true
+        },
+        "snapshot": {
+          "status": "pass",
+          "reasons": [],
+          "returned_ids": [
+            "r0",
+            "r1"
+          ],
+          "evidence_present": true
+        },
+        "indexed": {
+          "status": "pass",
+          "reasons": [],
+          "returned_ids": [
+            "r0",
+            "r1"
+          ],
+          "evidence_present": true
+        }
+      }
+    },
+    {
+      "id": "identifier_exact",
+      "group": "contract",
+      "status": "pass",
+      "paths": {
+        "scan": {
+          "status": "pass",
+          "reasons": [],
+          "returned_ids": [
+            "r0"
+          ],
+          "evidence_present": true
+        },
+        "snapshot": {
+          "status": "pass",
+          "reasons": [],
+          "returned_ids": [
+            "r0"
+          ],
+          "evidence_present": true
+        },
+        "indexed": {
+          "status": "pass",
+          "reasons": [],
+          "returned_ids": [
+            "r0"
+          ],
+          "evidence_present": true
+        }
+      }
+    },
+    {
+      "id": "true_no_match",
+      "group": "contract",
+      "status": "pass",
+      "paths": {
+        "scan": {
+          "status": "pass",
+          "reasons": [],
+          "returned_ids": [],
+          "evidence_present": true
+        },
+        "snapshot": {
+          "status": "pass",
+          "reasons": [],
+          "returned_ids": [],
+          "evidence_present": true
+        },
+        "indexed": {
+          "status": "pass",
+          "reasons": [],
+          "returned_ids": [],
+          "evidence_present": true
+        }
+      }
+    },
+    {
+      "id": "private_boundary",
+      "group": "contract",
+      "status": "pass",
+      "paths": {
+        "scan": {
+          "status": "pass",
+          "reasons": [],
+          "returned_ids": [],
+          "evidence_present": true
+        },
+        "snapshot": {
+          "status": "pass",
+          "reasons": [],
+          "returned_ids": [],
+          "evidence_present": true
+        },
+        "indexed": {
+          "status": "pass",
+          "reasons": [],
+          "returned_ids": [],
+          "evidence_present": true
+        }
+      }
+    },
+    {
+      "id": "current_revision",
+      "group": "contract",
+      "status": "pass",
+      "paths": {
+        "scan": {
+          "status": "pass",
+          "reasons": [],
+          "returned_ids": [
+            "r1"
+          ],
+          "evidence_present": true
+        },
+        "snapshot": {
+          "status": "pass",
+          "reasons": [],
+          "returned_ids": [
+            "r1"
+          ],
+          "evidence_present": true
+        },
+        "indexed": {
+          "status": "pass",
+          "reasons": [],
+          "returned_ids": [
+            "r1"
+          ],
+          "evidence_present": true
+        }
+      }
+    },
+    {
+      "id": "retracted_claim",
+      "group": "contract",
+      "status": "pass",
+      "paths": {
+        "scan": {
+          "status": "pass",
+          "reasons": [],
+          "returned_ids": [],
+          "evidence_present": true
+        },
+        "snapshot": {
+          "status": "pass",
+          "reasons": [],
+          "returned_ids": [],
+          "evidence_present": true
+        },
+        "indexed": {
+          "status": "pass",
+          "reasons": [],
+          "returned_ids": [],
+          "evidence_present": true
+        }
+      }
+    },
+    {
+      "id": "specific_decision__reversed",
+      "group": "capability",
+      "status": "pass",
+      "paths": {
+        "scan": {
+          "status": "pass",
+          "reasons": [],
+          "returned_ids": [
+            "r0"
+          ],
+          "evidence_present": true
+        },
+        "snapshot": {
+          "status": "pass",
+          "reasons": [],
+          "returned_ids": [
+            "r0"
+          ],
+          "evidence_present": true
+        },
+        "indexed": {
+          "status": "pass",
+          "reasons": [],
+          "returned_ids": [
+            "r0"
+          ],
+          "evidence_present": true
+        }
+      },
+      "ordering_stable": true
+    },
+    {
+      "id": "approved_amount__reversed",
+      "group": "capability",
+      "status": "pass",
+      "paths": {
+        "scan": {
+          "status": "pass",
+          "reasons": [],
+          "returned_ids": [
+            "r0"
+          ],
+          "evidence_present": true
+        },
+        "snapshot": {
+          "status": "pass",
+          "reasons": [],
+          "returned_ids": [
+            "r0"
+          ],
+          "evidence_present": true
+        },
+        "indexed": {
+          "status": "pass",
+          "reasons": [],
+          "returned_ids": [
+            "r0"
+          ],
+          "evidence_present": true
+        }
+      },
+      "ordering_stable": true
+    },
+    {
+      "id": "voice_paraphrase__reversed",
+      "group": "capability",
+      "status": "fail",
+      "paths": {
+        "scan": {
+          "status": "fail",
+          "reasons": [
+            "wrong evidence or order"
+          ],
+          "returned_ids": [],
+          "evidence_present": false
+        },
+        "snapshot": {
+          "status": "fail",
+          "reasons": [
+            "wrong evidence or order"
+          ],
+          "returned_ids": [],
+          "evidence_present": false
+        },
+        "indexed": {
+          "status": "fail",
+          "reasons": [
+            "wrong evidence or order"
+          ],
+          "returned_ids": [],
+          "evidence_present": false
+        }
+      },
+      "ordering_stable": true
+    },
+    {
+      "id": "storage_paraphrase__reversed",
+      "group": "capability",
+      "status": "fail",
+      "paths": {
+        "scan": {
+          "status": "fail",
+          "reasons": [
+            "wrong evidence or order"
+          ],
+          "returned_ids": [],
+          "evidence_present": false
+        },
+        "snapshot": {
+          "status": "fail",
+          "reasons": [
+            "wrong evidence or order"
+          ],
+          "returned_ids": [],
+          "evidence_present": false
+        },
+        "indexed": {
+          "status": "fail",
+          "reasons": [
+            "wrong evidence or order"
+          ],
+          "returned_ids": [],
+          "evidence_present": false
+        }
+      },
+      "ordering_stable": true
+    },
+    {
+      "id": "alias_chain__reversed",
+      "group": "capability",
+      "status": "fail",
+      "paths": {
+        "scan": {
+          "status": "fail",
+          "reasons": [
+            "wrong evidence or order"
+          ],
+          "returned_ids": [
+            "r0",
+            "r2",
+            "r1"
+          ],
+          "evidence_present": true
+        },
+        "snapshot": {
+          "status": "fail",
+          "reasons": [
+            "wrong evidence or order"
+          ],
+          "returned_ids": [
+            "r0",
+            "r2",
+            "r1"
+          ],
+          "evidence_present": true
+        },
+        "indexed": {
+          "status": "fail",
+          "reasons": [
+            "wrong evidence or order"
+          ],
+          "returned_ids": [
+            "r0",
+            "r2",
+            "r1"
+          ],
+          "evidence_present": true
+        }
+      },
+      "ordering_stable": true
+    },
+    {
+      "id": "direction__reversed",
+      "group": "capability",
+      "status": "fail",
+      "paths": {
+        "scan": {
+          "status": "fail",
+          "reasons": [
+            "wrong evidence or order"
+          ],
+          "returned_ids": [
+            "r0",
+            "r1"
+          ],
+          "evidence_present": true
+        },
+        "snapshot": {
+          "status": "fail",
+          "reasons": [
+            "wrong evidence or order"
+          ],
+          "returned_ids": [
+            "r0",
+            "r1"
+          ],
+          "evidence_present": true
+        },
+        "indexed": {
+          "status": "fail",
+          "reasons": [
+            "wrong evidence or order"
+          ],
+          "returned_ids": [
+            "r0",
+            "r1"
+          ],
+          "evidence_present": true
+        }
+      },
+      "ordering_stable": true
+    },
+    {
+      "id": "no_asserted_code__reversed",
+      "group": "capability",
+      "status": "fail",
+      "paths": {
+        "scan": {
+          "status": "fail",
+          "reasons": [
+            "wrong evidence or order"
+          ],
+          "returned_ids": [
+            "r0",
+            "r1"
+          ],
+          "evidence_present": true
+        },
+        "snapshot": {
+          "status": "fail",
+          "reasons": [
+            "wrong evidence or order"
+          ],
+          "returned_ids": [
+            "r0",
+            "r1"
+          ],
+          "evidence_present": true
+        },
+        "indexed": {
+          "status": "fail",
+          "reasons": [
+            "wrong evidence or order"
+          ],
+          "returned_ids": [
+            "r0",
+            "r1"
+          ],
+          "evidence_present": true
+        }
+      },
+      "ordering_stable": true
+    },
+    {
+      "id": "source_instruction__reversed",
+      "group": "capability",
+      "status": "fail",
+      "paths": {
+        "scan": {
+          "status": "fail",
+          "reasons": [
+            "wrong evidence or order"
+          ],
+          "returned_ids": [
+            "r0",
+            "r1"
+          ],
+          "evidence_present": true
+        },
+        "snapshot": {
+          "status": "fail",
+          "reasons": [
+            "wrong evidence or order"
+          ],
+          "returned_ids": [
+            "r0",
+            "r1"
+          ],
+          "evidence_present": true
+        },
+        "indexed": {
+          "status": "fail",
+          "reasons": [
+            "wrong evidence or order"
+          ],
+          "returned_ids": [
+            "r0",
+            "r1"
+          ],
+          "evidence_present": true
+        }
+      },
+      "ordering_stable": true
+    },
+    {
+      "id": "two_constraints__reversed",
+      "group": "capability",
+      "status": "fail",
+      "paths": {
+        "scan": {
+          "status": "fail",
+          "reasons": [
+            "wrong evidence or order"
+          ],
+          "returned_ids": [
+            "r0",
+            "r1",
+            "r2"
+          ],
+          "evidence_present": true
+        },
+        "snapshot": {
+          "status": "fail",
+          "reasons": [
+            "wrong evidence or order"
+          ],
+          "returned_ids": [
+            "r0",
+            "r1",
+            "r2"
+          ],
+          "evidence_present": true
+        },
+        "indexed": {
+          "status": "fail",
+          "reasons": [
+            "wrong evidence or order"
+          ],
+          "returned_ids": [
+            "r0",
+            "r1",
+            "r2"
+          ],
+          "evidence_present": true
+        }
+      },
+      "ordering_stable": true
+    },
+    {
+      "id": "explicit_conflict__reversed",
+      "group": "contract",
+      "status": "pass",
+      "paths": {
+        "scan": {
+          "status": "pass",
+          "reasons": [],
+          "returned_ids": [
+            "r1",
+            "r0"
+          ],
+          "evidence_present": true
+        },
+        "snapshot": {
+          "status": "pass",
+          "reasons": [],
+          "returned_ids": [
+            "r1",
+            "r0"
+          ],
+          "evidence_present": true
+        },
+        "indexed": {
+          "status": "pass",
+          "reasons": [],
+          "returned_ids": [
+            "r1",
+            "r0"
+          ],
+          "evidence_present": true
+        }
+      },
+      "ordering_stable": true
+    },
+    {
+      "id": "ambiguous_project__reversed",
+      "group": "contract",
+      "status": "pass",
+      "paths": {
+        "scan": {
+          "status": "pass",
+          "reasons": [],
+          "returned_ids": [
+            "r1",
+            "r0"
+          ],
+          "evidence_present": true
+        },
+        "snapshot": {
+          "status": "pass",
+          "reasons": [],
+          "returned_ids": [
+            "r1",
+            "r0"
+          ],
+          "evidence_present": true
+        },
+        "indexed": {
+          "status": "pass",
+          "reasons": [],
+          "returned_ids": [
+            "r1",
+            "r0"
+          ],
+          "evidence_present": true
+        }
+      },
+      "ordering_stable": true
+    },
+    {
+      "id": "negation_pair__reversed",
+      "group": "contract",
+      "status": "pass",
+      "paths": {
+        "scan": {
+          "status": "pass",
+          "reasons": [],
+          "returned_ids": [
+            "r0",
+            "r1"
+          ],
+          "evidence_present": true
+        },
+        "snapshot": {
+          "status": "pass",
+          "reasons": [],
+          "returned_ids": [
+            "r0",
+            "r1"
+          ],
+          "evidence_present": true
+        },
+        "indexed": {
+          "status": "pass",
+          "reasons": [],
+          "returned_ids": [
+            "r0",
+            "r1"
+          ],
+          "evidence_present": true
+        }
+      },
+      "ordering_stable": true
+    },
+    {
+      "id": "identifier_exact__reversed",
+      "group": "contract",
+      "status": "pass",
+      "paths": {
+        "scan": {
+          "status": "pass",
+          "reasons": [],
+          "returned_ids": [
+            "r0"
+          ],
+          "evidence_present": true
+        },
+        "snapshot": {
+          "status": "pass",
+          "reasons": [],
+          "returned_ids": [
+            "r0"
+          ],
+          "evidence_present": true
+        },
+        "indexed": {
+          "status": "pass",
+          "reasons": [],
+          "returned_ids": [
+            "r0"
+          ],
+          "evidence_present": true
+        }
+      },
+      "ordering_stable": true
+    },
+    {
+      "id": "true_no_match__reversed",
+      "group": "contract",
+      "status": "pass",
+      "paths": {
+        "scan": {
+          "status": "pass",
+          "reasons": [],
+          "returned_ids": [],
+          "evidence_present": true
+        },
+        "snapshot": {
+          "status": "pass",
+          "reasons": [],
+          "returned_ids": [],
+          "evidence_present": true
+        },
+        "indexed": {
+          "status": "pass",
+          "reasons": [],
+          "returned_ids": [],
+          "evidence_present": true
+        }
+      },
+      "ordering_stable": true
+    },
+    {
+      "id": "private_boundary__reversed",
+      "group": "contract",
+      "status": "pass",
+      "paths": {
+        "scan": {
+          "status": "pass",
+          "reasons": [],
+          "returned_ids": [],
+          "evidence_present": true
+        },
+        "snapshot": {
+          "status": "pass",
+          "reasons": [],
+          "returned_ids": [],
+          "evidence_present": true
+        },
+        "indexed": {
+          "status": "pass",
+          "reasons": [],
+          "returned_ids": [],
+          "evidence_present": true
+        }
+      },
+      "ordering_stable": true
+    }
+  ],
+  "limitation": "Post-implementation authored challenge set, not independent blind holdout. Source retrieval outcomes only, not agent answers."
+}

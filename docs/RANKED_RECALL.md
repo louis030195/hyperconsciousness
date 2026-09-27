@@ -84,3 +84,6 @@ No-vocabulary-overlap paraphrases remain unmet and are reported as failures.
 Query reformulation, semantic enrichment, answer synthesis and user-created
 recurring tasks belong in the external harness; this endpoint executes none of
 those responsibilities. No model trials are claimed by the deterministic evals.
+
+See [external client guidance](RECALL_CLIENT.md) for query reformulation, alias
+lookups, source verification and honest abstention outside HC.

@@ -62,6 +62,9 @@ export function validateSuite(suite) {
     assert.equal(c.query, peer.query);
     assert.equal(c.limit, peer.limit);
     assert.equal(c.mode, peer.mode);
+    for (const key of ['tags', 'grant_tags', 'since', 'until', 'expired', 'revoked', 'reopen']) {
+      assert.deepEqual(c[key], peer[key], `ordering peers changed ${key}`);
+    }
   }
   assert.ok(suite.cases.some(c => c.group === 'contract'));
   assert.ok(suite.cases.some(c => c.group === 'capability'));
@@ -145,7 +148,21 @@ export function grade(suite, evidence, suiteHash) {
     const rows = results.filter(r => r.group === group);
     summary[group] = Object.fromEntries(['pass', 'fail', 'infrastructure_error'].map(s => [s, rows.filter(r => r.status === s).length]));
   }
-  return { schema: 1, basis: 'executed_hc_core', suite_hash: suiteHash, summary, results };
+  // Evidence availability is a separate diagnostic; strict oracles still gate.
+  const categories = {};
+  for (const c of suite.cases) {
+    const category = c.category ?? c.group;
+    const row = results.find(r => r.id === c.id);
+    const stats = categories[category] ??= { total: 0, pass: 0, fail: 0, infrastructure_error: 0,
+      positive_retrieval_cases: 0, complete_evidence_cases: 0 };
+    stats.total++;
+    stats[row.status]++;
+    if (c.expect.ids.length && !c.expect.denied && !c.expect.by_path) {
+      stats.positive_retrieval_cases++;
+      if (paths.every(p => row.paths?.[p]?.evidence_present === true)) stats.complete_evidence_cases++;
+    }
+  }
+  return { schema: 1, basis: 'executed_hc_core', suite_hash: suiteHash, summary, categories, results };
 }
 
 function command(program, args, options = {}) {
@@ -155,10 +172,11 @@ function command(program, args, options = {}) {
 }
 
 function main(args) {
-  assert.ok(['check', 'run'].includes(args[0]), 'usage: check|run [--gate=contracts] [--suite=ranked]');
-  assert.ok(args.slice(1).every(a => ['--gate=contracts', '--suite=ranked'].includes(a)));
+  assert.ok(['check', 'run'].includes(args[0]), 'usage: check|run [--gate=contracts] [--suite=ranked|challenge]');
+  assert.ok(args.slice(1).every(a => ['--gate=contracts', '--suite=ranked', '--suite=challenge'].includes(a)));
   const contractsOnly = args.includes('--gate=contracts');
-  const suiteFile = args.includes('--suite=ranked') ? 'ranked-cases.json' : 'cases.json';
+  assert.ok(!(args.includes('--suite=ranked') && args.includes('--suite=challenge')), 'choose one suite');
+  const suiteFile = args.includes('--suite=challenge') ? 'challenge-cases.json' : args.includes('--suite=ranked') ? 'ranked-cases.json' : 'cases.json';
   const bytes = readFileSync(join(root, 'evals/recall', suiteFile));
   const suite = JSON.parse(bytes);
   validateSuite(suite);

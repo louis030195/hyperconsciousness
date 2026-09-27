@@ -49,7 +49,9 @@ visible. Run `npm run eval:recall` to gate every desired outcome, including the
 richer ranking and semantic-recall capabilities. Also run
 `npm run eval:ranked -- --gate=contracts` when changing retrieval; this executes
 the opt-in [lexical relevance](docs/RANKED_RECALL.md) contracts and keeps unmet
-capabilities visible. See
+capabilities visible. Run `npm run eval:challenge -- --gate=contracts` against
+the frozen post-implementation challenge cases; do not rewrite a first-run
+baseline to hide regressions. See
 [the recall evals](evals/recall/README.md) for the frozen baseline, evidence
 artifacts and limits. These are finite development-time evals, not agent loops,
 model trials or performance measurements.
