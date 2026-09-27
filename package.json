@@ -43,7 +43,8 @@
     "eval:recall:check": "node --test evals/recall/run.test.mjs && node evals/recall/run.mjs check",
     "eval:recall": "node --test evals/recall/run.test.mjs && node evals/recall/run.mjs run",
     "eval:ranked": "node --test evals/recall/run.test.mjs && node evals/recall/run.mjs run --suite=ranked",
-    "eval:challenge": "node --test evals/recall/run.test.mjs && node evals/recall/run.mjs run --suite=challenge"
+    "eval:challenge": "node --test evals/recall/run.test.mjs && node evals/recall/run.mjs run --suite=challenge",
+    "eval:harness:check": "node --test evals/harness/score.test.mjs"
   },
   "engines": {
     "node": ">=18"
