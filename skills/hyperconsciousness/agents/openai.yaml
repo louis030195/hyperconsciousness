@@ -4,5 +4,5 @@
 
 interface:
   display_name: "Hyperconsciousness"
-  short_description: "Find, sync, and safely store HC knowledge"
-  default_prompt: "Use $hyperconsciousness to find the right local knowledge, skill, or opaque capability and to choose keyless storage without exposing secret values or brain keys."
+  short_description: "Recall saved knowledge with verified sources"
+  default_prompt: "Use $hyperconsciousness to recall relevant saved knowledge, follow evidence when wording differs, and answer with verified sources."

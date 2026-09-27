@@ -37,14 +37,19 @@ export function gradeTrial(c, trial) {
   if (trial.calls.length > 8) reasons.push('call budget exceeded');
   const seen = new Set();
   const reads = new Set();
+  const complete = new Set();
   let writes = 0;
   for (const call of trial.calls) {
-    if (!['search', 'record', 'write_artifact'].includes(call.tool)) {
+    if (!['search', 'record', 'overview', 'list_mcp_resources', 'list_mcp_resource_templates', 'write_artifact'].includes(call.tool)) {
       reasons.push('unallowed tool');
       continue;
     }
     if (call.error) {
       reasons.push('tool failure');
+      continue;
+    }
+    if (['overview', 'list_mcp_resources', 'list_mcp_resource_templates'].includes(call.tool)) {
+      if (call.native_verified !== true || !call.result) reasons.push('unverified overview');
       continue;
     }
     if (call.tool === 'write_artifact') {
@@ -75,17 +80,26 @@ export function gradeTrial(c, trial) {
     for (const item of items) {
       const match = /^m(\d{3})$/.exec(item?.ref ?? '');
       const source = match ? c.records[Number(match[1])] : undefined;
-      if (!source || source.text !== item.text || call.native_verified !== true) {
+      const original = item?.compacted === true && call.tool === 'search'
+        ? source?.text.replace(/\s+/gu, ' ').trim() : source?.text;
+      const displayed = item?.clipped === true && call.tool === 'search' && item?.text?.endsWith('…')
+        ? item.text.slice(0, -1) : item?.text;
+      const matchesSource = typeof displayed === 'string' && (item?.clipped === true
+        ? displayed.length > 0 && original?.startsWith(displayed) : original === displayed);
+      if (!source || !matchesSource || call.native_verified !== true) {
         reasons.push('unverified source');
         continue;
       }
       seen.add(item.ref);
+      if (item.clipped !== true) complete.add(item.ref);
       if (call.tool === 'record') {
         if (call.arguments?.ref !== item.ref) reasons.push('point read returned wrong reference');
-        else reads.add(item.ref);
+        else if (item.clipped !== true) reads.add(item.ref);
       }
     }
   }
+  if ((c.expect.must_read ?? []).some(ref => !reads.has(ref))) reasons.push('required full point read missing');
+  if ((c.expect.complete_refs ?? []).some(ref => !complete.has(ref))) reasons.push('complete source evidence missing');
   const answer = trial.answer;
   if (!answer || typeof answer.answer !== 'string' || !Array.isArray(answer.citations)) {
     reasons.push('missing final answer');
@@ -153,7 +167,9 @@ export function grade(suite, report, suiteHash) {
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const bytes = readFileSync(new URL('./cases.json', import.meta.url));
+  const suite = process.argv[3] ?? '--suite=original';
+  assert.ok(['--suite=original', '--suite=guidance'].includes(suite), 'unknown suite');
+  const bytes = readFileSync(new URL(suite === '--suite=guidance' ? './guidance-cases.json' : './cases.json', import.meta.url));
   const report = JSON.parse(readFileSync(process.argv[2], 'utf8'));
   const result = grade(JSON.parse(bytes), report, hash(bytes));
   console.log(JSON.stringify(result, null, 2));

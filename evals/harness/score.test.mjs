@@ -61,3 +61,41 @@ test('changed suite hashes and malformed protocol hashes cannot silently compare
  assert.throws(()=>grade(suite,report,hash('changed suite')));
  assert.throws(()=>grade(suite,{...report,protocol_sha256:'unverified'},digest));
 });
+
+test('clipped evidence does not satisfy a complete-source requirement', () => {
+ const guidance=JSON.parse(readFileSync(new URL('./guidance-cases.json',import.meta.url)));
+ const c=guidance.cases.find(c=>c.id==='clipped_approval');const t=ideal(c);
+ assert.equal(gradeTrial(c,t).status,'pass');
+ t.calls[0].result={...t.calls[0].result,text:c.records[0].text.slice(0,70),clipped:true};
+ assert.equal(gradeTrial(c,t).status,'fail');
+});
+test('native compact excerpts may preserve whitespace semantics but cannot invent source text', () => {
+ const c=find('voice_paraphrase');const t=ideal(c);const record=t.calls[0];
+ t.calls=[{...record,tool:'search',arguments:{query:'training',limit:5},result:{items:[{...record.result,text:record.result.text.slice(0,20)+'…',clipped:true,compacted:true}]}}];
+ assert.equal(gradeTrial(c,t).status,'pass');
+ t.calls[0].result.items[0].text='fabricated…';assert.equal(gradeTrial(c,t).status,'fail');
+ t.calls[0].result.items[0].text='…';assert.equal(gradeTrial(c,t).status,'fail');
+});
+test('guidance suite preserves the original seven tasks and calibrates the four added cases', () => {
+ const bytes=readFileSync(new URL('./guidance-cases.json',import.meta.url));const guidance=JSON.parse(bytes);
+ assert.deepEqual(guidance.cases.slice(0,7),suite.cases);
+ const result=grade(guidance,{basis:'fixture',suite_sha256:hash(bytes),model:'none',effort:'none',protocol_sha256:hash('fixture'),backends:['fixture'],trials:guidance.cases.map(ideal)},hash(bytes));
+ assert.equal(result.results.length,11);assert.ok(result.results.every(r=>r.status==='pass'));
+});
+
+test('metadata discovery consumes the same budget and cannot bypass no-action tasks', () => {
+ const metadata={tool:'list_mcp_resources',arguments:{},result:{resources:[]},native_verified:true};
+ const c=find('voice_paraphrase');const t=ideal(c);t.calls.push(...Array.from({length:8},()=>metadata));
+ assert.equal(gradeTrial(c,t).status,'fail');
+ const stop=find('skill_stop');const stopped=ideal(stop);stopped.calls.push(metadata);
+ assert.equal(gradeTrial(stop,stopped).status,'fail');
+});
+
+test('complete native search evidence satisfies verification without a redundant point read', () => {
+ const guidance=JSON.parse(readFileSync(new URL('./guidance-cases.json',import.meta.url)));
+ const c=guidance.cases.find(c=>c.id==='clipped_approval');const t=ideal(c);const record=t.calls[0];
+ t.calls=[{...record,tool:'search',arguments:{query:'Birch',limit:5},result:{items:[{...record.result,clipped:false,compacted:true}]}}];
+ assert.equal(gradeTrial(c,t).status,'pass');
+ t.calls[0].result.items[0].text=t.calls[0].result.items[0].text.slice(0,100)+'…';t.calls[0].result.items[0].clipped=true;
+ assert.equal(gradeTrial(c,t).status,'fail');
+});
