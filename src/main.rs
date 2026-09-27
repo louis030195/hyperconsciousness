@@ -48,6 +48,7 @@ mod sigv4;
 mod snapshot_archive;
 mod tcp;
 mod tunnel;
+mod updater;
 
 const USAGE: &str = "\
 hyperconsciousness (hc), one encrypted brain across your devices
@@ -61,6 +62,8 @@ short command: hc.
   hc status --remote              verify host authentication and tool discovery
   hc mcp --remote                 use the configured hosted reader
   hc logout                       revoke this hosted session
+  hc update [--check | --enable | --disable]
+                                  install or manage native release updates
 
   hc start                 begin a new brain on this machine
   hc join <ssh host>       join the brain on another machine
@@ -4268,6 +4271,10 @@ fn read_remote_secret(path: &Path) -> Result<String> {
 
 fn run() -> Result<()> {
     let args = parse();
+    if matches!(args.command.as_str(), "update" | "__update") {
+        return updater::run(&args.rest, args.command == "__update").map_err(Error::from);
+    }
+    updater::maybe_start(&args.command);
     if matches!(args.command.as_str(), "setup" | "login" | "logout")
         || (matches!(args.command.as_str(), "status" | "mcp")
             && args.rest.iter().any(|v| v == "--remote"))

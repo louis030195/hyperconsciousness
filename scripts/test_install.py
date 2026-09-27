@@ -39,6 +39,7 @@ if [ -z "$out" ]; then printf '[{"tag_name": "v0.1.0-alpha.5"}]\n'; else cp "$FI
         for _ in range(2): self.assertEqual(self.run_installer().returncode, 0)
         self.assertEqual((self.dest/'other').read_text(), 'keep')
         self.assertFalse((self.root/'.brain').exists())
+        self.assertFalse((self.dest/'.hc-auto-update').exists(), 'explicit HC_VERSION stays pinned')
         self.assertEqual(subprocess.check_output([str(self.dest/'hc'),'--version'],text=True).strip(),'hc 0.1.0-alpha.5')
     def test_bad_checksum_preserves_existing_binary(self):
         self.package(); (self.dest/'hc').write_text('old')
@@ -61,6 +62,10 @@ if [ -z "$out" ]; then printf '[{"tag_name": "v0.1.0-alpha.5"}]\n'; else cp "$FI
     def test_discovers_alpha_release_and_rejects_invalid_version(self):
         self.package(); self.env.pop('HC_VERSION')
         self.assertEqual(self.run_installer().returncode,0)
+        self.assertEqual((self.dest/'.hc-auto-update').read_text(),'1\n')
+        self.env['HC_AUTO_UPDATE']='0'
+        self.assertEqual(self.run_installer().returncode,0)
+        self.assertFalse((self.dest/'.hc-auto-update').exists())
         self.env['HC_VERSION']='../../bad'
         self.assertNotEqual(self.run_installer().returncode,0)
 

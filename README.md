@@ -30,6 +30,17 @@ include Apple Silicon/Intel Mac, Linux x86-64/ARM64 and Windows x86-64 builds.
 Linux builds require Ubuntu 24.04-compatible libraries; Mac builds are not
 notarized. On Windows, extract the ZIP and run `hc.exe`.
 
+Installer-managed copies update automatically from GitHub releases. On use, HC
+checks in the background at most once every six hours. Running commands and MCP
+sessions keep their current binary; the next launch uses the update. No dashboard
+or persistent updater service starts. Windows ZIP users can opt in with
+`hc update --enable`.
+
+Use `hc update` to update now, `hc update --check` to check without installing,
+or `hc update --disable` to turn it off. `HC_AUTO_UPDATE=0` skips automatic checks
+for that process. Source/Cargo/npm builds and installs pinned with `HC_VERSION`
+do not opt in automatically. See [update behavior](docs/RELEASING.md#automatic-cli-updates).
+
 To connect to an existing organization, use its connection pack:
 
 ```sh

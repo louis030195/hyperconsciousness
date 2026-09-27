@@ -109,7 +109,7 @@ jobs:
           HC_RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
         run: |
           set -euo pipefail
-          test "$(find dist -type f | wc -l)" -eq 5
+          test "$(find dist -type f | wc -l)" -eq 10
           cp install.sh dist/install.sh
           (cd dist && sha256sum hc-* install.sh > SHA256SUMS)
           flags=()

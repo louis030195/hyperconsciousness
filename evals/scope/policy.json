@@ -57,6 +57,8 @@
     "p256",
     "rand_core",
     "rpassword",
+    "self-replace",
+    "semver",
     "serde",
     "serde_json",
     "sha2",

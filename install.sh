@@ -54,6 +54,17 @@ main() {
   chmod 755 "$pending"
   mv -f "$pending" "$install_dir/hc"
   pending=
+  # Version-pinned installations stay pinned unless explicitly opted in later.
+  if [ "${HC_AUTO_UPDATE:-1}" != 0 ] && [ -z "${HC_VERSION:-}" ]; then
+    pending=$(mktemp "$install_dir/.hc-update-enable.XXXXXX")
+    printf '1\n' > "$pending"
+    chmod 600 "$pending"
+    mv -f "$pending" "$install_dir/.hc-auto-update"
+    pending=
+    printf 'Automatic updates enabled (background checks every six hours of use).\n'
+  else
+    rm -f "$install_dir/.hc-auto-update"
+  fi
   printf 'Installed %s at %s/hc\n' "$version" "$install_dir"
   case ":$PATH:" in *":$install_dir:"*) ;; *) printf 'Add to your shell PATH: export PATH="%s:$PATH"\n' "$install_dir";; esac
 }
