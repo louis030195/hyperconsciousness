@@ -28,12 +28,15 @@ use hyperconsciousness::wire::{self, Peer};
 use zeroize::Zeroizing;
 
 mod access_cli;
+mod access_client;
 #[cfg(test)]
 mod access_tests;
 mod bucket;
 mod capture;
 mod dpop;
 mod fswatch;
+mod hosted_cli;
+mod hosted_skills;
 mod http;
 mod mcp;
 mod oauth;
@@ -52,6 +55,12 @@ short command: hc.
 
   hc find <query> [--scope all|hc|skills|pkm|secrets] [--limit n]
                                   find knowledge and capabilities without exposing secret values
+
+  hc setup <connection.json> [--codex] configure a hosted reader
+  hc login [--no-browser]          sign in to the configured host
+  hc status --remote              verify host authentication and tool discovery
+  hc mcp --remote                 use the configured hosted reader
+  hc logout                       revoke this hosted session
 
   hc start                 begin a new brain on this machine
   hc join <ssh host>       join the brain on another machine
@@ -4259,6 +4268,12 @@ fn read_remote_secret(path: &Path) -> Result<String> {
 
 fn run() -> Result<()> {
     let args = parse();
+    if matches!(args.command.as_str(), "setup" | "login" | "logout")
+        || (matches!(args.command.as_str(), "status" | "mcp")
+            && args.rest.iter().any(|v| v == "--remote"))
+    {
+        return hosted_cli::run(&args);
+    }
 
     match args.command.as_str() {
         "version" | "--version" | "-V" => {

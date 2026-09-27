@@ -1,0 +1,118 @@
+# screenpipe — AI that knows everything you've seen, said, or heard
+# https://screenpipe.com
+name: release
+on:
+  push:
+    branches: [main]
+    paths: [Cargo.toml, .github/workflows/release.yml]
+    tags: ['v*']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  prepare:
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.release.outputs.version }}
+      tag: ${{ steps.release.outputs.tag }}
+      publish: ${{ steps.release.outputs.publish }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git merge-base --is-ancestor HEAD origin/main
+          python3 - <<'PY'
+          import json, os, re, subprocess, tomllib
+          version = tomllib.load(open('Cargo.toml', 'rb'))['package']['version']
+          assert re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+(?:-[A-Za-z0-9.-]+)?', version)
+          assert json.load(open('package.json'))['version'] == version
+          tag = 'v' + version
+          ref = os.environ['GITHUB_REF']
+          assert not ref.startswith('refs/tags/') or ref == 'refs/tags/' + tag
+          releases = json.loads(subprocess.check_output(['gh', 'api', '--paginate', '--slurp', 'repos/' + os.environ['GITHUB_REPOSITORY'] + '/releases']))
+          exists = any(r['tag_name'] == tag for page in releases for r in page)
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+              f.write(f'version={version}\ntag={tag}\npublish={str(not exists).lower()}\n')
+          print('Already published; leaving release unchanged.' if exists else 'Building ' + tag)
+          PY
+      - uses: actions/setup-node@v7
+        if: steps.release.outputs.publish == 'true'
+        with:
+          node-version: 24
+      - if: steps.release.outputs.publish == 'true'
+        run: npm test && npm run eval:scope
+      - if: steps.release.outputs.publish == 'true'
+        run: python3 -m unittest discover -s scripts -p 'test_*.py'
+  build:
+    needs: prepare
+    if: needs.prepare.outputs.publish == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15
+            target: aarch64-apple-darwin
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+          - os: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y pkg-config libssl-dev libdbus-1-dev
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install 1.88.0 --profile minimal --component clippy,rustfmt --target ${{ matrix.target }}
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy --locked --all-targets --target ${{ matrix.target }} -- -D warnings
+      - run: cargo test --locked --target ${{ matrix.target }}
+      - run: cargo build --release --locked --target ${{ matrix.target }}
+      - name: Package and smoke test native binary
+        env:
+          HC_RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
+          HC_RELEASE_TARGET: ${{ matrix.target }}
+        shell: bash
+        run: python scripts/package-release.py "$HC_RELEASE_TARGET" "$HC_RELEASE_VERSION"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: hc-${{ matrix.target }}
+          path: dist/*
+          if-no-files-found: error
+  publish:
+    needs: [prepare, build]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: hc-*
+          path: dist
+          merge-multiple: true
+      - name: Publish complete verified release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HC_RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          set -euo pipefail
+          test "$(find dist -type f | wc -l)" -eq 5
+          cp install.sh dist/install.sh
+          (cd dist && sha256sum hc-* install.sh > SHA256SUMS)
+          flags=()
+          case "$HC_RELEASE_TAG" in *-*) flags+=(--prerelease);; esac
+          # Create the release only after every platform has passed. Never overwrite it.
+          gh release create "$HC_RELEASE_TAG" dist/* --target "$GITHUB_SHA" --title "HC $HC_RELEASE_TAG" --notes-file docs/RELEASE-NOTES.md "${flags[@]}"

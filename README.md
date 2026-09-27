@@ -15,6 +15,34 @@ HC is a developer alpha, so APIs and commands may change. No independent
 security audit is claimed. Read the [security limits](docs/CONSTRAINTS.md) before
 using it for important data. The package is `hyperconsciousness`; run it with `hc`.
 
+## Install
+
+On macOS or Linux, install the latest published alpha with one command:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/louis030195/hyperconsciousness/main/install.sh | sh
+```
+
+The installer verifies the release checksum and version before installing to
+`~/.local/bin`. It does not create a brain or start a service. Follow its PATH
+instruction if needed. [GitHub releases](https://github.com/louis030195/hyperconsciousness/releases)
+include Apple Silicon/Intel Mac, Linux x86-64/ARM64 and Windows x86-64 builds.
+Linux builds require Ubuntu 24.04-compatible libraries; Mac builds are not
+notarized. On Windows, extract the ZIP and run `hc.exe`.
+
+To connect to an existing organization, use its connection pack:
+
+```sh
+hc setup company-hc.json --codex
+hc login
+hc status --remote
+```
+
+Setup installs the supplied instruction skills and registers HC with Codex.
+Start a new Codex task after signing in. No Bun or provider API keys are needed.
+See [hosted access](docs/HOSTED-ACCESS.md) for other clients and access boundaries.
+The company connection is separate from your personal brain.
+
 ## Local dashboard
 
 Use the optional [HC Atlas dashboard](dashboard/README.md) to inspect storage,
@@ -68,9 +96,9 @@ hc --help
 On Windows, use `cargo build --release --locked` and run
 `target\release\hc.exe`. Add the binary's directory to your PATH if needed.
 
-Build this alpha from the repository checkout. The npm registry package is not
-its source. The repository retains npm packaging scripts for compatibility and
-tests them in CI.
+The npm registry package is not the distribution source for this alpha. Use
+the verified binaries above or build this checkout. npm packaging remains
+tested for compatibility. See [release automation](docs/RELEASING.md).
 
 ## Try an isolated store
 
