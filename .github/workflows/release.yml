@@ -80,7 +80,7 @@ jobs:
       - run: cargo clippy --locked --all-targets --target ${{ matrix.target }} -- -D warnings
       - run: cargo test --locked --target ${{ matrix.target }}
       - run: cargo build --release --locked --target ${{ matrix.target }}
-      - name: Package and smoke test native binary
+      - name: Package and smoke test native binary and update feed
         env:
           HC_RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
           HC_RELEASE_TARGET: ${{ matrix.target }}

@@ -10,6 +10,8 @@ binary = pathlib.Path('target') / target / 'release' / ('hc.exe' if windows else
 actual = subprocess.check_output([str(binary), '--version'], text=True).strip()
 assert actual == 'hc ' + version, (actual, version)
 subprocess.run([str(binary), '--help'], check=True, stdout=subprocess.DEVNULL)
+# Prove the compiled TLS backend can reach the real public update feed.
+subprocess.run([str(binary), 'update', '--check'], check=True, timeout=75)
 out = pathlib.Path('dist'); out.mkdir(exist_ok=True)
 # Raw executables let the native updater avoid an archive extraction dependency.
 shutil.copy2(binary, out / ('hc-' + target + ('.exe' if windows else '')))

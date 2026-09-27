@@ -201,7 +201,10 @@ pub(crate) fn run(args: &[String], background: bool) -> io::Result<()> {
     let original = digest(&fs::read(&exe)?);
     // An older process may still be running after another updater replaced its path.
     verify_version(&exe, VERSION)?;
+    let tls = ureq::native_tls::TlsConnector::new()
+        .map_err(|_| fail("system TLS trust could not be initialized"))?;
     let client = ureq::AgentBuilder::new()
+        .tls_connector(std::sync::Arc::new(tls))
         .https_only(true)
         .redirects(5)
         .timeout(Duration::from_secs(60))
