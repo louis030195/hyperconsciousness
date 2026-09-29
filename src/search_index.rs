@@ -13,7 +13,7 @@
 //! heads. Missing, stale, corrupt or rolled-back bytes can only force a rebuild
 //! or the ordinary full-scan fallback; they can never widen a grant.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::fs::{self, File, OpenOptions};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
@@ -286,6 +286,14 @@ impl Index {
             .open(&lock_path)?;
         make_private_file(&lock)?;
         if !FileExt::try_lock_exclusive(&lock)? {
+            // A competing publisher need not block a disk snapshot that already
+            // matches this key view and the current signed heads. Query release
+            // revalidates its tail and every returned record as usual.
+            for index in Self::load_slots(root, keys)?.into_iter().rev() {
+                if index.fingerprint == fingerprint && index.is_current(store)? {
+                    return Ok(index);
+                }
+            }
             return Err(Error::Denied("search index is being refreshed"));
         }
 
@@ -542,7 +550,10 @@ impl Index {
                     return Ok(false);
                 }
                 for segment in affected {
-                    let complete = log.read_located_segment(segment)?;
+                    let mut complete = log.read_located_segment(segment)?;
+                    // The active file may have grown after `before` was pinned.
+                    // Its shard must describe only that verified prefix.
+                    complete.retain(|located| located.record.seq <= current.seq);
                     next.replace_segment(keys, *author, segment, &complete)?;
                 }
             }
@@ -558,31 +569,37 @@ impl Index {
                 }
             }
 
-            if before == store.cache_heads()? {
-                next.heads = before;
-                next.segments
-                    .sort_by_key(|segment| (segment.author, segment.log_segment));
-                if can_reuse_captures
-                    && next
-                        .segments
-                        .iter()
-                        .map(|s| s.managed as usize)
-                        .sum::<usize>()
-                        <= MAX_CAPTURE_CACHE_RECORDS
-                {
-                    let mut state = Arc::clone(self.captures.get().expect("checked capture cache"));
-                    for (meta, stamp) in capture_tail {
-                        Arc::make_mut(&mut state).observe(meta, stamp);
-                    }
-                    if state.cache_bytes() <= MAX_CAPTURE_CACHE_BYTES {
-                        let _ = next.captures.set(state);
-                    }
+            // Keep the completed signed prefix even if another writer appended.
+            // Retrying from the original heads repeats expensive shard work and
+            // can prevent any manifest from being published on a busy store.
+            next.heads = before.clone();
+            next.segments
+                .sort_by_key(|segment| (segment.author, segment.log_segment));
+            if can_reuse_captures
+                && next
+                    .segments
+                    .iter()
+                    .map(|s| s.managed as usize)
+                    .sum::<usize>()
+                    <= MAX_CAPTURE_CACHE_RECORDS
+            {
+                let mut state = Arc::clone(self.captures.get().expect("checked capture cache"));
+                for (meta, stamp) in capture_tail {
+                    Arc::make_mut(&mut state).observe(meta, stamp);
                 }
-                *self = next;
+                if state.cache_bytes() <= MAX_CAPTURE_CACHE_BYTES {
+                    let _ = next.captures.set(state);
+                }
+            }
+            *self = next;
+            if before == store.cache_heads()? {
                 return Ok(true);
             }
         }
-        Ok(false)
+        // This is a valid, publishable prefix. Query entry still requires current
+        // heads and release still validates revocations and capture corrections.
+        // A retry advances only the remaining tail instead of rebuilding history.
+        Ok(true)
     }
 
     /// Fold a cold author one disk segment at a time. Do not clone its whole
@@ -1665,17 +1682,26 @@ fn grams(bytes: &[u8]) -> Option<BTreeSet<u64>> {
     if bytes.len() < 3 {
         return Some(BTreeSet::new());
     }
-    let mut grams = BTreeSet::new();
+    // Hash each distinct three-byte window once. Repeated metadata and long
+    // repetitive text used to derive a BLAKE3 context for every byte position.
+    let mut unique = HashSet::new();
     for gram in bytes.windows(3) {
-        let mut hasher = blake3::Hasher::new_derive_key(GRAM_CONTEXT);
-        hasher.update(gram);
+        unique.insert([gram[0], gram[1], gram[2]]);
+        if unique.len() > MAX_GRAMS_PER_RECORD {
+            // Unindexed records are exact-matched, so this conservative bound
+            // cannot remove a result, including in the event of a hash collision.
+            return None;
+        }
+    }
+    let base = blake3::Hasher::new_derive_key(GRAM_CONTEXT);
+    let mut grams = BTreeSet::new();
+    for gram in unique {
+        let mut hasher = base.clone();
+        hasher.update(&gram);
         let digest = hasher.finalize();
         let mut short = [0u8; 8];
         short.copy_from_slice(&digest.as_bytes()[..8]);
         grams.insert(u64::from_be_bytes(short));
-        if grams.len() > MAX_GRAMS_PER_RECORD {
-            return None;
-        }
     }
     Some(grams)
 }
@@ -2044,6 +2070,73 @@ mod tests {
             );
             filter.before = Some(result.records[0].order_key());
         }
+    }
+
+    #[test]
+    fn a_busy_build_publishes_progress_and_catches_up_on_retry() {
+        struct AppendingKeys<'a> {
+            key: &'a [u8; 32],
+            store: &'a Store,
+            signing: &'a SigningKey,
+            remaining: Cell<usize>,
+        }
+        impl DataKeys for AppendingKeys<'_> {
+            fn current_epoch(&self) -> u32 {
+                1
+            }
+            fn key(&self, _: u32) -> Result<&[u8; 32]> {
+                Ok(self.key)
+            }
+            fn open_record(&self, record: &Record) -> Result<Vec<u8>> {
+                if self.remaining.get() > 0 {
+                    self.remaining.set(self.remaining.get() - 1);
+                    append(
+                        self.store,
+                        self.signing,
+                        self.key,
+                        &[r#"{"kind":"note","text":"concurrent append"}"#.into()],
+                    );
+                }
+                record.open(self.key)
+            }
+        }
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::open(root.path()).unwrap();
+        let signing = SigningKey::generate(&mut OsRng);
+        let key = random_key();
+        let fingerprint = Hash::of(key.as_slice());
+        append(
+            &store,
+            &signing,
+            &key,
+            &[r#"{"kind":"note","text":"first"}"#.into()],
+        );
+        let racing = AppendingKeys {
+            key: &key,
+            store: &store,
+            signing: &signing,
+            remaining: Cell::new(100),
+        };
+        let index = Index::load_or_build(root.path(), &store, &racing, fingerprint)
+            .expect("a busy store must preserve its verified prefix");
+        assert!(!index.is_current(&store).unwrap());
+        assert!(index.heads[0].1.seq > 0);
+        assert!(!Index::load_slots(root.path(), &key).unwrap().is_empty());
+        let mut sequences = Vec::new();
+        index
+            .visit(&key, None, |entry, _| {
+                sequences.push(entry.seq);
+                Ok(())
+            })
+            .unwrap();
+        assert_eq!(
+            sequences.iter().max(),
+            Some(&index.heads[0].1.seq),
+            "an active shard must exclude records beyond its declared prefix"
+        );
+        let ready = Index::load_or_build(root.path(), &store, &key, fingerprint).unwrap();
+        assert!(ready.is_current(&store).unwrap());
+        assert!(ready.generation > index.generation);
     }
 
     #[test]
@@ -2618,8 +2711,94 @@ mod tests {
         ));
     }
 
+    fn reference_grams(bytes: &[u8]) -> Option<BTreeSet<u64>> {
+        let mut result = BTreeSet::new();
+        for gram in bytes.windows(3) {
+            let mut hasher = blake3::Hasher::new_derive_key(GRAM_CONTEXT);
+            hasher.update(gram);
+            result.insert(u64::from_be_bytes(
+                hasher.finalize().as_bytes()[..8].try_into().unwrap(),
+            ));
+            if result.len() > MAX_GRAMS_PER_RECORD {
+                return None;
+            }
+        }
+        Some(result)
+    }
+
     #[test]
-    fn a_concurrent_builder_fails_to_the_streaming_path_without_waiting() {
+    fn deduplicated_grams_preserve_existing_postings() {
+        for text in [
+            "",
+            "a",
+            "ab",
+            "aaa",
+            "aBc Café 家族 🦀",
+            "metadata ".repeat(100).as_str(),
+        ] {
+            let folded = text.to_lowercase();
+            assert_eq!(grams(folded.as_bytes()), reference_grams(folded.as_bytes()));
+        }
+        let mut bytes = vec![0u8; 100_000];
+        use rand_core::RngCore;
+        OsRng.fill_bytes(&mut bytes);
+        assert_eq!(grams(&bytes), reference_grams(&bytes));
+        assert!(grams(&bytes).is_none(), "diverse payloads stay bounded");
+    }
+
+    #[test]
+    #[ignore]
+    fn repeated_gram_benchmark() {
+        let bytes =
+            r#"{"kind":"note","source":"sensor","type":"sample","text":"repeated metadata"}"#
+                .repeat(1000);
+        let start = std::time::Instant::now();
+        let expected = reference_grams(bytes.as_bytes());
+        let before = start.elapsed();
+        let start = std::time::Instant::now();
+        let actual = grams(bytes.as_bytes());
+        let after = start.elapsed();
+        assert_eq!(actual, expected);
+        eprintln!(
+            "gram_benchmark bytes={} baseline_us={} optimized_us={}",
+            bytes.len(),
+            before.as_micros(),
+            after.as_micros()
+        );
+    }
+
+    #[test]
+    fn contention_can_reuse_only_a_current_same_key_snapshot() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::open(root.path()).unwrap();
+        let signing = SigningKey::generate(&mut OsRng);
+        let key = random_key();
+        let fingerprint = Hash::of(key.as_slice());
+        append(&store, &signing, &key, &["first".into()]);
+        Index::load_or_build(root.path(), &store, &key, fingerprint).unwrap();
+        let lock = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(cache_dir(root.path()).join("cache.lock"))
+            .unwrap();
+        FileExt::lock_exclusive(&lock).unwrap();
+        assert!(Index::load_or_build(root.path(), &store, &key, fingerprint)
+            .unwrap()
+            .is_current(&store)
+            .unwrap());
+        assert!(
+            Index::load_or_build(root.path(), &store, &key, Hash::of(b"different key view"))
+                .is_err()
+        );
+        append(&store, &signing, &key, &["later".into()]);
+        assert!(matches!(
+            Index::load_or_build(root.path(), &store, &key, fingerprint),
+            Err(Error::Denied("search index is being refreshed"))
+        ));
+    }
+
+    #[test]
+    fn a_concurrent_builder_reports_contention_without_waiting() {
         let root = tempfile::tempdir().unwrap();
         let store = Store::open(root.path()).unwrap();
         prepare_cache(root.path()).unwrap();
@@ -2837,7 +3016,19 @@ mod tests {
             .into_iter()
             .filter_map(|path| fs::metadata(path).ok().map(|metadata| metadata.len()))
             .sum();
-        let index_bytes = metadata_bytes + postings_bytes + manifest_bytes;
+        let directory_bytes: u64 = Index::load_slots(root.path(), &key)
+            .unwrap()
+            .into_iter()
+            .flat_map(|index| index.pages)
+            .collect::<BTreeSet<_>>()
+            .iter()
+            .map(|name| {
+                fs::metadata(segments_dir(root.path()).join(name))
+                    .unwrap()
+                    .len()
+            })
+            .sum();
+        let index_bytes = metadata_bytes + postings_bytes + manifest_bytes + directory_bytes;
         let physical_index_bytes = fs::read_dir(segments_dir(root.path()))
             .unwrap()
             .map(|entry| entry.unwrap().metadata().unwrap().len())

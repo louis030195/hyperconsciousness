@@ -67,3 +67,13 @@ keep descriptions separate from tool input-schema structure, and verify clipped
 passages through point reads. A tied answer score with fewer calls is an efficiency
 observation in that sample, not proof of better semantic retrieval or general
 accuracy. Keep setup repairs and interrupted trials outside the matched score.
+
+## Index catch-up
+
+If a read reports `search index is being refreshed` or
+`search index changed during query` / `search index changed during point read`,
+another writer or index builder moved the local view. Retry with the same grant
+and filters after a short delay, within the caller's existing budget. Do not
+request broader access or interpret the refusal as missing data. HC preserves
+verified index progress and avoids concurrent full-history fallback scans for
+these conditions. A cold build still scales with the stored history.

@@ -739,6 +739,16 @@ still preserve trusted-node diagnostic counts. Every returned record is reopened
 and signature/identity checked. Candidate bodies are decrypted and exact-matched;
 short/Unicode queries and unindexed records retain the same semantics.
 
+Search-index catch-up retains each completely verified prefix between its three
+bounded passes. Active shard reads exclude records beyond the heads pinned for
+that pass. A busy builder may publish this progress without claiming it is
+current; query entry still requires current heads, so the next request advances
+the remaining tail. A contending reader may reuse an already current disk
+snapshot only under the same usable-key fingerprint. Otherwise MCP search and
+point reads return the index-busy or changed-index error without starting a
+second lifetime scan. Clients may retry within their existing call/time budget;
+this is not a grant refusal or proof that a record is absent.
+
 Indexed reads use a signed-prefix data snapshot. The final release check verifies
 new tail signatures and predecessor links, rejects changed/missing prefixes,
 relevant ancestor revocations, unreadable tails, and any managed-capture change.

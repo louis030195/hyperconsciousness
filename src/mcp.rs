@@ -933,6 +933,12 @@ impl Server {
                             // A bounded ranked query must not retry an expensive
                             // full scan after a resource or permission refusal.
                             Err(error) if ranked => return Err(error),
+                            Err(
+                                error @ Error::Denied(
+                                    "search index is being refreshed"
+                                    | "search index changed during query",
+                                ),
+                            ) => return Err(error),
                             Err(_) => hyperconsciousness::query::look(
                                 &store,
                                 &keys,
@@ -1088,6 +1094,12 @@ impl Server {
                         })();
                         match indexed {
                             Ok(answer) => answer,
+                            Err(
+                                error @ Error::Denied(
+                                    "search index is being refreshed"
+                                    | "search index changed during point read",
+                                ),
+                            ) => return Err(error),
                             Err(_) => hyperconsciousness::query::record_by_ref(
                                 &store,
                                 &keys,
@@ -3238,6 +3250,69 @@ mod tests {
         assert!(result.contains("protected-permission-marker"));
         assert_eq!(permissions.status(&id).unwrap().state, "consumed");
         assert!(server.call("search", &exact).is_err());
+    }
+
+    #[test]
+    fn contended_index_does_not_fall_back_to_a_full_search_or_point_scan() {
+        use fs4::fs_std::FileExt;
+        std::env::set_var(NO_KEYSTORE_ENV, "1");
+        let dir = tempfile::tempdir().unwrap();
+        let mut identity = Identity::load_or_create(dir.path()).unwrap();
+        identity.create_brain().unwrap();
+        append(
+            &dir.path().to_path_buf(),
+            &identity,
+            &json!({"kind":"note", "text":"needle"}).to_string(),
+        )
+        .unwrap();
+        let store = Store::open(dir.path()).unwrap();
+        let keys = RuntimeKeys::open(dir.path(), &identity).unwrap();
+        hyperconsciousness::search_index::Index::load_or_build(
+            dir.path(),
+            &store,
+            &keys,
+            keys.cache_fingerprint(),
+        )
+        .unwrap();
+        let seq = store.log(identity.device()).unwrap().head().unwrap().seq;
+        let grant = Grant::issue(
+            &identity.grant_authority_signing().unwrap(),
+            identity.device(),
+            Scope::everything(),
+            READ,
+            u64::MAX,
+        )
+        .unwrap();
+        let server = Server::new(dir.path().to_path_buf(), vec![grant]);
+        let lock = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(dir.path().join("cache/search/cache.lock"))
+            .unwrap();
+        FileExt::lock_exclusive(&lock).unwrap();
+        append(
+            &dir.path().to_path_buf(),
+            &identity,
+            &json!({"kind":"note", "text":"new arrival"}).to_string(),
+        )
+        .unwrap();
+        for (name, args) in [
+            ("search", json!({"query":"needle"})),
+            (
+                "record",
+                json!({"ref":format!("{}:{seq}", identity.device().short())}),
+            ),
+        ] {
+            assert!(matches!(
+                server.call(name, &args),
+                Err(Error::Denied("search index is being refreshed"))
+            ));
+        }
+        drop(lock);
+        assert!(server
+            .call("search", &json!({"query":"needle"}))
+            .unwrap()
+            .contains("needle"));
     }
 
     #[test]
