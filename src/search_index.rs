@@ -942,7 +942,11 @@ impl Index {
     }
 
     fn encode_manifest(&self) -> Result<Vec<u8>> {
-        let stored = StoredManifest {
+        self.encode_manifest_bounded(MAX_MANIFEST_PAGES * MANIFEST_PAGE_BYTES)
+    }
+
+    fn encode_manifest_bounded(&self, max: usize) -> Result<Vec<u8>> {
+        let mut stored = StoredManifest {
             schema: "hyperconsciousness.search-manifest.v7".to_string(),
             generation: self.generation,
             fingerprint: self.fingerprint.hex(),
@@ -979,7 +983,27 @@ impl Index {
                 })
                 .collect(),
         };
-        Ok(serde_json::to_vec(&stored)?)
+        loop {
+            let bytes = serde_json::to_vec(&stored)?;
+            if bytes.len() <= max {
+                return Ok(bytes);
+            }
+            let got = bytes.len();
+            drop(bytes);
+            let mut changed = false;
+            for segment in &mut stored.segments {
+                let filter = Base64UrlUnpadded::decode_vec(&segment.gram_filter)
+                    .map_err(|_| Error::Malformed("invalid search gram filter"))?;
+                if filter.len() > GRAM_FILTER_BYTES {
+                    segment.gram_filter =
+                        Base64UrlUnpadded::encode_string(&fold_gram_filter(&filter));
+                    changed = true;
+                }
+            }
+            if !changed {
+                return Err(Error::TooLarge { got, max });
+            }
+        }
     }
 
     fn decode_manifest(root: &Path, bytes: &[u8]) -> Result<Self> {
@@ -1745,6 +1769,32 @@ fn gram_filter_contains(filter: &[u8], gram: u64) -> bool {
             .all(|bit| filter[bit / 8] & (1 << (bit % 8)) != 0)
 }
 
+// Folding into a divisor preserves every original modulo-hash bit. If a filter
+// has no smaller supported divisor, an all-positive minimum filter routes every
+// candidate to exact matching. Neither case can introduce a false negative.
+fn fold_gram_filter(filter: &[u8]) -> Vec<u8> {
+    let mut target = 0;
+    let mut divisor = 1;
+    while divisor * divisor <= filter.len() {
+        if filter.len() % divisor == 0 {
+            for size in [divisor, filter.len() / divisor] {
+                if (GRAM_FILTER_BYTES..=filter.len() / 2).contains(&size) {
+                    target = target.max(size);
+                }
+            }
+        }
+        divisor += 1;
+    }
+    if target == 0 {
+        return vec![u8::MAX; GRAM_FILTER_BYTES];
+    }
+    let mut folded = vec![0; target];
+    for (index, byte) in filter.iter().enumerate() {
+        folded[index % target] |= byte;
+    }
+    folded
+}
+
 fn gram_filter_bits(gram: u64, bytes: usize) -> [usize; GRAM_FILTER_HASHES as usize] {
     let first = gram;
     let second = gram.rotate_left(29) | 1;
@@ -2268,6 +2318,50 @@ mod tests {
             .count();
         assert!(false_positives < 500, "route filter unexpectedly saturated");
         assert!(!gram_filter_contains(&[], 1));
+    }
+
+    #[test]
+    fn bounded_manifest_folds_filters_without_losing_candidates() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::open(root.path()).unwrap();
+        let signing = SigningKey::generate(&mut OsRng);
+        let key = random_key();
+        append(&store, &signing, &key, &["needle".into()]);
+        let mut index =
+            Index::load_or_build(root.path(), &store, &key, Hash::of(key.as_slice())).unwrap();
+        let grams: Vec<u64> = (0u64..40_000)
+            .map(|n| {
+                let hash = Hash::of(&n.to_be_bytes());
+                u64::from_be_bytes(hash.0[..8].try_into().unwrap())
+            })
+            .collect();
+        index.segments[0].gram_filter = build_gram_filter(grams.iter().copied());
+        let ordinary = index.encode_manifest().unwrap();
+        let bounded = index.encode_manifest_bounded(4096).unwrap();
+        assert!(ordinary.len() > 4096);
+        assert!(bounded.len() <= 4096);
+        let decoded = Index::decode_manifest(root.path(), &bounded).unwrap();
+        assert_eq!(decoded.heads, index.heads);
+        assert_eq!(decoded.segments[0].file, index.segments[0].file);
+        assert_eq!(decoded.segments[0].ciphertext, index.segments[0].ciphertext);
+        assert_eq!(
+            decoded.segments[0].postings_file,
+            index.segments[0].postings_file
+        );
+        assert!(grams
+            .iter()
+            .all(|gram| gram_filter_contains(&decoded.segments[0].gram_filter, *gram)));
+        assert!(matches!(
+            index.encode_manifest_bounded(1),
+            Err(Error::TooLarge { .. })
+        ));
+        // A prime length cannot fold to another supported modulus.
+        let prime = vec![0u8; 1031];
+        let conservative = fold_gram_filter(&prime);
+        assert_eq!(conservative, vec![u8::MAX; GRAM_FILTER_BYTES]);
+        assert!(grams
+            .iter()
+            .all(|gram| gram_filter_contains(&conservative, *gram)));
     }
 
     #[test]

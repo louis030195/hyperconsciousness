@@ -749,6 +749,14 @@ point reads return the index-busy or changed-index error without starting a
 second lifetime scan. Clients may retry within their existing call/time budget;
 this is not a grant refusal or proof that a record is absent.
 
+When route filters make a manifest exceed the existing directory budget, the
+writer folds their bits into smaller divisor-sized filters. A filter with no
+supported divisor becomes an all-positive minimum-size filter. These operations
+can add false positives, which still undergo exact matching, but cannot discard
+matches. Signed heads, locations, shard hashes and the directory size limit are
+unchanged. A directory whose non-filter metadata still exceeds the bound is
+refused.
+
 Indexed reads use a signed-prefix data snapshot. The final release check verifies
 new tail signatures and predecessor links, rejects changed/missing prefixes,
 relevant ancestor revocations, unreadable tails, and any managed-capture change.
