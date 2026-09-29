@@ -1,0 +1,4 @@
+interface:
+  display_name: "Ingest support"
+  short_description: "Import selected support records into HC"
+  default_prompt: "Use $hc-ingest-support to import the selected source records into my authorized HC destination and verify them."

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Ingest advertising data"
+  short_description: "Import selected advertising data records into HC"
+  default_prompt: "Use $hc-ingest-ads to import the selected source records into my authorized HC destination and verify them."

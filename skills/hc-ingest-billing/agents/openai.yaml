@@ -1,0 +1,4 @@
+interface:
+  display_name: "Ingest billing records"
+  short_description: "Import selected billing records records into HC"
+  default_prompt: "Use $hc-ingest-billing to import the selected source records into my authorized HC destination and verify them."

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Ingest meeting context"
+  short_description: "Import selected source records into HC"
+  default_prompt: "Use $hc-ingest-meetings to import the selected records into my authorized HC destination and verify them."

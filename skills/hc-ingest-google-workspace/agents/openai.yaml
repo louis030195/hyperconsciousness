@@ -1,0 +1,4 @@
+interface:
+  display_name: "Ingest Google Workspace"
+  short_description: "Import selected Google Workspace records into HC"
+  default_prompt: "Use $hc-ingest-google-workspace to import the selected source records into my authorized HC destination and verify them."

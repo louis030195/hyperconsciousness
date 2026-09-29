@@ -1,0 +1,4 @@
+interface:
+  display_name: "Ingest CRM"
+  short_description: "Import selected CRM records into HC"
+  default_prompt: "Use $hc-ingest-crm to import the selected source records into my authorized HC destination and verify them."

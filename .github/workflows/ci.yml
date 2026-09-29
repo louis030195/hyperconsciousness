@@ -30,6 +30,8 @@ jobs:
           node-version: 20
       - name: Check repository boundaries and calibrate scope evaluator
         run: npm run eval:scope
+      - name: Verify ingestion skill installation and references
+        run: python3 -m unittest discover -s skills/tests
 
   rust:
     name: rust (${{ matrix.os }})

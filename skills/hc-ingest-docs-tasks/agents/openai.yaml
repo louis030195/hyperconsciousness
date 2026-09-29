@@ -1,0 +1,4 @@
+interface:
+  display_name: "Ingest documents and tasks"
+  short_description: "Import selected source records into HC"
+  default_prompt: "Use $hc-ingest-docs-tasks to import the selected records into my authorized HC destination and verify them."

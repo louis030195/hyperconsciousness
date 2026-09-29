@@ -1,0 +1,4 @@
+interface:
+  display_name: "Ingest cloud operations"
+  short_description: "Import selected cloud operations records into HC"
+  default_prompt: "Use $hc-ingest-infra to import the selected source records into my authorized HC destination and verify them."

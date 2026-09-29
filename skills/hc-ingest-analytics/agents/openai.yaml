@@ -1,0 +1,4 @@
+interface:
+  display_name: "Ingest analytics"
+  short_description: "Import selected analytics records into HC"
+  default_prompt: "Use $hc-ingest-analytics to import the selected source records into my authorized HC destination and verify them."

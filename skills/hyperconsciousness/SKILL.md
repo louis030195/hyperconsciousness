@@ -119,6 +119,15 @@ control devices, or orchestrate private agents. Those operations require a
 separately deployed and authenticated control plane that is not distributed by
 this repository. Installing this skill grants no control-plane credentials.
 
+## Import source records
+
+For an explicit ingestion request, use the installed `hc-ingest` contract and
+matching `hc-ingest-*` source skill. The optional bundle covers chat histories
+and business tools; installation and source selection are documented in the
+[public skill catalog](https://github.com/louis030195/hyperconsciousness/blob/main/skills/README.md).
+Keep ordinary recall on this skill. Source access and an HC write grant are
+separate prerequisites; installing instructions grants neither.
+
 ## Advanced operations
 
 For pairing, grants, revocation, sync verification, recovery, workspace

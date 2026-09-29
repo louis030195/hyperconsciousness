@@ -1,0 +1,4 @@
+interface:
+  display_name: "Ingest marketing tools"
+  short_description: "Import selected marketing tools records into HC"
+  default_prompt: "Use $hc-ingest-marketing to import the selected source records into my authorized HC destination and verify them."

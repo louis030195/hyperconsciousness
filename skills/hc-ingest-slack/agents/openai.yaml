@@ -1,0 +1,4 @@
+interface:
+  display_name: "Ingest Slack"
+  short_description: "Import selected Slack records into HC"
+  default_prompt: "Use $hc-ingest-slack to import the selected source records into my authorized HC destination and verify them."

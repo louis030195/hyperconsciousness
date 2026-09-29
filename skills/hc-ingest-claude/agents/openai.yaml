@@ -1,0 +1,4 @@
+interface:
+  display_name: "Ingest Claude chats"
+  short_description: "Import selected Claude chats records into HC"
+  default_prompt: "Use $hc-ingest-claude to import the selected source records into my authorized HC destination and verify them."

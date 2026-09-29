@@ -54,6 +54,22 @@ Start a new Codex task after signing in. No Bun or provider API keys are needed.
 See [hosted access](docs/HOSTED-ACCESS.md) for other clients and access boundaries.
 The company connection is separate from your personal brain.
 
+## Ingest chats and tools
+
+The [ingestion skill catalog](skills/README.md) includes Codex and Claude chats,
+Slack, Google Workspace, GitHub, CRM, support, documents, meetings, analytics,
+ads, billing, marketing and cloud operations. Install all recipes from a clone:
+
+```sh
+python3 scripts/install-ingestion-skills.py --dest ~/.codex/skills
+```
+
+For Claude Code, use `--dest ~/.claude/skills`. These are portable agent
+instructions using existing source access and an authorized HC writer. They
+preserve source identity, freshness and retry receipts. Installing skills does
+not connect accounts or start background ingestion; the catalog explains
+selection, prerequisites and verification.
+
 ## Local dashboard
 
 Use the optional [HC Atlas dashboard](dashboard/README.md) to inspect storage,

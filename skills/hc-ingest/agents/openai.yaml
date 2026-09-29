@@ -1,0 +1,4 @@
+interface:
+  display_name: "Ingest into HC"
+  short_description: "Import scoped records with provenance and readback"
+  default_prompt: "Use $hc-ingest to import my selected records into HC and verify the saved content."

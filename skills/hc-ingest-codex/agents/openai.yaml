@@ -1,0 +1,4 @@
+interface:
+  display_name: "Ingest Codex chats"
+  short_description: "Import selected Codex chats records into HC"
+  default_prompt: "Use $hc-ingest-codex to import the selected source records into my authorized HC destination and verify them."
