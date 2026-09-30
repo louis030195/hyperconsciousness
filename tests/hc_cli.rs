@@ -156,3 +156,123 @@ fn scoped_ask_hides_outside_counts_and_releases_nothing_when_audit_is_locked() {
     assert!(!String::from_utf8_lossy(&denied.stdout).contains("visible-canary"));
     drop(log);
 }
+
+#[test]
+fn local_file_saves_wait_for_brief_contention_and_read_back_exactly() {
+    use hyperconsciousness::{Identity, Store};
+    use std::process::Stdio;
+    use std::time::Duration;
+    std::env::set_var("BRAINMESH_NO_KEYSTORE", "1");
+    let root = tempfile::tempdir().unwrap();
+    let files = tempfile::tempdir().unwrap();
+    let mut identity = Identity::load_or_create(root.path()).unwrap();
+    identity.create_brain().unwrap();
+    let store = Store::open(root.path()).unwrap();
+    let lock = store.log_for_write(identity.device()).unwrap();
+    let source = files.path().join("receipt.md");
+    fs::write(&source, b"synthetic receipt, no personal data").unwrap();
+    let start = std::time::Instant::now();
+    let child = Command::new(binary())
+        .arg("add")
+        .arg(&source)
+        .arg("--dir")
+        .arg(root.path())
+        .env("BRAINMESH_NO_KEYSTORE", "1")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    std::thread::sleep(Duration::from_millis(200));
+    drop(lock);
+    let result = child.wait_with_output().unwrap();
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    assert!(start.elapsed() < Duration::from_secs(3));
+    let mut children = Vec::new();
+    for n in 0..4 {
+        let source = files.path().join(format!("receipt-{n}.md"));
+        fs::write(&source, format!("synthetic receipt {n}")).unwrap();
+        children.push(
+            Command::new(binary())
+                .arg("add")
+                .arg(&source)
+                .arg("--dir")
+                .arg(root.path())
+                .env("BRAINMESH_NO_KEYSTORE", "1")
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .unwrap(),
+        );
+    }
+    for child in children {
+        let result = child.wait_with_output().unwrap();
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+    }
+    for n in 0..4 {
+        let dest = files.path().join(format!("read-{n}.md"));
+        let result = Command::new(binary())
+            .args(["get", &format!("receipt-{n}.md")])
+            .arg(&dest)
+            .arg("--dir")
+            .arg(root.path())
+            .env("BRAINMESH_NO_KEYSTORE", "1")
+            .output()
+            .unwrap();
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        assert_eq!(
+            fs::read_to_string(dest).unwrap(),
+            format!("synthetic receipt {n}")
+        );
+    }
+    assert_eq!(
+        hyperconsciousness::catalog::FileCatalog::scan(
+            &store,
+            &hyperconsciousness::keyring::RuntimeKeys::open_read_only(root.path(), &identity)
+                .unwrap()
+        )
+        .unwrap()
+        .newest()
+        .len(),
+        5
+    );
+}
+
+#[test]
+fn local_append_lock_wait_is_bounded_and_never_replays_an_uncertain_write() {
+    use hyperconsciousness::{Identity, Store};
+    std::env::set_var("BRAINMESH_NO_KEYSTORE", "1");
+    let root = tempfile::tempdir().unwrap();
+    let files = tempfile::tempdir().unwrap();
+    let mut identity = Identity::load_or_create(root.path()).unwrap();
+    identity.create_brain().unwrap();
+    let store = Store::open(root.path()).unwrap();
+    let lock = store.log_for_write(identity.device()).unwrap();
+    let before = lock.cache_head().unwrap();
+    let source = files.path().join("receipt.md");
+    fs::write(&source, b"synthetic receipt").unwrap();
+    let start = std::time::Instant::now();
+    let result = Command::new(binary())
+        .arg("add")
+        .arg(source)
+        .arg("--dir")
+        .arg(root.path())
+        .env("BRAINMESH_NO_KEYSTORE", "1")
+        .output()
+        .unwrap();
+    assert!(!result.status.success());
+    assert!(start.elapsed() >= std::time::Duration::from_secs(3));
+    assert!(start.elapsed() < std::time::Duration::from_secs(6));
+    assert_eq!(lock.cache_head().unwrap(), before);
+}

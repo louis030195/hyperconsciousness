@@ -122,3 +122,35 @@ Human output stays concise. `--json` errors use
 `hyperconsciousness.error.v1` with a stable code, message, and retryable flag.
 Configured, reachable, authenticated, converged, durable, and verified are
 separate states and must not be collapsed into one healthy boolean.
+
+## File receipt lookups and local write contention
+
+`FileCatalog` folds signed file metadata into a private encrypted local cache at
+`cache/file-catalog-v1`. The cache is derived state, limited to 64 MiB and bound
+to the runtime's complete usable-key/cutoff fingerprint. Custom key providers
+that do not declare that fingerprint continue to use a fresh scan. No file names
+or blob references are persisted as plaintext in this cache.
+
+The first lookup builds the fold. Later processes validate the signed log heads
+and fold only contiguous appended records. A removed author, rollback, changed
+prefix, corrupt cache, or different key view forces a rebuild. Concurrent appends
+may advance beyond the read's captured heads; that later suffix is included on the
+next read. Cache writes are atomic and best effort, without holding an author
+write lock. A missing or unwritable cache affects performance, not availability.
+Before `get` opens or fetches a blob, it resolves the selected local record
+coordinates, verifies the signature, decrypts with the current keys, and compares
+all file metadata with the selected catalog version. Signed records and blobs
+remain authoritative. No wire or signed-record format changes are involved.
+
+Local CLI appends use the existing locked-tail/new-batch path. Network imports
+retain the full idempotent replay/fork validation path. A local CLI writer waits
+up to three seconds to acquire a busy author lock, including the first-use owner
+membership migration. Only lock-acquisition failures are retried; uncertain I/O
+or commit failures are returned without replaying the write. These are separate
+bounded acquisition steps, not a retry of the overall save operation.
+
+Regression coverage includes encrypted cache contents, warm reads without old
+payload opens, incremental versions, replayed cache snapshots, new/removed authors,
+key-view changes, corrupt source/cache bytes, torn tails, symlinks, concurrent
+CLI saves, and bounded lock failures without duplicate records. A successful local
+save/readback does not establish replication to another device or object store.

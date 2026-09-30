@@ -4170,8 +4170,9 @@ fn append_many_to(
 
     // the write lock is held only for this append, so a long running agent
     // and a quick cli write do not fight over the log
-    let log = store.log_for_write(identity.device())?;
-    let mut head = log.head()?;
+    let log = retry_local_lock(|| store.log_for_write(identity.device()))?;
+    let mut head = log.cache_head()?;
+    let mut committed_head = head;
     let mut clock = Clock::new();
     let mut ids = Vec::with_capacity(payloads.len());
     let mut records = Vec::with_capacity(payloads.len());
@@ -4198,12 +4199,7 @@ fn append_many_to(
         ids.push(record.id());
         records.push(record);
     }
-    let (accepted, already_had) = log.append_batch(&records)?;
-    if accepted != records.len() as u64 || already_had != 0 {
-        return Err(Error::Malformed(
-            "new local record batch did not append exactly once",
-        ));
-    }
+    log.append_new_batch(&records, &mut committed_head)?;
     Ok(ids)
 }
 
@@ -4240,7 +4236,22 @@ fn record_device_membership(
 }
 
 fn runtime_keys(dir: &Path, identity: &Identity) -> Result<RuntimeKeys> {
-    RuntimeKeys::open(dir, identity)
+    // A first write may need the same author lock to record owner membership.
+    retry_local_lock(|| RuntimeKeys::open(dir, identity))
+}
+
+/// Retry only failure to acquire a local lock, before the append starts.
+/// Never replay an append after an I/O error or an uncertain commit.
+fn retry_local_lock<T>(mut operation: impl FnMut() -> Result<T>) -> Result<T> {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+    loop {
+        match operation() {
+            Err(Error::Locked(_)) if std::time::Instant::now() < deadline => {
+                std::thread::sleep(std::time::Duration::from_millis(25));
+            }
+            result => return result,
+        }
+    }
 }
 
 fn runtime_keys_read_only(dir: &Path, identity: &Identity) -> Result<RuntimeKeys> {
@@ -5802,12 +5813,14 @@ fn run() -> Result<()> {
                     ))?;
 
                     println!("version {which} of {} for {wanted}", all.len());
+                    FileCatalog::verify_version(&store, &keys, picked)?;
                     (wanted.clone(), picked.reference.clone())
                 }
                 None => {
                     let version = catalog
                         .latest_named(wanted)
                         .ok_or(Error::Malformed("no file by that name"))?;
+                    FileCatalog::verify_version(&store, &keys, version)?;
                     (version.name.clone(), version.reference.clone())
                 }
             };
