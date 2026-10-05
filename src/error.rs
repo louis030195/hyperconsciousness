@@ -84,8 +84,30 @@ pub struct MachineErrorBody {
 }
 
 impl Error {
+    /// These refusals discard a stale read, not the caller's authority. Keep
+    /// the list exact: revocations, bad signatures and changed prefixes must
+    /// never become retryable merely because their messages mention a read.
+    pub fn is_read_contention(&self) -> bool {
+        matches!(
+            self,
+            Error::Denied(
+                "search index is being refreshed"
+                    | "search index changed during query"
+                    | "search index changed during point read"
+                    | "search index changed during overview"
+                    | "search index changed during ranked read"
+                    | "snapshot changed during capture read"
+                    | "snapshot changed during ranked read"
+                    | "capture history changed during read"
+                    | "capture history changed during ranked read"
+                    | "read tail changed throughout release check"
+            )
+        )
+    }
+
     pub fn code(&self) -> &'static str {
         match self {
+            error if error.is_read_contention() => "read_contention",
             Error::Crypto(_) => "crypto_error",
             Error::Malformed(_) => "malformed_request",
             Error::RecordTruncated => "record_truncated",
@@ -107,6 +129,7 @@ impl Error {
 
     pub fn retryable(&self) -> bool {
         match self {
+            error if error.is_read_contention() => true,
             Error::Locked(_) | Error::WorkspaceChanged { .. } => true,
             Error::Io(error) => matches!(
                 error.kind(),
@@ -147,5 +170,32 @@ mod tests {
         let timeout = Error::Io(std::io::Error::new(std::io::ErrorKind::TimedOut, "late"));
         assert_eq!(timeout.code(), "io_error");
         assert!(timeout.retryable());
+    }
+
+    #[test]
+    fn read_contention_is_distinct_from_authority_and_integrity_failures() {
+        for message in [
+            "search index is being refreshed",
+            "capture history changed during read",
+            "snapshot changed during capture read",
+        ] {
+            let error = Error::Denied(message).machine();
+            assert_eq!(error.error.code, "read_contention");
+            assert!(error.error.retryable);
+        }
+        for message in [
+            "grant revoked during read",
+            "runtime key view changed during read",
+            "search snapshot prefix changed",
+            "search snapshot tail changed",
+            "search snapshot tail exceeds read budget",
+            "search index segment hash changed",
+        ] {
+            let error = Error::Denied(message).machine();
+            assert_eq!(error.error.code, "permission_denied");
+            assert!(!error.error.retryable);
+        }
+        assert!(!Error::Expired.is_read_contention());
+        assert!(!Error::Signature.is_read_contention());
     }
 }

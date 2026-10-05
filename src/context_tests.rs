@@ -38,6 +38,149 @@ fn note(server: &Server, identity: &Identity, text: &str, sensitivity: u8) {
 }
 
 #[test]
+fn indexed_read_contention_does_not_fall_back_to_a_history_scan() {
+    use fs4::fs_std::FileExt;
+
+    let (_dir, identity, server) = setup();
+    note(&server, &identity, "indexed evidence", PERSONAL);
+    let store = Store::open(&server.dir).unwrap();
+    let keys = RuntimeKeys::open(&server.dir, &identity).unwrap();
+    hyperconsciousness::search_index::Index::load_or_build(
+        &server.dir,
+        &store,
+        &keys,
+        keys.cache_fingerprint(),
+    )
+    .unwrap();
+    let page: Value = serde_json::from_str(
+        &server
+            .call(
+                "search",
+                &json!({"query":"indexed evidence", "format":"structured"}),
+            )
+            .unwrap(),
+    )
+    .unwrap();
+    let reference = page["items"][0]["ref"].clone();
+    // Make the cached index stale while another process owns its refresh lock.
+    // A streaming fallback would still find the note, hiding the contention.
+    note(&server, &identity, "new evidence", PERSONAL);
+    let lock = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(server.dir.join("cache/search/cache.lock"))
+        .unwrap();
+    FileExt::lock_exclusive(&lock).unwrap();
+    for (name, arguments) in [
+        ("search", json!({"query":"evidence"})),
+        ("recent", json!({"kind":"note"})),
+        ("record", json!({"ref":reference})),
+        ("overview", json!({})),
+        ("files", json!({})),
+    ] {
+        let result = server
+            .answer(&json!({
+                "jsonrpc":"2.0", "id":1, "method":"tools/call",
+                "params":{"name":name, "arguments":arguments},
+            }))
+            .unwrap();
+        assert_eq!(
+            result["result"]["isError"], true,
+            "{name} silently scanned history"
+        );
+        assert!(result["result"]["structuredContent"].is_null());
+        assert_eq!(
+            result["result"]["_meta"]["hc/error"]["error"]["code"],
+            "read_contention"
+        );
+        assert_eq!(
+            result["result"]["_meta"]["hc/error"]["error"]["retryable"],
+            true
+        );
+    }
+    drop(lock);
+    assert!(server
+        .call("search", &json!({"query":"new evidence"}))
+        .unwrap()
+        .contains("new evidence"));
+}
+
+#[test]
+fn retry_reopens_the_read_view_and_a_new_revocation_still_wins() {
+    use fs4::fs_std::FileExt;
+
+    for revoke in [false, true] {
+        let (_dir, identity, server) = setup();
+        note(&server, &identity, "old evidence", PERSONAL);
+        let store = Store::open(&server.dir).unwrap();
+        let keys = RuntimeKeys::open(&server.dir, &identity).unwrap();
+        hyperconsciousness::search_index::Index::load_or_build(
+            &server.dir,
+            &store,
+            &keys,
+            keys.cache_fingerprint(),
+        )
+        .unwrap();
+        note(&server, &identity, "new evidence", PERSONAL);
+        let mut lock = Some(
+            std::fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .open(server.dir.join("cache/search/cache.lock"))
+                .unwrap(),
+        );
+        FileExt::lock_exclusive(lock.as_ref().unwrap()).unwrap();
+        let mut attempts = 0;
+        let result = retry_read(true, || {
+            attempts += 1;
+            let result = server.call_once("search", &json!({"query":"new evidence"}), (None, None));
+            if attempts == 1 {
+                assert!(result.as_ref().unwrap_err().is_read_contention());
+                drop(lock.take());
+                if revoke {
+                    append(
+                        &server.dir,
+                        &identity,
+                        &json!({
+                            "kind":"revoke", "grant":server.chain[0].id().hex(),
+                        })
+                        .to_string(),
+                    )
+                    .unwrap();
+                }
+            }
+            result
+        });
+        assert_eq!(attempts, 2);
+        if revoke {
+            let error = result.unwrap_err();
+            assert!(!error.is_read_contention());
+            assert!(error.to_string().contains("revoked"));
+        } else {
+            assert!(result.unwrap().contains("new evidence"));
+        }
+    }
+}
+
+#[test]
+fn retry_policy_is_bounded_and_never_replays_non_retryable_operations() {
+    for (enabled, error_message, expected_attempts) in [
+        (true, "capture history changed during read", 3),
+        (false, "capture history changed during read", 1),
+        (true, "grant revoked during read", 1),
+        (true, "search snapshot prefix changed", 1),
+    ] {
+        let mut attempts = 0;
+        let result: Result<()> = retry_read(enabled, || {
+            attempts += 1;
+            Err(Error::Denied(error_message))
+        });
+        assert!(result.is_err());
+        assert_eq!(attempts, expected_attempts);
+    }
+}
+
+#[test]
 fn structured_context_is_bounded_citable_and_pages_without_gaps_on_both_read_paths() {
     for indexed in [false, true] {
         let (_dir, identity, server) = setup();

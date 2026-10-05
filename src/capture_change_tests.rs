@@ -23,6 +23,45 @@ fn head(server: &Server, identity: &Identity) -> hyperconsciousness::log::Head {
 }
 
 #[test]
+fn read_retry_discards_results_superseded_during_release_validation() {
+    for replacement in ["corrected evidence", ""] {
+        let (_dir, identity, server) = setup(READ | WRITE);
+        write(
+            &server,
+            args(vec![change("changing", 1, "obsolete evidence")]),
+        );
+        let store = Store::open(&server.dir).unwrap();
+        let keys = RuntimeKeys::open(&server.dir, &identity).unwrap();
+        let heads = store.cache_heads().unwrap();
+        let mut attempts = 0;
+        let output = retry_read(true, || {
+            attempts += 1;
+            let output = server.call_once("search", &json!({"query":"evidence"}), (None, None))?;
+            if attempts == 1 {
+                assert!(output.contains("obsolete evidence"));
+                write(&server, args(vec![change("changing", 2, replacement)]));
+                // Simulate the final release check seeing a concurrent managed
+                // update after query formatting but before exposing the result.
+                hyperconsciousness::search_index::validate_read_tail(
+                    &store,
+                    &keys,
+                    &heads,
+                    &server.chain,
+                )?;
+                panic!("a concurrent correction must invalidate the old result");
+            }
+            Ok(output)
+        })
+        .unwrap();
+        assert_eq!(attempts, 2);
+        assert!(!output.contains("obsolete evidence"));
+        if !replacement.is_empty() {
+            assert!(output.contains(replacement));
+        }
+    }
+}
+
+#[test]
 fn exact_retry_survives_restart_grant_renewal_and_lost_cache() {
     let (_dir, identity, server) = setup(READ | WRITE);
     let batch = args(vec![change("a", 1, "first"), change("b", 1, "second")]);

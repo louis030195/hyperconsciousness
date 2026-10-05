@@ -54,8 +54,11 @@ chronological and rejects relevance mode.
   is added. Work is still proportional to candidate/filter selectivity; this is
   not a claim of production-scale latency on every corpus.
 - Indexed failures are returned rather than retried through an expensive
-  streaming query after a resource/permission refusal. Existing literal fallback
-  behavior is unchanged.
+  streaming query after a resource/permission refusal. Indexed literal reads also
+  retain the indexed error instead of falling back to a full-history scan. MCP
+  may retry a brief read conflict with fresh authorization, as described in
+  [the read constraints](CONSTRAINTS.md); resource and permission refusals are
+  not automatically retried.
 
 The Rust entry points are `query::ranked::{look, look_snapshot, look_indexed}`.
 They return the existing `Answer` type with selected records in reverse rank

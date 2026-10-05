@@ -783,10 +783,18 @@ impl Server {
                         )
                     }
                     Ok(text) => Ok(json!({"content": [{"type": "text", "text": text}]})),
-                    Err(error) => Ok(json!({
-                        "isError": true,
-                        "content": [{"type": "text", "text": error.to_string()}],
-                    })),
+                    Err(error) => {
+                        let text = if error.is_read_contention() {
+                            format!("{error}; retry the same read shortly (read_contention)")
+                        } else {
+                            error.to_string()
+                        };
+                        Ok(json!({
+                            "isError": true,
+                            "content": [{"type": "text", "text": text}],
+                            "_meta": {"hc/error": error.machine()},
+                        }))
+                    }
                 }
             }
 
@@ -798,6 +806,22 @@ impl Server {
     }
 
     fn call(&self, name: &str, arguments: &Value) -> Result<String> {
+        // Reopen keys, policy and the read view on each attempt. Never replay
+        // writes, or consume a one-use approval again after a failed read.
+        let retry = matches!(name, "search" | "recent" | "record" | "overview" | "files")
+            && arguments.get("access_request_id").is_none();
+        // Resolve relative dates once without changing the cursor's binding to
+        // the caller's original arguments. Authorization time remains fresh.
+        let window = (since(arguments.get("since")), since(arguments.get("until")));
+        retry_read(retry, || self.call_once(name, arguments, window))
+    }
+
+    fn call_once(
+        &self,
+        name: &str,
+        arguments: &Value,
+        window: (Option<u64>, Option<u64>),
+    ) -> Result<String> {
         let identity = Identity::load_for_brain(&self.dir)?;
         let keys = RuntimeKeys::open(&self.dir, &identity)?;
         let store = Store::open(&self.dir)?;
@@ -867,8 +891,8 @@ impl Server {
                         kind: arguments["kind"].as_str().map(String::from),
                         kinds: Vec::new(),
                         tags,
-                        since: since(arguments.get("since")),
-                        until: since(arguments.get("until")),
+                        since: window.0,
+                        until: window.1,
                         before: None,
                         limit: effective_limit,
                     };
@@ -928,26 +952,10 @@ impl Server {
                                 &filter,
                             )
                         })();
-                        match indexed {
-                            Ok(answer) => answer,
-                            // A bounded ranked query must not retry an expensive
-                            // full scan after a resource or permission refusal.
-                            Err(error) if ranked => return Err(error),
-                            Err(
-                                error @ Error::Denied(
-                                    "search index is being refreshed"
-                                    | "search index changed during query",
-                                ),
-                            ) => return Err(error),
-                            Err(_) => hyperconsciousness::query::look(
-                                &store,
-                                &keys,
-                                &call_chain,
-                                identity.grant_authority()?,
-                                now,
-                                &filter,
-                            )?,
-                        }
+                        // The index repairs its derived state itself. A refusal
+                        // must not trigger an unbounded lifetime scan, which can
+                        // race with another capture and hide the original error.
+                        indexed?
                     };
 
                     if structured {
@@ -1092,23 +1100,7 @@ impl Server {
                                 reference,
                             )
                         })();
-                        match indexed {
-                            Ok(answer) => answer,
-                            Err(
-                                error @ Error::Denied(
-                                    "search index is being refreshed"
-                                    | "search index changed during point read",
-                                ),
-                            ) => return Err(error),
-                            Err(_) => hyperconsciousness::query::record_by_ref(
-                                &store,
-                                &keys,
-                                &call_chain,
-                                identity.grant_authority()?,
-                                now,
-                                reference,
-                            )?,
-                        }
+                        indexed?
                     } else {
                         let snapshot = self.snapshot(&store, &keys)?;
                         if let Some(snapshot) = snapshot {
@@ -1216,16 +1208,7 @@ impl Server {
                                 now,
                             )
                         })();
-                        match indexed {
-                            Ok(map) => map,
-                            Err(_) => hyperconsciousness::query::overview(
-                                &store,
-                                &keys,
-                                &call_chain,
-                                identity.grant_authority()?,
-                                now,
-                            )?,
-                        }
+                        indexed?
                     };
 
                     let mut out = String::new();
@@ -1562,17 +1545,7 @@ impl Server {
                                 &filter,
                             )
                         })();
-                        match indexed {
-                            Ok(answer) => answer,
-                            Err(_) => hyperconsciousness::query::look(
-                                &store,
-                                &keys,
-                                &call_chain,
-                                identity.grant_authority()?,
-                                now,
-                                &filter,
-                            )?,
-                        }
+                        indexed?
                     };
 
                     // newest of each, with how many lie behind it. a model that
@@ -2254,6 +2227,27 @@ impl RememberInput {
         }
         payload.to_string()
     }
+}
+
+fn retry_read<T>(enabled: bool, mut read: impl FnMut() -> Result<T>) -> Result<T> {
+    let start = std::time::Instant::now();
+    for attempt in 0..3 {
+        match read() {
+            Err(error)
+                if enabled
+                    && error.is_read_contention()
+                    && attempt < 2
+                    && start.elapsed() < std::time::Duration::from_millis(250) =>
+            {
+                std::thread::sleep(std::time::Duration::from_millis(10 << attempt));
+                if start.elapsed() >= std::time::Duration::from_millis(250) {
+                    return Err(error);
+                }
+            }
+            result => return result,
+        }
+    }
+    unreachable!("the last read attempt returns its result")
 }
 
 fn append(dir: &PathBuf, identity: &Identity, payload: &str) -> Result<(Record, Hash)> {

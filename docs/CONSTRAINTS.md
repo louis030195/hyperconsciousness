@@ -108,7 +108,19 @@ resource limits, not measured production capacity or unlimited multi-tenancy.
 Read release checks tolerate ordinary append-only writes but fail closed for
 corrections/retractions, relevant revocations, changed key views or company
 membership. Tail catch-up is capped at three passes, 10,000 records and 64 MiB.
-A busy control stream or repeated index cleanup can still force retry/fallback.
+A busy control stream or repeated index cleanup can still refuse a read. MCP
+does not start a full-history scan after an indexed read fails. It retries only
+an exact allowlist of transient read conflicts, at most three attempts, and
+starts no further retry once 250 ms have elapsed. This is a retry-start budget,
+not a timeout on an individual index build or read. Every attempt reopens keys,
+policy and the current view and repeats the original filters/cursor. Writes and
+reads using one-time approval IDs are never automatically replayed. Revocations,
+expired grants, integrity failures and resource-limit failures are not retried.
+MCP tool errors include the machine error in `_meta["hc/error"]` without
+returning structured result content. Transient conflicts include a same-read
+retry hint in their text and use `read_contention` and `retryable: true`,
+rather than a permanent permission-denial code. Other error text stays unchanged. The caller
+must still obtain a successful read before claiming data was returned.
 Small in-memory/streaming reads retain their conservative head-equality checks.
 Use independent keys, stores, OS identities and workload budgets per trust domain;
 a shared trusted process is not a tenant-isolation boundary. No remote traffic
