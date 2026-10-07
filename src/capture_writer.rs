@@ -38,12 +38,11 @@ impl Server {
         // Hold the ordinary author lock across lookup, validation and append.
         // Opening it also repairs a torn tail before recovering retry receipts.
         let log = store.log_for_write(identity.device())?;
-        let index = hyperconsciousness::search_index::Index::load_or_build(
-            &self.dir,
-            &store,
-            &keys,
-            fingerprint,
-        )?;
+        // Reuse the same authenticated process cache as reads. Reopening the
+        // entire disk index for every capture batch holds the author lock over
+        // repeated manifest decoding and starves readers during ingestion.
+        let cached = self.search_index(&store, &keys)?;
+        let index = cached.read().unwrap_or_else(|p| p.into_inner());
         let mut state = index.capture_state_shared(&keys)?;
         let permissions = self.revocations(&store, &keys)?;
         let now = Clock::new().now().millis;
