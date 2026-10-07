@@ -562,6 +562,170 @@ struct Request {
     body: Vec<u8>,
 }
 
+type McpOptions = (Option<(String, PathBuf)>, Vec<String>);
+
+/// Transport options are opt-in and must occur together. Never silently fall
+/// back to stdio when a caller intended to start a shared endpoint.
+pub(crate) fn mcp_options(args: &[String]) -> Result<McpOptions> {
+    let mut bind = None;
+    let mut token = None;
+    let mut rest = Vec::new();
+    let mut args = args.iter();
+    while let Some(arg) = args.next() {
+        if matches!(arg.as_str(), "--bind" | "--token-file") {
+            let value = args
+                .next()
+                .filter(|v| !v.starts_with('-'))
+                .ok_or(Error::Malformed(
+                    "MCP HTTP needs --bind <loopback-address> --token-file <private-file>",
+                ))?;
+            let previous = if arg == "--bind" {
+                bind.replace(value.clone())
+            } else {
+                token.replace(value.clone())
+            };
+            if previous.is_some() {
+                return Err(Error::Malformed("duplicate MCP transport option"));
+            }
+        } else {
+            rest.push(arg.clone());
+        }
+    }
+    let options = match (bind, token) {
+        (None, None) => None,
+        (Some(bind), Some(token)) => Some((bind, PathBuf::from(token))),
+        _ => {
+            return Err(Error::Malformed(
+                "MCP HTTP requires both --bind and --token-file",
+            ))
+        }
+    };
+    Ok((options, rest))
+}
+
+fn mcp_token(path: &Path) -> Result<String> {
+    hyperconsciousness::guard::no_symlink(path)?;
+    if !std::fs::symlink_metadata(path)?.is_file() {
+        return Err(Error::Denied("MCP token must be a private regular file"));
+    }
+    let file = private_options().read(true).open(path)?;
+    let metadata = file.metadata()?;
+    if !metadata.is_file() || metadata.len() > 1024 {
+        return Err(Error::Denied(
+            "MCP token must be a private bounded regular file",
+        ));
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        if metadata.mode() & 0o777 != 0o600 || metadata.uid() != unsafe { libc::geteuid() } {
+            return Err(Error::Denied(
+                "MCP token must be owned by this user with mode 0600",
+            ));
+        }
+    }
+    let mut token = String::new();
+    file.take(1025).read_to_string(&mut token)?;
+    let token = token.trim();
+    if !(32..=1024).contains(&token.len()) || !token.bytes().all(|b| b.is_ascii_graphic()) {
+        return Err(Error::Denied(
+            "MCP token must contain 32 to 1024 non-whitespace ASCII characters",
+        ));
+    }
+    Ok(token.to_owned())
+}
+
+/// An optional local transport for the existing scoped MCP request handler.
+/// One process owns the cache or hosted login; clients only hold its bearer.
+/// No OAuth issuer, new grant, store or background process is created here.
+pub(crate) fn serve_mcp(
+    bind: &str,
+    token_file: &Path,
+    answer: impl Fn(&Value) -> Option<Value> + Send + Sync + 'static,
+) -> Result<()> {
+    let address: std::net::SocketAddr = bind
+        .parse()
+        .map_err(|_| Error::Malformed("MCP HTTP requires a numeric loopback address"))?;
+    if !address.ip().is_loopback() {
+        return Err(Error::Denied("shared MCP HTTP must bind to loopback"));
+    }
+    let token = Arc::new(mcp_token(token_file)?);
+    let listener = TcpListener::bind(address)?;
+    let answer = Arc::new(answer);
+    let active = Arc::new(AtomicUsize::new(0));
+    println!("MCP listening on http://{}/mcp", listener.local_addr()?);
+    std::io::stdout().flush()?;
+    for stream in listener.incoming() {
+        let Ok(mut stream) = stream else { continue };
+        let Some(lease) = ConnectionLease::acquire(&active, MAX_HTTP_CONNECTIONS) else {
+            let _ = stream.set_nonblocking(true);
+            let _ = respond(&mut stream, 503, "text/plain", b"server busy");
+            continue;
+        };
+        let token = Arc::clone(&token);
+        let answer = Arc::clone(&answer);
+        std::thread::spawn(move || {
+            let _lease = lease;
+            let _ = stream.set_read_timeout(Some(TIMEOUT));
+            let _ = stream.set_write_timeout(Some(TIMEOUT));
+            let _ = handle_shared_mcp(stream, &token, &*answer);
+        });
+    }
+    Ok(())
+}
+
+fn handle_shared_mcp(
+    mut stream: TcpStream,
+    token: &str,
+    answer: &impl Fn(&Value) -> Option<Value>,
+) -> Result<()> {
+    let request = match read_request(&mut stream) {
+        Ok(request) => request,
+        Err(_) => return respond(&mut stream, 400, "text/plain", b"bad request"),
+    };
+    // Local harnesses do not send Origin. Refuse every browser origin,
+    // including null, before any login refresh or private store read.
+    if request.origin.is_some() {
+        return respond(&mut stream, 403, "text/plain", b"origin refused");
+    }
+    let authorized = request
+        .authorization
+        .as_deref()
+        .and_then(|h| h.strip_prefix("Bearer "))
+        .is_some_and(|presented| constant_time_eq(presented.as_bytes(), token.as_bytes()));
+    if !authorized {
+        return respond(&mut stream, 401, "text/plain", b"unauthorized");
+    }
+    match (request.method.as_str(), request.path.as_str()) {
+        ("GET", "/health") => respond(&mut stream, 200, "text/plain", b"ok"),
+        ("GET", "/mcp") => respond(&mut stream, 405, "text/plain", b"SSE is not supported"),
+        ("DELETE", "/mcp") => respond(&mut stream, 204, "text/plain", b""),
+        ("POST", "/mcp") => {
+            let message = match serde_json::from_slice::<Value>(&request.body) {
+                Ok(message) if message.is_object() => message,
+                _ => {
+                    return respond(
+                        &mut stream,
+                        400,
+                        "text/plain",
+                        b"expected one JSON-RPC object",
+                    )
+                }
+            };
+            match answer(&message) {
+                Some(value) => respond(
+                    &mut stream,
+                    200,
+                    "application/json",
+                    value.to_string().as_bytes(),
+                ),
+                None => respond(&mut stream, 202, "text/plain", b""),
+            }
+        }
+        _ => respond(&mut stream, 404, "text/plain", b"not found"),
+    }
+}
+
 pub fn serve(bind: &str, endpoint: Endpoint) -> Result<()> {
     let listener = TcpListener::bind(bind)?;
     let endpoint = Arc::new(endpoint);
@@ -2246,15 +2410,23 @@ pub fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
 fn read_request(stream: &mut TcpStream) -> Result<Request> {
     let mut reader = BufReader::new(stream);
     let mut head = Vec::new();
+    let mut header_bytes = 0;
 
     // read the header block one line at a time, bounded, because a client
     // that never sends a blank line must not be able to grow this forever
     loop {
         let mut line = String::new();
-        let read = reader.read_line(&mut line)?;
+        let read = reader
+            .by_ref()
+            .take((MAX_HEADERS - header_bytes + 1) as u64)
+            .read_line(&mut line)?;
 
         if read == 0 {
             return Err(Error::Malformed("connection closed mid request"));
+        }
+        header_bytes += read;
+        if header_bytes > MAX_HEADERS {
+            return Err(Error::Malformed("headers too large"));
         }
 
         if line == "\r\n" || line == "\n" {
@@ -2262,9 +2434,6 @@ fn read_request(stream: &mut TcpStream) -> Result<Request> {
         }
 
         head.push(line);
-        if head.iter().map(String::len).sum::<usize>() > MAX_HEADERS {
-            return Err(Error::Malformed("headers too large"));
-        }
     }
 
     let first = head.first().ok_or(Error::Malformed("no request line"))?;

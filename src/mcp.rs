@@ -690,6 +690,16 @@ impl Server {
         Ok(found)
     }
 
+    /// Preserve stdio by default; explicitly requested HTTP shares one server
+    /// across clients without giving any client broader grant authority.
+    pub fn run_transport(self, args: &[String]) -> Result<()> {
+        let (options, _) = crate::http::mcp_options(args)?;
+        match options {
+            Some((bind, token)) => crate::http::serve_mcp(&bind, &token, move |r| self.answer(r)),
+            None => self.run(std::io::stdin().lock(), std::io::stdout()),
+        }
+    }
+
     /// read a message, answer it, repeat. a notification has no id and gets no
     /// answer, which is the one framing rule that trips implementations up.
     pub fn run(&self, input: impl BufRead, mut output: impl Write) -> Result<()> {

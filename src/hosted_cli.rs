@@ -74,6 +74,11 @@ pub(crate) fn run(args: &Args) -> Result<()> {
         eprintln!("HC connection saved for {}. Next: hc login", profile.origin);
         return Ok(());
     }
+    let (http, transport_args) = if args.command == "mcp" {
+        crate::http::mcp_options(&args.rest)?
+    } else {
+        (None, args.rest.clone())
+    };
     let expected: &[&str] = if args.command == "login" && args.rest == ["--no-browser"] {
         &["--no-browser"]
     } else if matches!(args.command.as_str(), "mcp" | "status") {
@@ -81,7 +86,12 @@ pub(crate) fn run(args: &Args) -> Result<()> {
     } else {
         &[]
     };
-    if args.rest.iter().map(String::as_str).collect::<Vec<_>>() != expected {
+    if transport_args
+        .iter()
+        .map(String::as_str)
+        .collect::<Vec<_>>()
+        != expected
+    {
         return Err(Error::Malformed(
             "use hc login, hc logout, hc status --remote, or hc mcp --remote",
         ));
@@ -101,7 +111,10 @@ pub(crate) fn run(args: &Args) -> Result<()> {
             );
             Ok(())
         }
-        "mcp" => client.mcp(io::stdin().lock(), io::stdout().lock()),
+        "mcp" => match http {
+            Some((bind, token)) => crate::http::serve_mcp(&bind, &token, move |r| client.answer(r)),
+            None => client.mcp(io::stdin().lock(), io::stdout().lock()),
+        },
         _ => Err(Error::Malformed("unknown HC access command")),
     }
 }

@@ -152,6 +152,8 @@ short command: hc.
   hc peers                 list them
   hc ask <grant> [text]    read as that grant sees it, and log it
   hc mcp --as <grant>      serve that grant to an ai client
+    --bind 127.0.0.1:PORT --token-file <private-file>
+                          share one authenticated MCP process across clients
   hc serve-http --as <g>   the same, over http, for phones
                                   --company-access requires current member/device policy
   hc access device-new <private-key-file>
@@ -6424,7 +6426,7 @@ fn run() -> Result<()> {
             } else {
                 server
             };
-            server.run(io::stdin().lock(), io::stdout())
+            server.run_transport(&args.rest)
         }
 
         // the same agent surface for clients that cannot spawn a process,
