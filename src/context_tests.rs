@@ -131,26 +131,31 @@ fn retry_reopens_the_read_view_and_a_new_revocation_still_wins() {
         );
         FileExt::lock_exclusive(lock.as_ref().unwrap()).unwrap();
         let mut attempts = 0;
-        let result = retry_read(true, || {
-            attempts += 1;
-            let result = server.call_once("search", &json!({"query":"new evidence"}), (None, None));
-            if attempts == 1 {
-                assert!(result.as_ref().unwrap_err().is_read_contention());
-                drop(lock.take());
-                if revoke {
-                    append(
-                        &server.dir,
-                        &identity,
-                        &json!({
-                            "kind":"revoke", "grant":server.chain[0].id().hex(),
-                        })
-                        .to_string(),
-                    )
-                    .unwrap();
+        let result = retry_read_with_elapsed(
+            true,
+            || {
+                attempts += 1;
+                let result =
+                    server.call_once("search", &json!({"query":"new evidence"}), (None, None));
+                if attempts == 1 {
+                    assert!(result.as_ref().unwrap_err().is_read_contention());
+                    drop(lock.take());
+                    if revoke {
+                        append(
+                            &server.dir,
+                            &identity,
+                            &json!({
+                                "kind":"revoke", "grant":server.chain[0].id().hex(),
+                            })
+                            .to_string(),
+                        )
+                        .unwrap();
+                    }
                 }
-            }
-            result
-        });
+                result
+            },
+            || std::time::Duration::ZERO,
+        );
         assert_eq!(attempts, 2);
         if revoke {
             let error = result.unwrap_err();
@@ -171,12 +176,41 @@ fn retry_policy_is_bounded_and_never_replays_non_retryable_operations() {
         (true, "search snapshot prefix changed", 1),
     ] {
         let mut attempts = 0;
-        let result: Result<()> = retry_read(enabled, || {
-            attempts += 1;
-            Err(Error::Denied(error_message))
-        });
+        let result: Result<()> = retry_read_with_elapsed(
+            enabled,
+            || {
+                attempts += 1;
+                Err(Error::Denied(error_message))
+            },
+            || std::time::Duration::ZERO,
+        );
         assert!(result.is_err());
         assert_eq!(attempts, expected_attempts);
+    }
+}
+
+#[test]
+fn retry_deadline_stops_before_or_after_backoff() {
+    for expires_after_backoff in [false, true] {
+        let mut attempts = 0;
+        let mut clock_reads = 0;
+        let result: Result<()> = retry_read_with_elapsed(
+            true,
+            || {
+                attempts += 1;
+                Err(Error::Denied("search index is being refreshed"))
+            },
+            || {
+                clock_reads += 1;
+                std::time::Duration::from_millis(if expires_after_backoff && clock_reads == 1 {
+                    0
+                } else {
+                    250
+                })
+            },
+        );
+        assert!(result.unwrap_err().is_read_contention());
+        assert_eq!(attempts, 1);
     }
 }
 
