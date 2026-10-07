@@ -24,6 +24,8 @@ pub struct SearchHit {
 pub fn skill_roots(home: &Path) -> Vec<PathBuf> {
     [
         ".codex/skills",
+        ".codex/skills/.system",
+        ".codex/plugins/cache",
         ".claude/skills",
         ".hermes/skills",
         ".agents/skills",
@@ -32,6 +34,11 @@ pub fn skill_roots(home: &Path) -> Vec<PathBuf> {
     ]
     .into_iter()
     .map(|path| home.join(path))
+    .chain(
+        std::env::var_os("HC_SKILL_ROOTS")
+            .into_iter()
+            .flat_map(|p| std::env::split_paths(&p).collect::<Vec<_>>()),
+    )
     .collect()
 }
 
@@ -57,29 +64,67 @@ pub fn search_skills(roots: &[PathBuf], query: &str) -> Vec<SearchHit> {
             continue;
         };
         let (name, description) = skill_frontmatter(&body, &path);
-        let name_match = name.to_lowercase().contains(&needle);
-        let description_match = description.to_lowercase().contains(&needle);
-        if !name_match && !description_match && !body.to_lowercase().contains(&needle) {
+        let Some(rank) = skill_rank(&name, &description, &body, &needle) else {
             continue;
-        }
+        };
         hits.push(SearchHit {
             scope: "skill",
             label: name,
             path: Some(path),
             excerpt: compact(&description, 180),
-            rank: if name_match {
-                0
-            } else if description_match {
-                1
-            } else {
-                2
-            },
+            rank,
         });
     }
     let mut hits = dedupe_sort(hits);
     let mut names = BTreeSet::new();
     hits.retain(|hit| names.insert(hit.label.to_lowercase()));
     hits
+}
+
+// Discovery is lexical, not semantic: prefer exact names, then substantial
+// word overlap. One incidental word cannot satisfy a long capability request.
+fn terms(text: &str) -> BTreeSet<String> {
+    text.split(|c: char| !c.is_alphanumeric())
+        .filter(|s| !s.is_empty())
+        .map(str::to_lowercase)
+        .filter(|s| {
+            !matches!(
+                s.as_str(),
+                "a" | "an" | "the" | "and" | "or" | "for" | "to" | "of" | "in" | "with"
+            )
+        })
+        .collect()
+}
+
+fn skill_rank(name: &str, description: &str, body: &str, query: &str) -> Option<u8> {
+    let name = name.to_lowercase();
+    if name == query {
+        return Some(0);
+    }
+    if name.contains(query) {
+        return Some(1);
+    }
+    if description.to_lowercase().contains(query) {
+        return Some(2);
+    }
+    let query_terms = terms(query);
+    let metadata = terms(&format!("{name} {description}"));
+    let covered = query_terms.intersection(&metadata).count();
+    if !query_terms.is_empty() && covered == query_terms.len() {
+        return Some(3);
+    }
+    let body_lower = body.to_lowercase();
+    if body_lower.contains(query) {
+        return Some(4);
+    }
+    let required = query_terms.len().div_ceil(2).max(2);
+    if covered >= required {
+        let name_coverage = query_terms.intersection(&terms(&name)).count().min(3);
+        return Some(
+            5 + 4 * (query_terms.len() - covered).min(20) as u8 + (3 - name_coverage) as u8,
+        );
+    }
+    None
 }
 
 pub fn search_pkm(roots: &[PathBuf], query: &str) -> Vec<SearchHit> {
@@ -130,8 +175,11 @@ fn collect<F: Fn(&Path) -> bool>(roots: &[PathBuf], out: &mut Vec<PathBuf>, keep
         .collect();
     let mut visited = BTreeSet::new();
     while let Some((path, depth)) = stack.pop() {
-        if visited.len() >= MAX_VISITED || depth > MAX_DEPTH {
+        if visited.len() >= MAX_VISITED {
             break;
+        }
+        if depth > MAX_DEPTH {
+            continue;
         }
         let Ok(canonical) = path.canonicalize() else {
             continue;
@@ -160,7 +208,9 @@ fn collect<F: Fn(&Path) -> bool>(roots: &[PathBuf], out: &mut Vec<PathBuf>, keep
         let Ok(entries) = fs::read_dir(&canonical) else {
             continue;
         };
-        for entry in entries.flatten() {
+        let mut entries = entries.flatten().collect::<Vec<_>>();
+        entries.sort_by_key(|entry| entry.file_name());
+        for entry in entries.into_iter().rev() {
             if entry
                 .file_name()
                 .to_str()
@@ -260,7 +310,82 @@ mod tests {
         let hits = search_skills(&[root.path().to_path_buf()], "phone");
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].label, "phone-alerts");
-        assert_eq!(hits[0].rank, 0);
+        assert_eq!(hits[0].rank, 1);
+    }
+
+    #[test]
+    fn multiword_skill_discovery_prefers_coverage_and_rejects_incidental_words() {
+        let root = tempfile::tempdir().unwrap();
+        for (name, description) in [
+            (
+                "meeting-prep",
+                "Prepare for an upcoming call using calendar context",
+            ),
+            ("calendar", "Show your calendar"),
+            ("unrelated", "Send a notification"),
+        ] {
+            let path = root.path().join(name);
+            fs::create_dir(&path).unwrap();
+            fs::write(
+                path.join("SKILL.md"),
+                format!("---\nname: {name}\ndescription: {description}\n---\n"),
+            )
+            .unwrap();
+        }
+        let hits = search_skills(&[root.path().into()], "meeting prep calendar upcoming call");
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].label, "meeting-prep");
+        assert_eq!(
+            search_skills(&[root.path().into()], "calendar")[0].label,
+            "calendar"
+        );
+        assert!(search_skills(&[root.path().into()], "quantum satellite navigation").is_empty());
+    }
+
+    #[test]
+    fn equally_covered_capabilities_prefer_more_specific_names() {
+        let specific = skill_rank(
+            "canvas-design",
+            "Create editable layouts",
+            "",
+            "canvas mockup design",
+        )
+        .unwrap();
+        let broad = skill_rank(
+            "canvas",
+            "Import design content into video",
+            "",
+            "canvas mockup design",
+        )
+        .unwrap();
+        assert!(specific < broad);
+        assert_eq!(
+            skill_rank("canvas", "Import design content", "", "canvas"),
+            Some(0)
+        );
+    }
+
+    #[test]
+    fn discovers_system_and_versioned_plugin_skills() {
+        let home = tempfile::tempdir().unwrap();
+        for (directory, name) in [
+            (".codex/skills/.system/imagegen", "imagegen"),
+            (
+                ".codex/plugins/cache/vendor/documents/1.0/skills/documents",
+                "documents",
+            ),
+        ] {
+            let path = home.path().join(directory);
+            fs::create_dir_all(&path).unwrap();
+            fs::write(
+                path.join("SKILL.md"),
+                format!("---\nname: {name}\ndescription: Installed capability\n---\n"),
+            )
+            .unwrap();
+            let hits = search_skills(&skill_roots(home.path()), name);
+            assert_eq!(hits[0].label, name);
+            assert_eq!(hits[0].rank, 0);
+        }
     }
 
     #[test]

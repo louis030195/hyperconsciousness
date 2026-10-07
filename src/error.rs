@@ -100,6 +100,7 @@ impl Error {
                     | "snapshot changed during capture read"
                     | "snapshot changed during ranked read"
                     | "capture history changed during read"
+                    | "capture history changed during projection"
                     | "capture history changed during ranked read"
                     | "read tail changed throughout release check"
             )
@@ -118,6 +119,10 @@ impl Error {
             Error::Frozen(_) => "author_frozen",
             Error::Locked(_) => "store_locked",
             Error::Signature => "signature_invalid",
+            Error::Denied(
+                "ranked recall candidate budget exceeded; narrow kind, tags or dates"
+                | "ranked recall text budget exceeded; narrow kind, tags or dates",
+            ) => "query_limit_exceeded",
             Error::Denied(_) => "permission_denied",
             Error::WorkspaceChanged { .. } => "workspace_changed",
             Error::Expired => "grant_expired",

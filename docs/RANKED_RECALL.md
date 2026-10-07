@@ -35,6 +35,9 @@ control metadata. Tag, kind and date filters still narrow the authorized scope.
 
 The structured response uses `order: "relevance"` and
 `ranking: "bounded_lexical_bm25_v1"`. Output budgets and clipping still apply.
+Compact search excerpts center on the literal match or first matching query
+term, including matches deep in a long record. Clipping remains explicit;
+point reads preserve original text and formatting.
 `has_more` means matches remain beyond the selected/output window; `next_cursor`
 is null. Relevance search explicitly rejects chronological cursors. Refine the
 query/filters or increase the limit to retrieve more. Omitting `mode` preserves
@@ -44,9 +47,11 @@ chronological and rejects relevance mode.
 ## Resource and privacy boundaries
 
 - At most 4,096 UTF-8 query bytes and 32 distinct non-stopword query terms.
-- At most 10,000 matching candidates, 32 MiB of their JSON payloads, and 250,000
-  candidate tokens per call. Exceeding a bound returns an explicit error asking
-  for narrower filters, never a silently partial ranking. Results cap at 200.
+- At most 10,000 matching candidates, 32 MiB of their JSON payloads, 250,000
+  non-stopword tokens per document, and 4,000,000 across candidates per call.
+  Scoring retains query frequencies and adjacency flags rather than allocated
+  tokens for every word. Exceeding a bound returns `query_limit_exceeded`,
+  asking for narrower filters, never a silently partial ranking. Results cap at 200.
 - Persistent indexed reads route query terms through existing encrypted gram
   postings. Prefix verification and scoring happen on the authorized node.
   Snapshot and streaming readers provide the same result contract. No plaintext

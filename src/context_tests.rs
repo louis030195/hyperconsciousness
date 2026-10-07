@@ -171,6 +171,7 @@ fn retry_reopens_the_read_view_and_a_new_revocation_still_wins() {
 fn retry_policy_is_bounded_and_never_replays_non_retryable_operations() {
     for (enabled, error_message, expected_attempts) in [
         (true, "capture history changed during read", 3),
+        (true, "capture history changed during projection", 3),
         (false, "capture history changed during read", 1),
         (true, "grant revoked during read", 1),
         (true, "search snapshot prefix changed", 1),
@@ -635,4 +636,92 @@ fn relevance_resource_exhaustion_is_explicit_and_does_not_return_a_partial_answe
             )
             .is_ok());
     }
+}
+
+#[test]
+fn search_excerpts_include_tail_evidence_with_unicode_and_preserve_point_reads() {
+    let (_dir, identity, server) = setup();
+    let text = format!(
+        "{}The café agreement was renewed for twelve months.",
+        "İ 家族 header ".repeat(300)
+    );
+    note(&server, &identity, &text, PERSONAL);
+    for mode in ["literal", "relevance"] {
+        let mut args =
+            json!({"query":"café agreement", "format":"structured", "max_output_chars":1024});
+        if mode == "relevance" {
+            args["mode"] = json!(mode);
+        }
+        let page: Value = serde_json::from_str(&server.call("search", &args).unwrap()).unwrap();
+        let item = &page["items"][0];
+        assert!(item["text"]
+            .as_str()
+            .unwrap()
+            .contains("café agreement was renewed"));
+        assert_eq!(item["clipped"], true);
+        let record = server
+            .call(
+                "record",
+                &json!({"ref":item["ref"], "max_output_chars":16000}),
+            )
+            .unwrap();
+        assert!(record.contains("İ 家族 header"));
+    }
+    let (excerpt, clipped) = search_excerpt(&text, Some("café agreement"), 80);
+    assert!(excerpt.contains("café agreement was renewed"));
+    assert!(excerpt.chars().count() <= 80 && clipped);
+    assert_eq!(
+        search_excerpt(&text, Some("café agreement"), 0),
+        (String::new(), true)
+    );
+}
+
+#[test]
+fn ranked_recall_handles_several_long_records_without_retaining_all_tokens() {
+    let (_dir, identity, server) = setup();
+    note(&server, &identity, "evidence target exact answer", PERSONAL);
+    for n in 0..3 {
+        note(
+            &server,
+            &identity,
+            &format!("evidence {n} {}", "filler ".repeat(90_000)),
+            PERSONAL,
+        );
+    }
+    let output = server.call("search", &json!({"query":"evidence target", "mode":"relevance", "format":"structured", "limit":4})).unwrap();
+    let page: Value = serde_json::from_str(&output).unwrap();
+    assert_eq!(page["items"].as_array().unwrap().len(), 4);
+    assert!(page["items"][0]["text"]
+        .as_str()
+        .unwrap()
+        .contains("exact answer"));
+}
+
+#[test]
+fn store_lock_retry_is_bounded_and_disabled_for_non_replayable_operations() {
+    for enabled in [false, true] {
+        let mut attempts = 0;
+        let result: Result<()> = retry_read_with_elapsed(
+            enabled,
+            || {
+                attempts += 1;
+                Err(Error::Locked(DeviceId([0; 32])))
+            },
+            || std::time::Duration::ZERO,
+        );
+        assert!(matches!(result, Err(Error::Locked(_))));
+        assert_eq!(attempts, if enabled { 3 } else { 1 });
+    }
+}
+
+#[test]
+fn ranked_limits_are_distinct_from_permission_denials() {
+    let error =
+        Error::Denied("ranked recall candidate budget exceeded; narrow kind, tags or dates");
+    assert_eq!(error.code(), "query_limit_exceeded");
+    assert!(!error.retryable());
+    assert_eq!(
+        Error::Denied("grant revoked during read").code(),
+        "permission_denied"
+    );
 }

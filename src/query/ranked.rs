@@ -9,12 +9,14 @@
 
 use super::*;
 use serde_json::Value;
+use zeroize::Zeroizing;
 
 const MAX_QUERY_BYTES: usize = 4096;
 const MAX_TERMS: usize = 32;
 const MAX_CANDIDATES: usize = 10_000;
 const MAX_PAYLOAD_BYTES: usize = 32 * 1024 * 1024;
-const MAX_TOKENS: usize = 250_000;
+const MAX_DOCUMENT_TOKENS: usize = 250_000;
+const MAX_TOKENS: usize = 4_000_000;
 
 fn stop(word: &str) -> bool {
     matches!(
@@ -71,14 +73,10 @@ fn matches(word: &str, term: &str) -> bool {
 
 struct Document {
     record: Record,
-    tokens: Vec<String>,
+    length: usize,
+    frequencies: Vec<usize>,
+    adjacent: Vec<bool>,
     content_key: Hash,
-}
-
-impl Drop for Document {
-    fn drop(&mut self) {
-        self.tokens.zeroize();
-    }
 }
 
 struct Corpus {
@@ -136,26 +134,49 @@ impl Corpus {
                 "ranked recall text budget exceeded; narrow kind, tags or dates",
             ));
         }
-        let mut tokens: Vec<_> = text
+        // Keep only query-specific statistics, not every token's allocated
+        // String. Work remains bounded by document, corpus and payload limits.
+        let mut frequencies = vec![0usize; self.terms.len()];
+        let mut adjacent = vec![false; self.terms.len().saturating_sub(1)];
+        let mut previous = vec![false; self.terms.len()];
+        let mut length = 0usize;
+        for raw in text
             .split(|c: char| !c.is_alphanumeric())
             .filter(|s| !s.is_empty())
-            .map(str::to_lowercase)
-            .filter(|s| !stop(s))
-            .take(MAX_TOKENS + 1)
-            .collect();
-        if self.documents.len() >= MAX_CANDIDATES || self.token_count + tokens.len() > MAX_TOKENS {
-            tokens.zeroize();
+        {
+            let word = Zeroizing::new(raw.to_lowercase());
+            if stop(&word) {
+                continue;
+            }
+            length += 1;
+            if length > MAX_DOCUMENT_TOKENS || self.token_count + length > MAX_TOKENS {
+                return Err(Error::Denied(
+                    "ranked recall candidate budget exceeded; narrow kind, tags or dates",
+                ));
+            }
+            for (i, term) in self.terms.iter().enumerate().rev() {
+                let matched = matches(&word, term);
+                frequencies[i] += usize::from(matched);
+                if i > 0 && matched && previous[i - 1] {
+                    adjacent[i - 1] = true;
+                }
+                previous[i] = matched;
+            }
+        }
+        if self.documents.len() >= MAX_CANDIDATES {
             return Err(Error::Denied(
                 "ranked recall candidate budget exceeded; narrow kind, tags or dates",
             ));
         }
         self.payload_bytes += payload.len();
-        self.token_count += tokens.len();
+        self.token_count += length;
         self.documents.insert(
             record.id(),
             Document {
                 record,
-                tokens,
+                length,
+                frequencies,
+                adjacent,
                 content_key: Hash::of(text.as_bytes()),
             },
         );
@@ -164,19 +185,15 @@ impl Corpus {
 
     fn finish(self, effective: &Grant, filter: &Filter, now: u64) -> Answer {
         let n = self.documents.len() as f64;
-        let average = self
-            .documents
-            .values()
-            .map(|d| d.tokens.len())
-            .sum::<usize>() as f64
-            / n.max(1.0);
+        let average = self.documents.values().map(|d| d.length).sum::<usize>() as f64 / n.max(1.0);
         let df: Vec<_> = self
             .terms
             .iter()
-            .map(|term| {
+            .enumerate()
+            .map(|(i, _term)| {
                 self.documents
                     .values()
-                    .filter(|d| d.tokens.iter().any(|w| matches(w, term)))
+                    .filter(|d| d.frequencies[i] > 0)
                     .count() as f64
             })
             .collect();
@@ -186,28 +203,20 @@ impl Corpus {
             .map(|doc| {
                 let mut score = 0.0;
                 let mut covered = 0;
-                for (i, term) in self.terms.iter().enumerate() {
-                    let tf = doc.tokens.iter().filter(|w| matches(w, term)).count() as f64;
+                for (i, _) in self.terms.iter().enumerate() {
+                    let tf = doc.frequencies[i] as f64;
                     if tf == 0.0 {
                         continue;
                     }
                     covered += 1;
                     let idf = (1.0 + (n - df[i] + 0.5) / (df[i] + 0.5)).ln();
                     score += idf * tf * 2.2
-                        / (tf + 1.2 * (0.25 + 0.75 * doc.tokens.len() as f64 / average.max(1.0)));
+                        / (tf + 1.2 * (0.25 + 0.75 * doc.length as f64 / average.max(1.0)));
                 }
                 score += 2.0 * covered as f64 / self.terms.len() as f64;
                 // Adjacent query words retain order information lost by bag-of-words.
                 // This is a generic lexical feature, not a fact/relationship parser.
-                for pair in self.terms.windows(2) {
-                    if doc
-                        .tokens
-                        .windows(2)
-                        .any(|w| matches(&w[0], &pair[0]) && matches(&w[1], &pair[1]))
-                    {
-                        score += 0.5;
-                    }
-                }
+                score += 0.5 * doc.adjacent.iter().filter(|matched| **matched).count() as f64;
                 (score, doc)
             })
             .collect();

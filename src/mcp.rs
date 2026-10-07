@@ -1047,7 +1047,8 @@ impl Server {
                             .unwrap_or(0);
                         let body_chars =
                             match_chars.min(fair_share.saturating_sub(prefix.len() + 1));
-                        let (text, was_clipped) = compact_text(&text, body_chars);
+                        let (text, was_clipped) =
+                            search_excerpt(&text, filter.text.as_deref(), body_chars);
                         clipped += usize::from(was_clipped);
 
                         // date and id on every line, so a model can say when
@@ -2026,6 +2027,52 @@ fn compact_text(text: &str, max_chars: usize) -> (String, bool) {
     (out, clipped)
 }
 
+/// Spend the excerpt budget on the matching passage, not just record headers.
+/// Offsets are character-based so case folding cannot split UTF-8 boundaries.
+/// Point reads still return the original complete evidence and formatting.
+fn search_excerpt(text: &str, query: Option<&str>, max_chars: usize) -> (String, bool) {
+    let Some(query) = query.filter(|q| !q.trim().is_empty()) else {
+        return compact_text(text, max_chars);
+    };
+    let normalized = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    let lower = normalized.to_lowercase();
+    let query = query
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_lowercase();
+    let position = lower.find(&query).or_else(|| {
+        query
+            .split(|c: char| !c.is_alphanumeric())
+            .filter(|t| t.chars().count() >= 3)
+            .filter_map(|term| lower.find(term))
+            .min()
+    });
+    let Some(position) = position else {
+        return compact_text(&normalized, max_chars);
+    };
+    // Map the folded prefix back to source character indices (e.g. İ expands).
+    let mut folded_bytes = 0;
+    let mut match_char: usize = 0;
+    for c in normalized.chars() {
+        if folded_bytes >= position {
+            break;
+        }
+        folded_bytes += c.to_lowercase().map(char::len_utf8).sum::<usize>();
+        match_char += 1;
+    }
+    let start = match_char.saturating_sub(max_chars / 4);
+    if start == 0 {
+        return compact_text(&normalized, max_chars);
+    }
+    if max_chars == 0 {
+        return (String::new(), !normalized.is_empty());
+    }
+    let tail: String = normalized.chars().skip(start).collect();
+    let (excerpt, _) = compact_text(&tail, max_chars.saturating_sub(1));
+    (format!("…{excerpt}"), true)
+}
+
 /// The point-read tool preserves formatting; it only cuts on a character
 /// boundary and makes the cut explicit.
 fn clip_text(text: &str, max_chars: usize) -> (String, bool) {
@@ -2084,7 +2131,7 @@ fn structured_search_page(
         let mut candidate;
         loop {
             let (excerpt, clipped) = if compact {
-                compact_text(&text, allowed_chars)
+                search_excerpt(&text, filter.text.as_deref(), allowed_chars)
             } else {
                 clip_text(&text, allowed_chars)
             };
@@ -2264,7 +2311,7 @@ fn retry_read_with_elapsed<T>(
         match read() {
             Err(error)
                 if enabled
-                    && error.is_read_contention()
+                    && (error.is_read_contention() || matches!(error, Error::Locked(_)))
                     && attempt < 2
                     && elapsed() < std::time::Duration::from_millis(250) =>
             {
