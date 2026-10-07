@@ -249,28 +249,34 @@ impl Client {
                     continue;
                 }
             };
-            let result = (|| {
-                validate_rpc(&request)?;
-                let c = self.credentials()?;
-                self.post("/mcp", &request, Some(&c.access_token))
-            })();
-            if request.get("id").is_none() {
+            let Some(response) = self.answer(&request) else {
                 continue;
-            }
-            let id = request
-                .get("id")
-                .filter(|id| {
-                    id.is_null() || id.is_number() || id.as_str().is_some_and(|s| s.len() <= 1024)
-                })
-                .cloned()
-                .unwrap_or(Value::Null);
-            let response = result.unwrap_or_else(|error| {
-                let (code, message) = rpc_failure(&error);
-                json!({"jsonrpc":"2.0","id":id,"error":{"code":code,"message":message}})
-            });
+            };
             writeln!(output, "{response}")?;
             output.flush()?;
         }
+    }
+
+    /// The same authenticated request path for stdio and shared HTTP clients.
+    pub fn answer(&self, request: &Value) -> Option<Value> {
+        let result = (|| {
+            validate_rpc(request)?;
+            let c = self.credentials()?;
+            self.post("/mcp", request, Some(&c.access_token))
+        })();
+        request.get("id")?;
+        let id = request
+            .get("id")
+            .filter(|id| {
+                id.is_null() || id.is_number() || id.as_str().is_some_and(|s| s.len() <= 1024)
+            })
+            .cloned()
+            .unwrap_or(Value::Null);
+        let response = result.unwrap_or_else(|error| {
+            let (code, message) = rpc_failure(&error);
+            json!({"jsonrpc":"2.0","id":id,"error":{"code":code,"message":message}})
+        });
+        Some(response)
     }
 }
 

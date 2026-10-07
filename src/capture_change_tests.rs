@@ -34,24 +34,32 @@ fn read_retry_discards_results_superseded_during_release_validation() {
         let keys = RuntimeKeys::open(&server.dir, &identity).unwrap();
         let heads = store.cache_heads().unwrap();
         let mut attempts = 0;
-        let output = retry_read(true, || {
-            attempts += 1;
-            let output = server.call_once("search", &json!({"query":"evidence"}), (None, None))?;
-            if attempts == 1 {
-                assert!(output.contains("obsolete evidence"));
-                write(&server, args(vec![change("changing", 2, replacement)]));
-                // Simulate the final release check seeing a concurrent managed
-                // update after query formatting but before exposing the result.
-                hyperconsciousness::search_index::validate_read_tail(
-                    &store,
-                    &keys,
-                    &heads,
-                    &server.chain,
-                )?;
-                panic!("a concurrent correction must invalidate the old result");
-            }
-            Ok(output)
-        })
+        // Disk-backed setup inside the first attempt is not a timing test.
+        // Use a fixed clock so parallel CI load cannot exhaust the real 250 ms
+        // retry budget before this test exercises fresh release validation.
+        let output = retry_read_with_elapsed(
+            true,
+            || {
+                attempts += 1;
+                let output =
+                    server.call_once("search", &json!({"query":"evidence"}), (None, None))?;
+                if attempts == 1 {
+                    assert!(output.contains("obsolete evidence"));
+                    write(&server, args(vec![change("changing", 2, replacement)]));
+                    // Simulate the final release check seeing a concurrent managed
+                    // update after query formatting but before exposing the result.
+                    hyperconsciousness::search_index::validate_read_tail(
+                        &store,
+                        &keys,
+                        &heads,
+                        &server.chain,
+                    )?;
+                    panic!("a concurrent correction must invalidate the old result");
+                }
+                Ok(output)
+            },
+            || std::time::Duration::ZERO,
+        )
         .unwrap();
         assert_eq!(attempts, 2);
         assert!(!output.contains("obsolete evidence"));

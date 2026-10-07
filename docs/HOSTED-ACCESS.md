@@ -52,3 +52,52 @@ server-availability failure, not evidence that another Google login will fix it.
 The hosted adapter does not enable the separate owner-signed member/device
 policy API documented in COMPANY-ACCESS.md. Hosts must select and validate their
 own access architecture. Neither path grants access to personal HC implicitly.
+
+## Share one local MCP process across clients
+
+A stdio connection intentionally owns one `hc mcp` process until its input
+closes. Clients that keep many chats open can therefore retain many processes
+and duplicate personal query caches. For a desktop client with Streamable HTTP
+support, run one authenticated loopback endpoint per connection instead:
+
+```bash
+# Create a private random token once. Do not print it or pass it in arguments.
+(umask 077; openssl rand -hex 32 > /private/path/company-mcp.token)
+hc mcp --remote --bind 127.0.0.1:7783 \
+  --token-file /private/path/company-mcp.token
+
+# Personal access uses its existing grant, independently of the company login.
+hc mcp --as <grant-id> --dir /private/brain --bind 127.0.0.1:7782 \
+  --token-file /private/path/personal-mcp.token
+```
+
+Configure clients with the corresponding `http://127.0.0.1:PORT/mcp` URL and
+`Authorization: Bearer <token>` using their protected credential configuration.
+Use a different token for each endpoint and keep that configuration private.
+The token file must already exist, contain at least 32 non-whitespace ASCII
+characters, and on Unix be a regular file owned by the user with mode `0600`.
+The command prints only the listening URL. It creates no grant or service and
+never reads a personal store when `--remote` is selected. Supervise each
+endpoint using the host's existing service manager when persistent operation
+is wanted. Rotate a token by replacing the file, restarting that endpoint and
+updating its clients.
+
+The endpoint accepts only numeric loopback binds, refuses browser `Origin`
+headers, limits active connections to 64, and applies the existing bounded
+HTTP parser and connection deadlines. Authentication is required even for
+`GET /health`. Requests are stateless JSON-RPC POSTs; notifications return 202,
+GET streaming is unsupported, and DELETE does not stop the shared process.
+The personal handler rechecks the original grant on reads; the company handler
+uses the same login refresh, current membership checks and redacted failures as
+stdio. This transport adds no local authorization bypass or fallback store.
+
+Changing client configuration affects new connections. Let old stdio clients
+close normally or reload the relevant client session after in-flight work has
+finished. Killing an old process alone does not migrate its client connection.
+The default stdio interface remains unchanged for clients without HTTP support.
+
+A shared personal server can outlive an on-disk cache generation. If a derived
+metadata or postings shard disappears, HC drops that stale process cache and
+repairs the missing shard from its signed log segment under the publisher lock.
+Other log segments and signed history remain unchanged. Concurrent ingestion
+can still return a bounded `read_contention` error; retry the same read shortly.

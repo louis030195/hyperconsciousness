@@ -304,8 +304,9 @@ impl Index {
 
         if let Some(index) = cached.as_mut() {
             let previous_heads = index.heads.clone();
+            let repaired = index.repair_missing_segments(store, keys)?;
             if index.refresh(store, keys)? {
-                if index.heads != previous_heads {
+                if repaired || index.heads != previous_heads {
                     index.generation = index.generation.saturating_add(1);
                     index.save_manifest(keys)?;
                 }
@@ -320,6 +321,47 @@ impl Index {
         rebuilt.generation = generation;
         rebuilt.save_manifest(keys)?;
         Ok(rebuilt)
+    }
+
+    /// A cache shard can disappear after an older reader publishes a manifest
+    /// or after interrupted maintenance. Reconstruct only the affected signed
+    /// log segments while holding the publisher lock, never a lifetime scan.
+    fn repair_missing_segments<K: DataKeys + ?Sized>(
+        &mut self,
+        store: &Store,
+        keys: &K,
+    ) -> Result<bool> {
+        let mut missing = BTreeSet::new();
+        for segment in &self.segments {
+            for name in [&segment.file, &segment.postings_file] {
+                let path = segments_dir(&self.root).join(name);
+                guard::no_symlink(&path)?;
+                match fs::symlink_metadata(&path) {
+                    Ok(metadata) if metadata.is_file() => {}
+                    Ok(_) => return Err(Error::Denied("search cache shard is not a regular file")),
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                        missing.insert((segment.author, segment.log_segment));
+                    }
+                    Err(error) => return Err(error.into()),
+                }
+            }
+        }
+        if missing.is_empty() {
+            return Ok(false);
+        }
+        self.captures = OnceLock::new();
+        for (author, segment) in missing {
+            let head = self
+                .heads
+                .iter()
+                .find(|(a, _)| *a == author)
+                .ok_or(Error::Malformed("search shard has no signed head"))?
+                .1;
+            let mut records = store.log(author)?.read_located_segment(segment)?;
+            records.retain(|record| record.record.seq <= head.seq);
+            self.replace_segment(keys, author, segment, &records)?;
+        }
+        Ok(true)
     }
 
     pub fn is_current(&self, store: &Store) -> Result<bool> {
@@ -791,7 +833,7 @@ impl Index {
         descriptor: &SegmentRef,
     ) -> Result<Segment> {
         let path = segments_dir(&self.root).join(&descriptor.file);
-        let bytes = durable::read_bounded(&path, MAX_SEGMENT_BYTES)?;
+        let bytes = read_cache_shard(&path)?;
         if Hash::of(&bytes) != descriptor.ciphertext {
             return Err(Error::Denied("search index segment hash changed"));
         }
@@ -806,7 +848,7 @@ impl Index {
         entry_count: usize,
     ) -> Result<BTreeMap<u64, Vec<u32>>> {
         let path = segments_dir(&self.root).join(&descriptor.postings_file);
-        let bytes = durable::read_bounded(&path, MAX_SEGMENT_BYTES)?;
+        let bytes = read_cache_shard(&path)?;
         if Hash::of(&bytes) != descriptor.postings_ciphertext {
             return Err(Error::Denied("search index postings hash changed"));
         }
@@ -1857,6 +1899,15 @@ fn segment_file_name<K: DataKeys + ?Sized>(
     Ok(Hash(*blake3::keyed_hash(&derived, &input).as_bytes()).hex())
 }
 
+fn read_cache_shard(path: &Path) -> Result<Vec<u8>> {
+    durable::read_bounded(path, MAX_SEGMENT_BYTES).map_err(|error| match error {
+        Error::Io(ref io) if io.kind() == std::io::ErrorKind::NotFound => {
+            Error::Denied("search index cache shard is missing")
+        }
+        other => other,
+    })
+}
+
 fn prepare_cache(root: &Path) -> Result<()> {
     let cache = root.join("cache");
     guard::no_symlink(&cache)?;
@@ -2425,6 +2476,56 @@ mod tests {
         }
         log.append_new_batch(&records, &mut log.cache_head().unwrap())
             .unwrap();
+    }
+
+    #[test]
+    fn missing_cache_shards_are_repaired_from_only_their_signed_log_segment() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::open(root.path()).unwrap();
+        let key = random_key();
+        for _ in 0..2 {
+            let signing = SigningKey::generate(&mut OsRng);
+            append(
+                &store,
+                &signing,
+                &key,
+                &[serde_json::json!({"kind":"note","text":"canary"}).to_string()],
+            );
+        }
+        let keys = CountingKeys {
+            key,
+            opened: Cell::new(0),
+        };
+        let fingerprint = Hash::of(b"missing shard fixture");
+        let mut index = Index::load_or_build(root.path(), &store, &keys, fingerprint).unwrap();
+        let heads = store.cache_heads().unwrap();
+        for postings in [false, true] {
+            let descriptor = &index.segments[0];
+            let name = if postings {
+                &descriptor.postings_file
+            } else {
+                &descriptor.file
+            };
+            fs::remove_file(segments_dir(root.path()).join(name)).unwrap();
+            keys.opened.set(0);
+            index = Index::load_or_build(root.path(), &store, &keys, fingerprint).unwrap();
+            for descriptor in &index.segments {
+                let segment = index.open_segment(&keys, descriptor).unwrap();
+                index
+                    .open_postings(&keys, descriptor, segment.entries.len())
+                    .unwrap();
+            }
+            assert_eq!(
+                keys.opened.get(),
+                1,
+                "repair only the affected signed segment"
+            );
+            assert_eq!(
+                store.cache_heads().unwrap(),
+                heads,
+                "repair must not write history"
+            );
+        }
     }
 
     #[test]
