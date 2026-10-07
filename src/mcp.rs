@@ -823,7 +823,18 @@ impl Server {
         // Resolve relative dates once without changing the cursor's binding to
         // the caller's original arguments. Authorization time remains fresh.
         let window = (since(arguments.get("since")), since(arguments.get("until")));
-        retry_read(retry, || self.call_once(name, arguments, window))
+        retry_read(retry, || {
+            let result = self.call_once(name, arguments, window);
+            if matches!(
+                &result,
+                Err(Error::Denied("search index cache shard is missing"))
+            ) {
+                // Drop the stale resident manifest. A fresh load repairs only
+                // missing derived shards under the index publisher lock.
+                *self.search_cache.lock().unwrap_or_else(|p| p.into_inner()) = None;
+            }
+            result
+        })
     }
 
     fn call_once(
@@ -2239,18 +2250,26 @@ impl RememberInput {
     }
 }
 
-fn retry_read<T>(enabled: bool, mut read: impl FnMut() -> Result<T>) -> Result<T> {
+fn retry_read<T>(enabled: bool, read: impl FnMut() -> Result<T>) -> Result<T> {
     let start = std::time::Instant::now();
+    retry_read_with_elapsed(enabled, read, || start.elapsed())
+}
+
+fn retry_read_with_elapsed<T>(
+    enabled: bool,
+    mut read: impl FnMut() -> Result<T>,
+    mut elapsed: impl FnMut() -> std::time::Duration,
+) -> Result<T> {
     for attempt in 0..3 {
         match read() {
             Err(error)
                 if enabled
                     && error.is_read_contention()
                     && attempt < 2
-                    && start.elapsed() < std::time::Duration::from_millis(250) =>
+                    && elapsed() < std::time::Duration::from_millis(250) =>
             {
                 std::thread::sleep(std::time::Duration::from_millis(10 << attempt));
-                if start.elapsed() >= std::time::Duration::from_millis(250) {
+                if elapsed() >= std::time::Duration::from_millis(250) {
                     return Err(error);
                 }
             }

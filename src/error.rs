@@ -92,6 +92,7 @@ impl Error {
             self,
             Error::Denied(
                 "search index is being refreshed"
+                    | "search index cache shard is missing"
                     | "search index changed during query"
                     | "search index changed during point read"
                     | "search index changed during overview"

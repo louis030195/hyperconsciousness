@@ -95,3 +95,9 @@ Changing client configuration affects new connections. Let old stdio clients
 close normally or reload the relevant client session after in-flight work has
 finished. Killing an old process alone does not migrate its client connection.
 The default stdio interface remains unchanged for clients without HTTP support.
+
+A shared personal server can outlive an on-disk cache generation. If a derived
+metadata or postings shard disappears, HC drops that stale process cache and
+repairs the missing shard from its signed log segment under the publisher lock.
+Other log segments and signed history remain unchanged. Concurrent ingestion
+can still return a bounded `read_contention` error; retry the same read shortly.
