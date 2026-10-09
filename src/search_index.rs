@@ -8,7 +8,8 @@
 //! local byte coordinates separately from opaque gram postings, with an
 //! authenticated filter routing queries to candidate posting shards. It is
 //! split along the log's bounded immutable segments, so a tail append rebuilds
-//! only the active segment instead of decrypting a person's lifetime.
+//! only the new signed tail, reusing authenticated metadata and postings for
+//! its unchanged prefix instead of decrypting old records again.
 //! Every manifest is bound to the exact usable-key fingerprint and signed
 //! heads. Missing, stale, corrupt or rolled-back bytes can only force a rebuild
 //! or the ordinary full-scan fallback; they can never widen a grant.
@@ -596,7 +597,36 @@ impl Index {
                     // The active file may have grown after `before` was pinned.
                     // Its shard must describe only that verified prefix.
                     complete.retain(|located| located.record.seq <= current.seq);
-                    next.replace_segment(keys, *author, segment, &complete)?;
+                    // The old descriptor is authenticated under this exact key/cutoff
+                    // view. The tail above proved its predecessor chain to the new
+                    // head. Reuse its projection, but rebuild from signed records if
+                    // a derived shard disappeared or was damaged.
+                    let prefix = if keys.cache_identity() == Some(self.fingerprint) {
+                        self.segments
+                            .iter()
+                            .find(|s| s.author == *author && s.log_segment == segment)
+                            .and_then(|descriptor| {
+                                let mut prefix = self.open_segment(keys, descriptor).ok()?;
+                                prefix.grams = self
+                                    .open_postings(keys, descriptor, prefix.entries.len())
+                                    .ok()?;
+                                Some(prefix)
+                            })
+                    } else {
+                        None
+                    };
+                    if let Some(mut prefix) = prefix {
+                        complete.retain(|located| located.record.seq > old_head.seq);
+                        Self::extend_segment(keys, *author, segment, &complete, &mut prefix)?;
+                        let descriptor = self.persist_segment(keys, *author, segment, &prefix)?;
+                        next.segments
+                            .retain(|s| s.author != *author || s.log_segment != segment);
+                        if let Some(descriptor) = descriptor {
+                            next.segments.push(descriptor);
+                        }
+                    } else {
+                        next.replace_segment(keys, *author, segment, &complete)?;
+                    }
                 }
             }
 
@@ -703,6 +733,17 @@ impl Index {
             entries: Vec::new(),
             grams: BTreeMap::new(),
         };
+        Self::extend_segment(keys, author, log_segment, records, &mut segment)?;
+        self.persist_segment(keys, author, log_segment, &segment)
+    }
+
+    fn extend_segment<K: DataKeys + ?Sized>(
+        keys: &K,
+        author: DeviceId,
+        log_segment: u32,
+        records: &[LocatedRecord],
+        segment: &mut Segment,
+    ) -> Result<()> {
         for located in records {
             if located.record.author != author || located.location.segment != log_segment {
                 return Err(Error::Malformed("search segment mixes log coordinates"));
@@ -742,6 +783,16 @@ impl Index {
                 capture: crate::capture_state::Meta::from_payload(&payload)?,
             });
         }
+        Ok(())
+    }
+
+    fn persist_segment<K: DataKeys + ?Sized>(
+        &self,
+        keys: &K,
+        author: DeviceId,
+        log_segment: u32,
+        segment: &Segment,
+    ) -> Result<Option<SegmentRef>> {
         if segment.entries.is_empty() {
             return Ok(None);
         }
@@ -1988,6 +2039,10 @@ mod tests {
     }
 
     impl DataKeys for CountingKeys {
+        fn cache_identity(&self) -> Option<Hash> {
+            Some(Hash::of(self.key.as_slice()))
+        }
+
         fn current_epoch(&self) -> u32 {
             1
         }
@@ -2113,6 +2168,95 @@ mod tests {
             fired: Cell::new(false),
         };
         assert!(validate_read_tail(&store, &keys, &heads, &[grant]).is_err());
+    }
+
+    #[test]
+    fn warm_refresh_opens_only_appended_records_and_matches_a_cold_rebuild() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::open(root.path()).unwrap();
+        let signing = SigningKey::generate(&mut OsRng);
+        let keys = CountingKeys {
+            key: random_key(),
+            opened: Cell::new(0),
+        };
+        let fingerprint = Hash::of(keys.key.as_slice());
+        append(
+            &store,
+            &signing,
+            &keys.key,
+            &(0..1000)
+                .map(|n| format!(r#"{{"kind":"note","text":"history {n}"}}"#))
+                .collect::<Vec<_>>(),
+        );
+        let mut index = Index::load_or_build(root.path(), &store, &keys, fingerprint).unwrap();
+        for n in 0..3 {
+            append(
+                &store,
+                &signing,
+                &keys.key,
+                &[format!(r#"{{"kind":"read","text":"audit {n}"}}"#)],
+            );
+            keys.opened.set(0);
+            let started = std::time::Instant::now();
+            assert!(index.refresh_current(&store, &keys, fingerprint).unwrap());
+            eprintln!(
+                "warm refresh: {:?}, record opens: {}",
+                started.elapsed(),
+                keys.opened.get()
+            );
+            assert_eq!(
+                keys.opened.get(),
+                1,
+                "old signed records must not be decrypted again"
+            );
+        }
+        let cold = Index::build(root.path(), &store, &keys, fingerprint).unwrap();
+        for (warm, rebuilt) in index.segments.iter().zip(&cold.segments) {
+            let a = index.open_segment(&keys, warm).unwrap();
+            let b = cold.open_segment(&keys, rebuilt).unwrap();
+            assert_eq!(
+                a.encode_metadata(warm.author, warm.log_segment).unwrap(),
+                b.encode_metadata(rebuilt.author, rebuilt.log_segment)
+                    .unwrap()
+            );
+            assert_eq!(
+                index.open_postings(&keys, warm, a.entries.len()).unwrap(),
+                cold.open_postings(&keys, rebuilt, b.entries.len()).unwrap()
+            );
+        }
+        assert_eq!(index.segments.len(), cold.segments.len());
+    }
+
+    #[test]
+    fn incremental_refresh_repairs_damaged_prefix_shards() {
+        for missing in [false, true] {
+            let root = tempfile::tempdir().unwrap();
+            let store = Store::open(root.path()).unwrap();
+            let signing = SigningKey::generate(&mut OsRng);
+            let keys = CountingKeys {
+                key: random_key(),
+                opened: Cell::new(0),
+            };
+            let fingerprint = Hash::of(keys.key.as_slice());
+            append(&store, &signing, &keys.key, &["original needle".into()]);
+            let mut index = Index::load_or_build(root.path(), &store, &keys, fingerprint).unwrap();
+            let path = segments_dir(root.path()).join(&index.segments[0].postings_file);
+            if missing {
+                fs::remove_file(path).unwrap();
+            } else {
+                fs::write(path, b"damaged").unwrap();
+            }
+            append(&store, &signing, &keys.key, &["new needle".into()]);
+            keys.opened.set(0);
+            assert!(index.refresh_current(&store, &keys, fingerprint).unwrap());
+            assert_eq!(keys.opened.get(), 2, "damaged derived state must rebuild");
+            let segment = index.open_segment(&keys, &index.segments[0]).unwrap();
+            assert_eq!(segment.entries.len(), 2);
+            assert!(!index
+                .open_postings(&keys, &index.segments[0], 2)
+                .unwrap()
+                .is_empty());
+        }
     }
 
     #[test]
