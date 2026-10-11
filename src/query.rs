@@ -25,6 +25,7 @@ use crate::keyring::DataKeys;
 use crate::log::{Head, Store};
 use crate::record::Record;
 
+pub mod health;
 pub mod ranked;
 
 fn verify_authority<K: DataKeys + ?Sized>(

@@ -169,6 +169,154 @@ enum SummaryAccess {
 }
 
 impl Index {
+    /// Typed medical evidence cached per authenticated immutable search segment.
+    /// Reuses v8 rather than forcing a lifetime search-index rebuild. Only the
+    /// active changed segment needs reopening; no plaintext health files.
+    pub fn health_evidence<K: DataKeys + ?Sized>(
+        &self,
+        store: &Store,
+        keys: &K,
+        metrics: &[&str],
+    ) -> Result<Vec<crate::query::health::Evidence>> {
+        const CONTEXT: &str = "hyperconsciousness typed health shard v1";
+        #[derive(serde::Deserialize)]
+        struct HealthShard {
+            segment: String,
+            keys: String,
+            rows: Vec<crate::query::health::Evidence>,
+        }
+        #[derive(serde::Serialize, serde::Deserialize)]
+        struct HealthMeta {
+            segment: String,
+            keys: String,
+            metrics: BTreeSet<String>,
+            lifecycle: bool,
+        }
+        let mut rows = Vec::new();
+        for descriptor in &self.segments {
+            if descriptor
+                .tags
+                .as_ref()
+                .is_some_and(|tags| !tags.iter().any(|t| t == "health"))
+            {
+                continue;
+            }
+            let name = segment_file_name(
+                keys,
+                descriptor.author,
+                descriptor.log_segment,
+                b'h',
+                descriptor.ciphertext,
+            )?;
+            let path = segments_dir(&self.root).join(format!("{name}.health-v1"));
+            guard::no_symlink(&path)?;
+            let meta_path = segments_dir(&self.root).join(format!("{name}.health-meta-v1"));
+            guard::no_symlink(&meta_path)?;
+            let meta = durable::read_bounded(&meta_path, 64 * 1024)
+                .ok()
+                .and_then(|bytes| {
+                    open_bytes(
+                        b"BHM1",
+                        "hyperconsciousness typed health metadata v1",
+                        keys,
+                        &bytes,
+                    )
+                    .ok()
+                })
+                .and_then(|bytes| serde_json::from_slice::<HealthMeta>(&bytes).ok())
+                .filter(|v| {
+                    v.segment == descriptor.ciphertext.hex() && v.keys == self.fingerprint.hex()
+                });
+            if meta.as_ref().is_some_and(|m| {
+                !metrics.is_empty()
+                    && !m.lifecycle
+                    && !metrics.iter().any(|metric| m.metrics.contains(*metric))
+            }) {
+                continue;
+            }
+            let cached = durable::read_bounded(&path, MAX_SEGMENT_BYTES)
+                .ok()
+                .and_then(|bytes| open_bytes(b"BHQ1", CONTEXT, keys, &bytes).ok())
+                .and_then(|bytes| serde_json::from_slice::<HealthShard>(&bytes).ok())
+                .filter(|v| {
+                    v.segment == descriptor.ciphertext.hex() && v.keys == self.fingerprint.hex()
+                })
+                .map(|v| v.rows);
+            let segment_rows = if let Some(rows) = cached {
+                rows
+            } else {
+                let segment = self.open_segment(keys, descriptor)?;
+                let mut rows = Vec::new();
+                for entry in &segment.entries {
+                    if !entry.item.tags.iter().any(|t| t == "health") {
+                        continue;
+                    }
+                    let record = self.record(store, entry)?;
+                    let payload = keys.open_record(&record)?;
+                    if let Some(event) = crate::query::health::payload_event(&payload) {
+                        rows.push(crate::query::health::Evidence {
+                            reference: format!("{}:{}", entry.author.short(), entry.seq),
+                            record_id: entry.id.hex(),
+                            at: entry.item.at,
+                            kind: entry.item.kind.clone(),
+                            tags: entry.item.tags.clone(),
+                            sensitivity: entry.item.sensitivity,
+                            event,
+                        });
+                    }
+                }
+                let plaintext = serde_json::to_vec(
+                    &serde_json::json!({"segment":descriptor.ciphertext.hex(), "keys":self.fingerprint.hex(), "rows":rows}),
+                )?;
+                if plaintext.len() > MAX_SEGMENT_BYTES - HEADER_LEN - 16 {
+                    return Err(Error::Malformed("health shard exceeds bounded cache size"));
+                }
+                durable::write_private(&path, &seal_bytes(b"BHQ1", CONTEXT, keys, &plaintext)?)?;
+                rows
+            };
+            if meta.is_none() {
+                let meta = HealthMeta {
+                    segment: descriptor.ciphertext.hex(),
+                    keys: self.fingerprint.hex(),
+                    metrics: segment_rows
+                        .iter()
+                        .filter_map(|e| e.event["type"].as_str())
+                        .map(|t| crate::query::health::metric(t).to_string())
+                        .collect(),
+                    lifecycle: segment_rows.iter().any(|e| {
+                        e.event["deleted"] == true || e.event.get("sync_status").is_some()
+                    }),
+                };
+                let bytes = serde_json::to_vec(&meta)?;
+                if bytes.len() < 60_000 {
+                    durable::write_private(
+                        &meta_path,
+                        &seal_bytes(
+                            b"BHM1",
+                            "hyperconsciousness typed health metadata v1",
+                            keys,
+                            &bytes,
+                        )?,
+                    )?;
+                }
+            }
+            if segment_rows.len() > MAX_ENTRIES_PER_SEGMENT
+                || rows.len() + segment_rows.len() > 2_000_000
+            {
+                return Err(Error::Malformed("health projection exceeds sample budget"));
+            }
+            rows.extend(segment_rows.into_iter().filter(|e| {
+                metrics.is_empty()
+                    || e.event["deleted"] == true
+                    || e.event.get("sync_status").is_some()
+                    || e.event["type"]
+                        .as_str()
+                        .is_some_and(|t| metrics.contains(&crate::query::health::metric(t)))
+            }));
+        }
+        Ok(rows)
+    }
+
     /// An owned capture projection for callers that need to update it locally.
     pub fn capture_state<K: DataKeys + ?Sized>(
         &self,
@@ -1291,6 +1439,11 @@ pub fn validate_read_tail<K: DataKeys + ?Sized>(
                         return Err(Error::Denied("capture history changed during read"));
                     }
                     if let Ok(value) = serde_json::from_slice::<serde_json::Value>(&payload) {
+                        if value["health"]["deleted"] == true {
+                            return Err(Error::Denied(
+                                "health deletion arrived during read; retry",
+                            ));
+                        }
                         if value["kind"] == "revoke"
                             && value["grant"]
                                 .as_str()

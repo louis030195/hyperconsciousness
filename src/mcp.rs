@@ -768,7 +768,17 @@ impl Server {
                 // treats an error as a crash would drop the conversation.
                 let result = self.call(name, arguments).and_then(|text| {
                     if self.company_access_enabled()
-                        && matches!(name, "search" | "recent" | "record" | "overview" | "files")
+                        && matches!(
+                            name,
+                            "search"
+                                | "recent"
+                                | "record"
+                                | "overview"
+                                | "files"
+                                | "health_summary"
+                                | "health_status"
+                                | "health_samples"
+                        )
                     {
                         let identity = Identity::load_for_brain(&self.dir)?;
                         hyperconsciousness::access::revalidate_read(
@@ -782,8 +792,12 @@ impl Server {
                 });
                 match result {
                     Ok(text)
-                        if (matches!(name, "search" | "recent" | "record")
+                        if ((matches!(name, "search" | "recent" | "record")
                             && arguments["format"] == "structured")
+                            || matches!(
+                                name,
+                                "health_summary" | "health_status" | "health_samples"
+                            ))
                             || (matches!(name, "remember" | "remember_many")
                                 && arguments["return_receipts"] == true) =>
                     {
@@ -818,8 +832,17 @@ impl Server {
     fn call(&self, name: &str, arguments: &Value) -> Result<String> {
         // Reopen keys, policy and the read view on each attempt. Never replay
         // writes, or consume a one-use approval again after a failed read.
-        let retry = matches!(name, "search" | "recent" | "record" | "overview" | "files")
-            && arguments.get("access_request_id").is_none();
+        let retry = matches!(
+            name,
+            "search"
+                | "recent"
+                | "record"
+                | "overview"
+                | "files"
+                | "health_summary"
+                | "health_status"
+                | "health_samples"
+        ) && arguments.get("access_request_id").is_none();
         // Resolve relative dates once without changing the cursor's binding to
         // the caller's original arguments. Authorization time remains fresh.
         let window = (since(arguments.get("since")), since(arguments.get("until")));
@@ -849,10 +872,38 @@ impl Server {
         let now = Clock::new().now().millis;
         let (call_chain, clean_arguments) = self.call_chain(name, arguments)?;
         let arguments = &clean_arguments;
-        let reading = matches!(name, "search" | "recent" | "record" | "overview" | "files");
+        let reading = matches!(
+            name,
+            "search"
+                | "recent"
+                | "record"
+                | "overview"
+                | "files"
+                | "health_summary"
+                | "health_status"
+                | "health_samples"
+        );
         let read_heads = reading.then(|| store.cache_heads()).transpose()?;
         let result = (|| {
             match name {
+                "health_summary" | "health_status" | "health_samples" => {
+                    let index = self.search_index(&store, &keys)?;
+                    let permissions = self.revocations(&store, &keys)?;
+                    let index = index.read().unwrap_or_else(|p| p.into_inner());
+                    let answer = hyperconsciousness::query::health::indexed(
+                        &store,
+                        &keys,
+                        &index,
+                        &permissions,
+                        &call_chain,
+                        identity.grant_authority()?,
+                        now,
+                        name,
+                        arguments,
+                    )?;
+                    self.append_record(&identity, &answer.read_receipt)?;
+                    Ok(answer.value.to_string())
+                }
                 "search" | "recent" => {
                     let ranked = match arguments.get("mode") {
                         None | Some(Value::Null) => false,
@@ -2452,6 +2503,32 @@ fn fail(id: &Value, code: i64, message: &str) -> Value {
 fn tools() -> Value {
     json!([
         {
+            "name": "health_summary",
+            "description": "Daily health measurements by measurement date, with evidence, units and coverage. HRV uses hrv_sdnn or hrv_rmssd; they remain distinct. Sources stay separate. Includes timestamp-free deletions before date filtering. Missing data is not zero. Use health_status for available metrics and phone sync checkpoints. All results remain grant-scoped.",
+            "inputSchema": {"type":"object", "properties": {
+                "start":{"type":"string","description":"YYYY-MM-DD inclusive local measurement date"},
+                "end":{"type":"string","description":"YYYY-MM-DD exclusive; maximum 93 days"},
+                "timezone":{"type":"string","description":"IANA timezone; default UTC"},
+                "baseline_days":{"type":"integer","minimum":0,"maximum":93,"description":"Preceding comparison days; default 7, 0 disables"},
+                "metrics":{"type":"array","items":{"type":"string"},"description":"steps, sleep, hrv_sdnn, hrv_rmssd, resting_heart_rate, heart_rate, respiratory_rate, weight, vo2_max, active_energy, workout or exact HealthKit type"},
+                "source":{"type":"string","description":"Optional exact source bundle identifier"}
+            },"required":["start","end"]}
+        },
+        {
+            "name": "health_status",
+            "description": "Inspect indexed health metrics, measurement ranges, units, source identities and latest phone sync checkpoints. No readable samples does not prove denied HealthKit permission. HRV aliases are hrv_sdnn and hrv_rmssd. Sync completeness may be unknown even with recent samples.",
+            "inputSchema":{"type":"object","properties":{"metrics":{"type":"array","items":{"type":"string"}},"source":{"type":"string"}}}
+        },
+        {
+            "name": "health_samples",
+            "description": "Read complete typed health samples with evidence refs and stable pagination, never clipped JSON. Same date, timezone, metrics and source filters on every page. A changed evidence view rejects the cursor; restart in that case. End date exclusive, maximum 93 days.",
+            "inputSchema":{"type":"object","properties":{
+                "start":{"type":"string"},"end":{"type":"string"},"timezone":{"type":"string"},
+                "metrics":{"type":"array","items":{"type":"string"}},"source":{"type":"string"},
+                "limit":{"type":"integer","minimum":1,"maximum":200},"cursor":{"type":"string"}
+            },"required":["start","end"]}
+        },
+        {
             "name": "overview",
             "description": "inspect permitted record counts, dates, kinds and tags when the search scope \
                             or vocabulary is unknown. Returns metadata, not content. A focused question \
@@ -2706,6 +2783,9 @@ mod tests {
         assert_eq!(
             names,
             [
+                "health_summary",
+                "health_status",
+                "health_samples",
                 "overview",
                 "request_access",
                 "access_status",

@@ -267,7 +267,11 @@ impl Index {
         self.refresh(store, keys)
     }
 
-    fn refresh<K: DataKeys + ?Sized>(&mut self, store: &Store, keys: &K) -> Result<bool> {
+    pub(crate) fn refresh<K: DataKeys + ?Sized>(
+        &mut self,
+        store: &Store,
+        keys: &K,
+    ) -> Result<bool> {
         for _ in 0..BUILD_ATTEMPTS {
             let before = store.cache_heads()?;
             if before.len() > MAX_AUTHORS {

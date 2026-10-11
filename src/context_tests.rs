@@ -725,3 +725,67 @@ fn ranked_limits_are_distinct_from_permission_denials() {
         "permission_denied"
     );
 }
+
+#[test]
+fn health_tools_use_encrypted_shards_recheck_grants_and_preserve_corrections() {
+    let (_dir, identity, mut server) = setup();
+    let record = json!({"kind":"note","sensitivity":grant::MEDICAL,"tags":["health"],
+        "health":{"id":"synthetic-hrv","type":"HKQuantityTypeIdentifierHeartRateVariabilitySDNN",
+        "start_ms":1791241200000_i64,"end_ms":1791241200000_i64,"source":"test-watch","unit":"ms","value":52.5}});
+    append(&server.dir, &identity, &record.to_string()).unwrap();
+    // Existing PERSONAL grant must never gain medical access from cached data.
+    let denied: Value =
+        serde_json::from_str(&server.call("health_status", &json!({})).unwrap()).unwrap();
+    assert!(denied["metrics"].as_array().unwrap().is_empty());
+    let signing = identity.grant_authority_signing().unwrap();
+    let medical = Grant::issue(
+        &signing,
+        server.chain[0].to,
+        Scope {
+            max_sensitivity: grant::MEDICAL,
+            ..Scope::default()
+        },
+        READ,
+        u64::MAX,
+    )
+    .unwrap();
+    server.chain = vec![medical.clone()];
+    let allowed: Value =
+        serde_json::from_str(&server.call("health_status", &json!({})).unwrap()).unwrap();
+    assert_eq!(allowed["metrics"][0]["metric"], "hrv_sdnn");
+    let other: Value = serde_json::from_str(
+        &server
+            .call("health_status", &json!({"metrics":["steps"]}))
+            .unwrap(),
+    )
+    .unwrap();
+    assert!(other["metrics"].as_array().unwrap().is_empty());
+    let filtered: Value = serde_json::from_str(
+        &server
+            .call("health_status", &json!({"metrics":["hrv_sdnn"]}))
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(filtered["metrics"][0]["sample_count"], 1);
+    // The derived file is encrypted, not a second plaintext medical database.
+    for file in std::fs::read_dir(server.dir.join("cache/search-v8/segments")).unwrap() {
+        let path = file.unwrap().path();
+        if path.to_string_lossy().ends_with(".health-v1") {
+            let bytes = std::fs::read(path).unwrap();
+            assert!(!String::from_utf8_lossy(&bytes).contains("synthetic-hrv"));
+        }
+    }
+    let deletion = json!({"kind":"note","sensitivity":grant::MEDICAL,"tags":["health"],"health":{"id":"synthetic-hrv","deleted":true}});
+    append(&server.dir, &identity, &deletion.to_string()).unwrap();
+    append(&server.dir, &identity, &record.to_string()).unwrap();
+    let result: Value =
+        serde_json::from_str(&server.call("health_status", &json!({})).unwrap()).unwrap();
+    assert!(result["metrics"].as_array().unwrap().is_empty());
+    append(
+        &server.dir,
+        &identity,
+        &json!({"kind":"revoke","grant":medical.id().hex()}).to_string(),
+    )
+    .unwrap();
+    assert!(server.call("health_status", &json!({})).is_err());
+}
