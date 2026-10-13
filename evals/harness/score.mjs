@@ -102,7 +102,8 @@ export function gradeTrial(c, trial) {
       const match = /^m(\d{3})$/.exec(item?.ref ?? '');
       const source = match ? c.records[Number(match[1])] : undefined;
       const original = item?.compacted === true && call.tool === 'search'
-        ? source?.text.replace(/\s+/gu, ' ').trim() : source?.text;
+        // Match Rust char::is_whitespace, including NEL but not a literal BOM.
+        ? source?.text.replace(/\p{White_Space}+/gu, ' ').replace(/^ | $/g, '') : source?.text;
       const matchesSource = sourceMatches(original, item, call.tool);
       if (!source || !matchesSource || call.native_verified !== true) {
         reasons.push('unverified source');

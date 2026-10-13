@@ -151,3 +151,13 @@ test('an empty search still needs its native receipt verified', () => {
  assert.ok(gradeTrial(c,t).reasons.includes('unverified tool receipt'));
  t.calls.at(-1).native_verified=true;assert.equal(gradeTrial(c,t).status,'pass');
 });
+
+test('native whitespace compaction handles NEL and preserves a literal BOM', () => {
+ const c={...find('voice_paraphrase'),records:[{text:'\u0085Draft\u0085\u2003only.\u0085'}]};const t=ideal(c);
+ t.calls=[{tool:'search',arguments:{query:'draft',limit:1},result:{items:[{ref:'m000',text:'Draft only.',compacted:true}]},native_verified:true}];
+ assert.equal(gradeTrial(c,t).status,'pass');
+ c.records[0].text='\uFEFFDraft only.';
+ assert.equal(gradeTrial(c,t).status,'fail');
+ t.calls[0].result.items[0].text=c.records[0].text;
+ assert.equal(gradeTrial(c,t).status,'pass');
+});
