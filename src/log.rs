@@ -173,6 +173,17 @@ pub struct Head {
     pub empty: bool,
 }
 
+impl Drop for Log {
+    fn drop(&mut self) {
+        if let Some(lock) = &self.lock {
+            // Close alone can leave an inherited/duplicated open description
+            // holding the lock until an unrelated child reaches exec or exits.
+            // Writer authority ends with this guard, not that child's lifetime.
+            let _ = FileExt::unlock(lock);
+        }
+    }
+}
+
 impl Log {
     /// open read only. many of these can coexist.
     pub fn open(root: &Path, author: DeviceId) -> Result<Self> {
@@ -1784,6 +1795,33 @@ mod tests {
             store.log_for_write(writer.device()),
             Err(Error::Locked(_))
         ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn dropping_writer_releases_lock_even_with_an_inherited_descriptor() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(dir.path()).unwrap();
+        let writer = Writer::new();
+        let held = store.log_for_write(writer.device()).unwrap();
+        // A concurrent process spawn can briefly inherit this open description
+        // before exec closes CLOEXEC descriptors. Reproduce that lifetime
+        // deterministically without forking the multithreaded test process.
+        let inherited = held.lock.as_ref().unwrap().try_clone().unwrap();
+        assert!(matches!(
+            store.log_for_write(writer.device()),
+            Err(Error::Locked(_))
+        ));
+        drop(held);
+        let replacement = store.log_for_write(writer.device()).unwrap();
+        // Closing the unrelated duplicate must not unlock a new writer.
+        drop(inherited);
+        assert!(matches!(
+            store.log_for_write(writer.device()),
+            Err(Error::Locked(_))
+        ));
+        drop(replacement);
+        store.log_for_write(writer.device()).unwrap();
     }
 
     #[test]

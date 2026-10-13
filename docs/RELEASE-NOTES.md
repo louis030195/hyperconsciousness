@@ -12,6 +12,10 @@ Invalid combinations fail explicitly. Matching oversized records still fail
 without returning a partial ranking. This is lexical matching, not semantic
 retrieval; facts spread across records need separate queries or broader discovery.
 
+Writer guards now explicitly unlock on drop. An unrelated child process briefly
+inheriting a file descriptor can no longer prolong the writer lock after its
+owner finishes. The single-writer exclusion remains enforced while a guard lives.
+
 The external evaluation tools now compare frozen, paired baseline/candidate
 outcomes with a complete planned denominator and family-cluster confidence
 intervals. Missing evidence, boundary violations, critical regressions and
