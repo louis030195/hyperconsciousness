@@ -177,6 +177,9 @@ fn wait_callback(
         if !peer.ip().is_loopback() {
             continue;
         }
+        // BSD/macOS can inherit O_NONBLOCK from the listening socket. Read
+        // timeouts only bound blocking reads; an early WouldBlock is not EOF.
+        stream.set_nonblocking(false)?;
         stream.set_read_timeout(Some(Duration::from_secs(2)))?;
         stream.set_write_timeout(Some(Duration::from_secs(2)))?;
         let mut bytes = Vec::new();
@@ -323,6 +326,8 @@ mod tests {
         let sender = thread::spawn(move || {
             for state in ["wrong", "valid"] {
                 let mut stream = TcpStream::connect(address).unwrap();
+                // Accept may happen before the browser sends its HTTP headers.
+                thread::sleep(Duration::from_millis(100));
                 write!(
                     stream,
                     "GET /callback?state={state}&code=returned HTTP/1.1\r\nHost: {address}\r\n\r\n"
