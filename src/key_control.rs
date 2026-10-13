@@ -129,12 +129,15 @@ fn extend(store: &Store, epoch: u32, key: &[u8; 32], mut cache: Cached) -> Resul
             if record.author != *author || record.seq != next_seq || record.prev != previous.id {
                 return Err(Error::Denied("key control tail is not contiguous"));
             }
-            record.verify()?;
+            // The persisted head and every intervening record id bind this tail.
+            // Only selected control records participate in authorization; verify
+            // their signatures here and again when loading the derived index.
             scanned += 1;
             if record.epoch == epoch {
                 if let Ok(bytes) = record.open(key) {
                     if let Ok(value) = serde_json::from_slice::<Value>(&bytes) {
                         if selected(&value) {
+                            record.verify()?;
                             cache.records.push(record.encode());
                         }
                     }
@@ -279,6 +282,41 @@ mod tests {
         let author = DeviceId(signing.verifying_key().to_bytes());
         std::fs::remove_dir_all(root.path().join("log").join(author.hex())).unwrap();
         assert!(scan(&store, 1, &key).unwrap().0.is_empty());
+    }
+
+    #[test]
+    fn cold_control_scan_rejects_modified_unrelated_history() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::open(root.path()).unwrap();
+        let signing = SigningKey::generate(&mut OsRng);
+        let key = [7; 32];
+        append(
+            &store,
+            &signing,
+            &key,
+            &[
+                json!({"kind":"note","text":"unrelated first record"}),
+                json!({"kind":"device_membership","membership":"fixture"}),
+            ],
+        );
+        let author = DeviceId(signing.verifying_key().to_bytes());
+        let first = store
+            .log(author)
+            .unwrap()
+            .read_located_tail_from(0)
+            .unwrap()
+            .remove(0);
+        let path = root
+            .path()
+            .join("log")
+            .join(author.hex())
+            .join(format!("{:06}", first.location.segment));
+        let mut bytes = std::fs::read(&path).unwrap();
+        let at = first.location.offset as usize + first.location.length as usize - 1;
+        bytes[at] ^= 1;
+        std::fs::write(path, bytes).unwrap();
+        assert!(scan(&store, 1, &key).is_err());
+        assert!(!super::path(&store, 1).exists());
     }
 
     #[test]

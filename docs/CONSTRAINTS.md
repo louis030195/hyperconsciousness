@@ -433,3 +433,5 @@ decoded `text`/`name` grams alongside raw JSON grams so escaped Unicode, quotes
 and line breaks cannot suppress matches. The versioned `cache/search-v8`
 directory keeps older running binaries from replacing the new fold; it builds
 once from signed history and does not remove older cache files.
+
+The key-control index verifies signatures for every selected control record. Unrelated content is not used for authorization; cold indexing checks its author, sequence, predecessor and record-id chain against the persisted head, without repeating content signature verification already required at log append/import. A modified content record breaks that chain. This does not change root-signature, membership, transition or revocation validation.
