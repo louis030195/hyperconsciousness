@@ -146,7 +146,22 @@ impl RuntimeKeys {
             if migrate {
                 migrate_owner_memberships(root, identity)?;
             } else {
-                return Ok(RuntimeKeys::Single(Zeroizing::new(*identity.brain_key()?)));
+                // An unmigrated inventory remains observational. Once migration
+                // exists, readers must use the same memberships, cutoffs and
+                // cache identity as writers instead of rebuilding a legacy fold.
+                let marker = root.join("identity/membership-migration-v1");
+                match fs::read_to_string(&marker) {
+                    Ok(text) if text.trim() == identity.grant_authority()?.hex() => {}
+                    Ok(_) => {
+                        return Err(Error::Denied(
+                            "membership migration marker belongs to another authority",
+                        ));
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                        return Ok(RuntimeKeys::Single(Zeroizing::new(*identity.brain_key()?)));
+                    }
+                    Err(error) => return Err(error.into()),
+                }
             }
         }
         if matches!(
@@ -1602,6 +1617,21 @@ mod tests {
             .unwrap()
             .current_devices()
             .contains(&late));
+    }
+
+    #[test]
+    fn migrated_owner_read_only_and_write_views_share_the_same_scope() {
+        std::env::set_var(NO_KEYSTORE_ENV, "1");
+        let root = tempfile::tempdir().unwrap();
+        let mut identity = Identity::load_or_create(root.path()).unwrap();
+        identity.create_brain().unwrap();
+        let writable = RuntimeKeys::open(root.path(), &identity).unwrap();
+        let store = Store::open(root.path()).unwrap();
+        let before = store.cache_heads().unwrap();
+        let readonly = RuntimeKeys::open_read_only(root.path(), &identity).unwrap();
+        assert_eq!(readonly.cache_fingerprint(), writable.cache_fingerprint());
+        assert!(readonly.authority_state().is_some());
+        assert_eq!(store.cache_heads().unwrap(), before);
     }
 
     #[test]
