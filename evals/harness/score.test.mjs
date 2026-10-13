@@ -10,7 +10,7 @@ function ideal(c) {
   const refs=c.expect.required_refs;
   const calls=refs.map(ref=>({tool:'record',arguments:{ref},result:{ref,text:c.records[Number(ref.slice(1))].text},native_verified:true}));
   if(c.expect.artifact)calls.push({tool:'write_artifact',arguments:{value:c.expect.artifact},result:{written:'result.json'}});
-  return {case_id:c.id,backend:'fixture',status:'completed',execution_ref:'calibration-only',exposure_verified:true,calls,unexpected_tools:[],answer:{status:c.expect.status,answer:c.expect.answer_contains??'Synthetic grader calibration',citations:refs},artifact:c.expect.artifact??null,claim_review:{verdict:'pass',reason:'Fabricated positive calibration; not a model trial.'}};
+  return {case_id:c.id,backend:'fixture',status:'completed',execution_ref:'calibration-only',exposure_verified:true,calls,unexpected_tools:[],answer:{status:c.expect.status,answer:c.expect.answer_contains??'Synthetic grader calibration',citations:refs},artifact:c.expect.artifact??null,claim_review:{reviewer:'synthetic-calibration',verdict:'pass',reason:'Fabricated positive calibration; not a model trial.'}};
 }
 const find=id=>suite.cases.find(c=>c.id===id);
 test('ideal fixtures calibrate every oracle without claiming a model execution',()=>{
@@ -98,4 +98,56 @@ test('complete native search evidence satisfies verification without a redundant
  assert.equal(gradeTrial(c,t).status,'pass');
  t.calls[0].result.items[0].text=t.calls[0].result.items[0].text.slice(0,100)+'…';t.calls[0].result.items[0].clipped=true;
  assert.equal(gradeTrial(c,t).status,'fail');
+});
+
+test('verified middle passages are evidence but never complete sources or full point reads', () => {
+ const c={...find('voice_paraphrase'),records:[{text:'Draft only.\n\tCafé agreement is pending. No approval.'}]};
+ const t=ideal(c);
+ t.calls=[{tool:'search',arguments:{query:'café agreement',limit:1},result:{items:[{ref:'m000',text:'…Café agreement is pending.…',clipped:true,compacted:true}]},native_verified:true}];
+ assert.equal(gradeTrial(c,t).status,'pass');
+ assert.equal(gradeTrial({...c,expect:{...c.expect,complete_refs:['m000']}},t).status,'fail');
+ assert.equal(gradeTrial({...c,expect:{...c.expect,must_read:['m000']}},t).status,'fail');
+ for (const text of ['…Café agreement is approved.…','…Draft only. No approval.…','…','……','Café agreement is pending.…']) {
+  t.calls[0].result.items[0].text=text;
+  assert.equal(gradeTrial(c,t).status,'fail',text);
+ }
+ t.calls[0]={tool:'record',arguments:{ref:'m000'},result:{ref:'m000',text:'…Café agreement is pending.…',clipped:true},native_verified:true};
+ assert.equal(gradeTrial(c,t).status,'fail');
+});
+
+test('response budgets include metadata, JSON escaping and every tool response', () => {
+ const c=find('voice_paraphrase');
+ for (const extra of [
+  {tool:'overview',arguments:{},result:{text:'x'.repeat(6001)},native_verified:true},
+  {tool:'list_mcp_resources',arguments:{},result:{resources:['x'.repeat(6001)]},native_verified:true},
+  {tool:'search',arguments:{query:'training',limit:1},result:{items:[],metadata:'\\'.repeat(3100)},native_verified:true},
+  {tool:'record',arguments:{ref:'m000'},result:{...ideal(c).calls[0].result,metadata:'x'.repeat(6001)},native_verified:true},
+ ]) {const t=ideal(c);t.calls.push(extra);assert.ok(gradeTrial(c,t).reasons.includes('response budget exceeded'));}
+ const t=ideal(c);t.calls.push({tool:'overview',arguments:{},result:{text:'家'.repeat(5000)},native_verified:true});
+ assert.equal(gradeTrial(c,t).status,'pass');
+});
+
+test('claim reviews require a named reviewer as well as a verdict and reason', () => {
+ const c=find('voice_paraphrase');
+ for (const reviewer of [undefined,'', '   ',42]) {
+  const t=ideal(c);t.claim_review.reviewer=reviewer;
+  assert.equal(gradeTrial(c,t).status,'fail');
+ }
+});
+
+test('score provenance binds the grader, reviewed report and execution protocol', () => {
+ const report={basis:'fixture',suite_sha256:digest,model:'none',effort:'none',protocol_sha256:hash('fixture'),backends:['fixture'],trials:suite.cases.map(ideal)};
+ const first=grade(suite,report,digest);
+ assert.equal(first.provenance.scorer_sha256,hash(readFileSync(new URL('./score.mjs',import.meta.url))));
+ assert.equal(first.provenance.protocol_sha256,report.protocol_sha256);
+ assert.equal(first.provenance.report_canonical_sha256,grade(suite,{...report,trials:[...report.trials]},digest).provenance.report_canonical_sha256);
+ report.trials[0].claim_review.reason='Changed review';
+ assert.notEqual(first.provenance.report_canonical_sha256,grade(suite,report,digest).provenance.report_canonical_sha256);
+});
+
+test('an empty search still needs its native receipt verified', () => {
+ const c=find('voice_paraphrase');const t=ideal(c);
+ t.calls.push({tool:'search',arguments:{query:'unmatched topic',limit:1},result:{items:[]}});
+ assert.ok(gradeTrial(c,t).reasons.includes('unverified tool receipt'));
+ t.calls.at(-1).native_verified=true;assert.equal(gradeTrial(c,t).status,'pass');
 });

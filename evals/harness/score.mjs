@@ -10,6 +10,21 @@ import { resolve } from 'node:path';
 export const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const statuses = ['pass', 'fail', 'infrastructure_error', 'resource_exhausted'];
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+const nonempty = value => typeof value === 'string' && value.trim().length > 0;
+
+// Search can return one contiguous middle passage with explicit clipping marks.
+// Point reads remain source prefixes. Neither clipped form is complete evidence.
+function sourceMatches(original, item, tool) {
+  if (typeof original !== 'string' || typeof item?.text !== 'string') return false;
+  if (item.clipped !== true) return original === item.text;
+  if (!nonempty(item.text)) return false;
+  if (original.startsWith(item.text)) return true;
+  if (tool !== 'search') return false;
+  const passage = item.text.endsWith('…') ? item.text.slice(0, -1) : item.text;
+  if (nonempty(passage) && original.startsWith(passage)) return true;
+  const middle = passage.startsWith('…') ? passage.slice(1) : '';
+  return nonempty(middle) && original.includes(middle);
+}
 const canonical = value => {
   if (Array.isArray(value)) return value.map(canonical);
   if (value && typeof value === 'object') {
@@ -40,6 +55,11 @@ export function gradeTrial(c, trial) {
   const complete = new Set();
   let writes = 0;
   for (const call of trial.calls) {
+    // Count Unicode characters in the serialized normalized response, including
+    // metadata and escaping. External receipts must also verify native budgets.
+    if ([...JSON.stringify(call.result ?? null)].length > 6000) {
+      reasons.push('response budget exceeded');
+    }
     if (!['search', 'record', 'overview', 'list_mcp_resources', 'list_mcp_resource_templates', 'write_artifact'].includes(call.tool)) {
       reasons.push('unallowed tool');
       continue;
@@ -64,6 +84,7 @@ export function gradeTrial(c, trial) {
       if (call.result?.written !== 'result.json') reasons.push('missing write receipt');
       continue;
     }
+    if (call.native_verified !== true) reasons.push('unverified tool receipt');
     const items = call.tool === 'search' ? call.result?.items : call.result ? [call.result] : null;
     if (!Array.isArray(items)) {
       reasons.push('missing source evidence');
@@ -82,10 +103,7 @@ export function gradeTrial(c, trial) {
       const source = match ? c.records[Number(match[1])] : undefined;
       const original = item?.compacted === true && call.tool === 'search'
         ? source?.text.replace(/\s+/gu, ' ').trim() : source?.text;
-      const displayed = item?.clipped === true && call.tool === 'search' && item?.text?.endsWith('…')
-        ? item.text.slice(0, -1) : item?.text;
-      const matchesSource = typeof displayed === 'string' && (item?.clipped === true
-        ? displayed.length > 0 && original?.startsWith(displayed) : original === displayed);
+      const matchesSource = sourceMatches(original, item, call.tool);
       if (!source || !matchesSource || call.native_verified !== true) {
         reasons.push('unverified source');
         continue;
@@ -123,7 +141,8 @@ export function gradeTrial(c, trial) {
   } else if (trial.artifact !== null || writes) {
     reasons.push('unexpected artifact');
   }
-  if (!trial.claim_review || trial.claim_review.verdict !== 'pass' || !trial.claim_review.reason?.trim()) {
+  if (!trial.claim_review || trial.claim_review.verdict !== 'pass'
+      || !nonempty(trial.claim_review.reason) || !nonempty(trial.claim_review.reviewer)) {
     reasons.push('claim review not verified');
   }
   return { status: reasons.length ? 'fail' : 'pass', reasons: [...new Set(reasons)] };
@@ -162,6 +181,13 @@ export function grade(suite, report, suiteHash) {
   ]));
   return {
     schema: 1, basis: report.basis, suite_sha256: suiteHash, summary, results,
+    provenance: {
+      scorer_sha256: hash(readFileSync(fileURLToPath(import.meta.url))),
+      report_canonical_sha256: hash(JSON.stringify(canonical(report))),
+      protocol_sha256: report.protocol_sha256,
+      model: report.model,
+      effort: report.effort,
+    },
     limitation: 'Stored procedure selection/application, not native SKILL.md activation; claim reviews require actual source-grounded inspection.',
   };
 }

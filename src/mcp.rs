@@ -2097,6 +2097,11 @@ fn search_excerpt(text: &str, query: Option<&str>, max_chars: usize) -> (String,
         return compact_text(text, max_chars);
     };
     let normalized = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    // Preserve qualifications before a late match whenever all evidence fits.
+    // Passage selection is only necessary when the complete note exceeds budget.
+    if normalized.chars().count() <= max_chars {
+        return (normalized, false);
+    }
     let lower = normalized.to_lowercase();
     let query = query
         .split_whitespace()

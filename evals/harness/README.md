@@ -88,21 +88,35 @@ Each trial contains:
   `tool`, `arguments`, `result` or `error`. Searches return `{items:[{ref,text}]}`;
   point reads return `{ref,text}`. Native excerpts may include `clipped: true`
   and searches may include `compacted: true` for collapsed whitespace. The scorer
-  accepts only verified source prefixes and does not count a clipped point read
+  accepts verified source prefixes and contiguous search passages marked with a
+  leading clipping ellipsis. Invented text, stitched passages and unmarked middle
+  passages fail verification. A clipped search remains incomplete evidence. The scorer does not count a clipped point read
   as satisfying a required full read. `must_read` requires a full point read;
   `complete_refs` accepts a complete source from either search or point read. Do not replace a model-visible excerpt with
   a later audit's complete source text. Native `overview`, `list_mcp_resources`
   and `list_mcp_resource_templates` calls retain their actual result and verified
   receipt; they count as calls but supply no citable note evidence. The reviewer
-  sets `native_verified: true` only after verifying the actual backend receipt. Writes return `{written:"result.json"}`.
+  sets `native_verified: true` only after verifying the actual backend receipt,
+  including the native response budget before normalization. Every normalized
+  `result` is also limited to 6,000 Unicode characters after JSON serialization,
+  including metadata and escaping. Writes return `{written:"result.json"}`.
 - `answer: {status,answer,citations}`, the parsed persisted `artifact` or `null`,
-  and `claim_review: {verdict,reason,reviewer}`. Unknown review cannot pass.
+  and `claim_review: {verdict,reason,reviewer}`. Unknown review cannot pass; both
+  reason and reviewer must be nonempty strings. A named reviewer does not by itself
+  prove independent or blinded review.
 
 The scorer checks citations, source bytes, call order, budgets, wrong/repeated
 writes, no-action boundaries and missing evidence. It trusts the report producer's
 verification fields; it does not authenticate external receipts or independently
 grade natural-language truth. Keep the original evidence for inspection. A report
 claiming `actual_harness` does not by itself prove a model ran.
+
+Scores include provenance hashes of the scorer source and canonical reviewed
+report, plus protocol, model and effort. Preserve original reports and scores
+when fixing a grader. Regrade both arms with the same scorer and show the reason
+for changed labels; a grader correction is not an agent quality improvement.
+The complete-source and full-point-read requirements remain unchanged when a
+verified middle excerpt is accepted as partial evidence.
 
 See [recall evals](../recall/README.md) for engine-only retrieval contracts and
 [external recall guidance](../../docs/RECALL_CLIENT.md) for caller responsibilities.

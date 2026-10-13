@@ -1,7 +1,22 @@
 <!-- screenpipe — AI that knows everything you've seen, said, or heard -->
 <!-- https://screenpipe.com -->
 
-# HC alpha.8: precise lexical recall and paired outcome evaluation
+# HC alpha.12: preserve complete search evidence
+
+Search now returns the whole compacted note whenever it fits the excerpt budget,
+even when the query matches near the end. This preserves earlier qualifications
+such as draft status. Longer evidence still uses explicitly clipped passages,
+and point reads retain the original content and formatting.
+
+The offline outcome scorer verifies contiguous middle excerpts, rejects oversized
+normalized responses and requires reviewer attribution. Scores record hashes of
+the scorer and reviewed report. Clipped passages cannot satisfy complete-source
+or full-point-read requirements. These are retrieval and grader corrections;
+they do not establish improved agent answering or semantic recall.
+
+Install with `hc update`. HC remains a developer alpha.
+
+## Earlier alpha.8 through alpha.11 changes
 
 Relevance search accepts `match_terms: "all"` to require every non-stopword query
 term in the same record. An entity-plus-fact lookup can avoid exhausting the

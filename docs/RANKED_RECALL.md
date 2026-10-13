@@ -27,8 +27,15 @@ hashes break equal-score ties; ingestion order and recency are not tie-breakers.
 Identical text can finally tie by record ID. The scheme is lexical: it neither
 infers truth from conflicting records nor resolves arbitrary aliases/synonyms.
 
-Result text remains untrusted evidence with the same stable references,
-permission checks, corrections/retractions and read receipts as other retrieval.
+Result text remains untrusted evidence with stable references. Notes whose
+compacted text fits the excerpt budget are returned completely.
+A late query match must not discard earlier qualifications when the whole note
+fits. Longer notes use a bounded matching passage marked as clipped; reopen the
+record when omitted context is needed. This excerpt rule also applies to literal
+search and does not change ranking.
+
+Results retain the same permission checks, corrections/retractions and read
+receipts as other retrieval.
 Hidden, superseded and retracted records are excluded before corpus statistics
 are computed. Only the JSON `text` field is ranked, not arbitrary capture or
 control metadata. Tag, kind and date filters still narrow the authorized scope.

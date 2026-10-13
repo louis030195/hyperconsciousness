@@ -677,6 +677,30 @@ fn search_excerpts_include_tail_evidence_with_unicode_and_preserve_point_reads()
 }
 
 #[test]
+fn search_preserves_complete_evidence_when_the_compacted_note_fits() {
+    let (_dir, identity, server) = setup();
+    let text = format!(
+        "This is a draft, not an approval.\n{}Café agreement budget: 300.",
+        "İ 家族 background ".repeat(15)
+    );
+    let compacted = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    note(&server, &identity, &text, PERSONAL);
+    for mode in ["literal", "relevance"] {
+        let args = json!({"query":"café agreement", "mode":mode, "format":"structured", "max_chars":600, "max_output_chars":4000});
+        let page: Value = serde_json::from_str(&server.call("search", &args).unwrap()).unwrap();
+        assert_eq!(page["items"][0]["text"], compacted);
+        assert_eq!(page["items"][0]["clipped"], false);
+    }
+    for budget in [compacted.chars().count(), 600] {
+        assert_eq!(
+            search_excerpt(&text, Some("café agreement"), budget),
+            (compacted.clone(), false)
+        );
+    }
+    assert!(search_excerpt(&text, Some("café agreement"), 80).1);
+}
+
+#[test]
 fn ranked_recall_handles_several_long_records_without_retaining_all_tokens() {
     let (_dir, identity, server) = setup();
     note(&server, &identity, "evidence target exact answer", PERSONAL);
