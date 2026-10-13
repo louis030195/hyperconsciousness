@@ -1,6 +1,6 @@
 {
   "name": "hyperconsciousness",
-  "version": "0.1.0-alpha.7",
+  "version": "0.1.0-alpha.8",
   "description": "Hyperconsciousness, an encrypted, append-only memory layer across your devices",
   "license": "MIT",
   "author": "Louis Beaumont",
@@ -44,7 +44,8 @@
     "eval:recall": "node --test evals/recall/run.test.mjs && node evals/recall/run.mjs run",
     "eval:ranked": "node --test evals/recall/run.test.mjs && node evals/recall/run.mjs run --suite=ranked",
     "eval:challenge": "node --test evals/recall/run.test.mjs && node evals/recall/run.mjs run --suite=challenge",
-    "eval:harness:check": "node --test evals/harness/score.test.mjs"
+    "eval:harness:check": "node --test evals/harness/score.test.mjs evals/harness/compare.test.mjs",
+    "eval:harness:compare": "node evals/harness/compare.mjs"
   },
   "engines": {
     "node": ">=18"

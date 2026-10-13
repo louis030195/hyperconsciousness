@@ -80,6 +80,7 @@ struct Document {
 }
 
 struct Corpus {
+    require_all_terms: bool,
     terms: Vec<String>,
     documents: BTreeMap<Hash, Document>,
     payload_bytes: usize,
@@ -106,6 +107,7 @@ impl Corpus {
             ));
         }
         Ok(Self {
+            require_all_terms: filter.require_all_terms,
             terms,
             documents: BTreeMap::new(),
             payload_bytes: 0,
@@ -121,9 +123,22 @@ impl Corpus {
         let Some(text) = value.get("text").and_then(Value::as_str) else {
             return Ok(());
         };
-        let has_match = text.split(|c: char| !c.is_alphanumeric()).any(|word| {
-            let word = word.to_lowercase();
-            !stop(&word) && self.terms.iter().any(|term| matches(&word, term))
+        // Reject conjunctive nonmatches before charging candidate budgets. Scan
+        // the complete text: a late term must not be lost to a prefix cutoff.
+        let mut covered = vec![false; self.terms.len()];
+        let has_match = text.split(|c: char| !c.is_alphanumeric()).any(|raw| {
+            let word = Zeroizing::new(raw.to_lowercase());
+            if stop(&word) {
+                return false;
+            }
+            for (i, term) in self.terms.iter().enumerate() {
+                covered[i] |= matches(&word, term);
+            }
+            if self.require_all_terms {
+                covered.iter().all(|matched| *matched)
+            } else {
+                covered.iter().any(|matched| *matched)
+            }
         });
         if !has_match {
             return Ok(());
@@ -355,20 +370,26 @@ pub fn look_indexed<K: DataKeys + ?Sized>(
     }
     let captures = index.capture_state_shared(keys)?;
     let mut corpus = Corpus::new(filter)?;
-    for term in corpus.terms.clone() {
-        index.visit_ranked(keys, Some(&term), Some((chain, now)), |entry, candidate| {
-            if candidate
-                && captures.visible(entry.id, false)
-                && filter.keeps_metadata(&entry.item)
-                && chain.iter().all(|g| g.allows(&entry.item, READ, now))
-                && !corpus.documents.contains_key(&entry.id)
-            {
-                let record = index.record(store, entry)?;
-                let payload = keys.open_record(&record)?;
-                corpus.add(record, &payload)?;
-            }
-            Ok(None)
-        })?;
+    let terms = corpus.terms.clone();
+    let mut visit = |entry: &crate::search_index::Entry, candidate| {
+        if candidate
+            && captures.visible(entry.id, false)
+            && filter.keeps_metadata(&entry.item)
+            && chain.iter().all(|g| g.allows(&entry.item, READ, now))
+            && !corpus.documents.contains_key(&entry.id)
+        {
+            let record = index.record(store, entry)?;
+            let payload = keys.open_record(&record)?;
+            corpus.add(record, &payload)?;
+        }
+        Ok(None)
+    };
+    if filter.require_all_terms {
+        index.visit_ranked_all(keys, &terms, Some((chain, now)), &mut visit)?;
+    } else {
+        for term in terms {
+            index.visit_ranked(keys, Some(&term), Some((chain, now)), &mut visit)?;
+        }
     }
     index.validate_read(store, keys, chain)?;
     Ok(corpus.finish(effective, filter, now))

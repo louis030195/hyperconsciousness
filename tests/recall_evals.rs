@@ -45,6 +45,8 @@ struct Case {
     #[serde(default)]
     mode: String,
     #[serde(default)]
+    match_terms: String,
+    #[serde(default)]
     reverse_records: bool,
 }
 
@@ -185,6 +187,7 @@ fn collect(case: &Case) -> Result<Value, Box<dyn std::error::Error>> {
     let authority = DeviceId(fixture.signer.verifying_key().to_bytes());
     let chain = std::slice::from_ref(&fixture.grant);
     let filter = query::Filter {
+        require_all_terms: case.match_terms == "all",
         text: case.query.clone(),
         kind: Some("note".into()),
         limit: case.limit,

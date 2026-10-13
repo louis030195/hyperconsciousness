@@ -917,6 +917,16 @@ impl Server {
                             ))
                         }
                     };
+                    let require_all_terms = match arguments.get("match_terms") {
+                        None | Some(Value::Null) => false,
+                        Some(Value::String(value)) if ranked && value == "any" => false,
+                        Some(Value::String(value)) if ranked && value == "all" => true,
+                        _ => {
+                            return Err(Error::Malformed(
+                                "match_terms must be any or all and requires relevance mode",
+                            ))
+                        }
+                    };
                     if ranked && arguments.get("cursor").is_some_and(|v| !v.is_null()) {
                         return Err(Error::Malformed("relevance search has no chronological cursor; refine query or increase limit"));
                     }
@@ -956,6 +966,7 @@ impl Server {
                     tags.sort();
                     tags.dedup();
                     let mut filter = hyperconsciousness::query::Filter {
+                        require_all_terms,
                         text: arguments["query"]
                             .as_str()
                             .filter(|q| !q.trim().is_empty())
@@ -2164,6 +2175,11 @@ fn structured_search_page(
     });
     if ranked {
         page["ranking"] = json!("bounded_lexical_bm25_v1");
+        page["match_terms"] = json!(if filter.require_all_terms {
+            "all"
+        } else {
+            "any"
+        });
         page["continuation"] = json!("refine_query_or_increase_limit");
     }
     for (index, record) in records.iter().rev().enumerate() {
@@ -2578,6 +2594,7 @@ fn tools() -> Value {
             "name": "search",
             "description": "search authorized record text. Default literal mode matches a substring; \
                             use mode relevance for short multiword lexical discovery, not semantic similarity. \
+                            Use match_terms all when every term must occur in one record. \
                             Start with the entity and requested fact. If hits miss the fact, try alternative \
                             wording in separate queries within the caller's budget, not one long OR string. \
                             Follow aliases only when a source links them; check every requested condition. \
@@ -2591,6 +2608,7 @@ fn tools() -> Value {
                 "type": "object",
                 "properties": {
                     "mode": {"type":"string", "enum":["literal","relevance"], "description":"Default literal preserves exact substring/chronological search. Use relevance for ranked word-prefix discovery over authorized note text, with stable ties and no model. No cursor; narrow filters if bounded candidate limits are exceeded."},
+                    "match_terms": {"type":"string", "enum":["any","all"], "description":"Relevance only. Default any matches one or more terms. all requires every non-stopword term in the same record, useful for entity plus fact queries and avoiding broad candidate exhaustion. It can miss facts spread across records; broaden explicitly if needed. Word-prefix rules still apply."},
                     "query": {"type": "string", "description": "Literal substring by default; in relevance mode use a short entity/topic query. Try alternate phrases as separate calls, not Boolean operators. Omit for the most recent."},
                     "kind": {"type": "string", "description": "for example note, file, meeting"},
                     "tags": {"type": "array", "items": {"type": "string"}, "description": "any of these"},

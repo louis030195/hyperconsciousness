@@ -2075,6 +2075,8 @@ pub fn permit_actions_indexed<'a, K: DataKeys + ?Sized>(
 /// applied after the grant has already decided what may be seen at all.
 #[derive(Default, Clone)]
 pub struct Filter {
+    /// Ranked recall only: require every non-stopword query term in one record.
+    pub require_all_terms: bool,
     pub text: Option<String>,
     pub kind: Option<String>,
     /// any of these kinds; `kind` remains for the public single-kind surface

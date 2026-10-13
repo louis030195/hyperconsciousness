@@ -789,3 +789,61 @@ fn health_tools_use_encrypted_shards_recheck_grants_and_preserve_corrections() {
     .unwrap();
     assert!(server.call("health_status", &json!({})).is_err());
 }
+
+#[test]
+fn relevance_all_terms_skips_broad_distractors_without_hiding_matching_exhaustion() {
+    for indexed in [false, true] {
+        let (_dir, identity, server) = setup();
+        note(&server, &identity, &"resume ".repeat(250_001), PERSONAL);
+        note(&server, &identity, "Aster résumé resume approved", PERSONAL);
+        note(&server, &identity, "Aster unrelated", PERSONAL);
+        if indexed {
+            let store = Store::open(&server.dir).unwrap();
+            let keys = RuntimeKeys::open(&server.dir, &identity).unwrap();
+            hyperconsciousness::search_index::Index::load_or_build(
+                &server.dir,
+                &store,
+                &keys,
+                keys.cache_fingerprint(),
+            )
+            .unwrap();
+        }
+        let args = json!({"query":"aster resume", "mode":"relevance", "match_terms":"all", "format":"structured"});
+        let page: Value = serde_json::from_str(&server.call("search", &args).unwrap()).unwrap();
+        assert_eq!(page["items"].as_array().unwrap().len(), 1);
+        assert!(page["items"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("approved"));
+        // The existing broad mode still reports exhaustion, never a partial answer.
+        assert!(server
+            .call(
+                "search",
+                &json!({"query":"aster resume", "mode":"relevance"})
+            )
+            .is_err());
+        note(
+            &server,
+            &identity,
+            &format!("{} aster", "resume ".repeat(250_001)),
+            PERSONAL,
+        );
+        assert!(server.call("search", &args).is_err());
+    }
+}
+
+#[test]
+fn relevance_all_terms_rejects_invalid_or_ignored_options() {
+    let (_dir, identity, server) = setup();
+    note(&server, &identity, "Aster launch 2026", PERSONAL);
+    for args in [
+        json!({"query":"aster", "match_terms":"all"}),
+        json!({"query":"aster", "mode":"relevance", "match_terms":"most"}),
+        json!({"query":"aster", "mode":"relevance", "match_terms":true}),
+    ] {
+        assert!(server.call("search", &args).is_err(), "{args}");
+    }
+    assert!(server
+        .call("recent", &json!({"match_terms":"all"}))
+        .is_err());
+}

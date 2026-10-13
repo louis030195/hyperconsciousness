@@ -619,6 +619,42 @@ impl Index {
         F: FnMut(&Entry, bool) -> Result<Option<u64>>,
     {
         let query_grams = text.and_then(|text| normalized_grams(text.as_bytes()));
+        self.visit_grams_inner(keys, query_grams, access, visitor)
+    }
+
+    /// Intersect the grams of required terms, without inventing adjacency grams
+    /// between separate words. This is a candidate superset, not authorization
+    /// or exact token matching; unindexed records still reach the caller.
+    pub(crate) fn visit_ranked_all<K, F>(
+        &self,
+        keys: &K,
+        terms: &[String],
+        access: Option<(&[Grant], u64)>,
+        mut visitor: F,
+    ) -> Result<usize>
+    where
+        K: DataKeys + ?Sized,
+        F: FnMut(&Entry, bool) -> Result<Option<u64>>,
+    {
+        let grams = terms
+            .iter()
+            .filter_map(|term| normalized_grams(term.as_bytes()))
+            .flatten()
+            .collect();
+        self.visit_grams_inner(keys, Some(grams), access, &mut visitor)
+    }
+
+    fn visit_grams_inner<K, F>(
+        &self,
+        keys: &K,
+        query_grams: Option<BTreeSet<u64>>,
+        access: Option<(&[Grant], u64)>,
+        visitor: &mut F,
+    ) -> Result<usize>
+    where
+        K: DataKeys + ?Sized,
+        F: FnMut(&Entry, bool) -> Result<Option<u64>>,
+    {
         let mut bulk_withheld = 0usize;
         let mut floor = None;
         let mut descriptors: Vec<_> = self.segments.iter().collect();
@@ -2801,6 +2837,42 @@ mod tests {
         assert!(Index::load_slots(root.path(), &random_key())
             .unwrap()
             .is_empty());
+    }
+
+    #[test]
+    fn conjunctive_candidates_intersect_terms_without_requiring_adjacency() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::open(root.path()).unwrap();
+        let signing = SigningKey::generate(&mut OsRng);
+        let key = random_key();
+        let texts = [
+            "aster separate words resume",
+            "aster only",
+            "resume only",
+            "unrelated",
+        ];
+        let payloads: Vec<_> = texts
+            .iter()
+            .map(|text| serde_json::json!({"kind":"note","text":text}).to_string())
+            .collect();
+        append(&store, &signing, &key, &payloads);
+        let index =
+            Index::load_or_build(root.path(), &store, &key, Hash::of(key.as_slice())).unwrap();
+        let mut candidates = Vec::new();
+        index
+            .visit_ranked_all(
+                &key,
+                &["aster".into(), "resume".into()],
+                None,
+                |entry, candidate| {
+                    if candidate {
+                        candidates.push(entry.seq);
+                    }
+                    Ok(None)
+                },
+            )
+            .unwrap();
+        assert_eq!(candidates, [0]);
     }
 
     #[test]

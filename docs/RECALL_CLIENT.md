@@ -14,6 +14,11 @@ runs inside HC.
    search for known identifiers or exact phrases. Use `mode: "relevance"` for
    short multiword discovery queries. Include the requested distinction, such
    as "approved budget" or "launch decision", when the user supplied it.
+   On a schema advertising it, `match_terms: "all"` requires every non-stopword
+   term in the same record. Use it for an entity plus a fact when broad matches
+   are noisy or exhaust candidate limits. It preserves word-prefix rules, not
+   exact phrases. Facts split across records may need separate queries or the
+   default `match_terms: "any"`; do not turn a conjunctive miss into absence.
 2. If the initial search misses, try ordinary alternative wording for the same
    concept. "Overhead lifting" might be recorded as "military press". This is
    client reasoning, not semantic matching performed by HC.
@@ -77,3 +82,20 @@ and filters after a short delay, within the caller's existing budget. Do not
 request broader access or interpret the refusal as missing data. HC preserves
 verified index progress and avoids concurrent full-history fallback scans for
 these conditions. A cold build still scales with the stored history.
+
+## Choose HC and live sources by evidence need
+
+Use HC for previously captured decisions, context and provenance when the
+requested entity, period and detail level are covered by the current grant.
+A team publication reader may expose only curated datasets; its empty result
+says nothing about a separately collected corpus. Catalog availability, ingestion
+recency, event time and provider freshness are distinct. Missing coverage or
+freshness metadata is unknown, never zero or proof of complete coverage.
+
+For current balances, exact provider state, raw event analysis, or an explicit
+live-source request, use the authorized source adapter when HC cannot establish
+that contract. Keep HC context useful alongside that verification. Record a
+specific fallback reason: coverage, freshness, granularity, access, retrieval
+error, or source explicitly requested. Do not force HC-first calls on unrelated
+or self-contained tasks, increase grants, or count fewer provider calls as a
+quality gain without checking answer correctness.

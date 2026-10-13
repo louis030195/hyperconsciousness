@@ -24,6 +24,8 @@ export function validateSuite(suite) {
     seen.add(c.id);
     assert.ok(['contract', 'capability'].includes(c.group));
     assert.ok([undefined, 'literal', 'relevance'].includes(c.mode));
+    assert.ok([undefined, 'any', 'all'].includes(c.match_terms));
+    assert.ok(c.match_terms === undefined || c.mode === 'relevance');
     assert.ok(typeof c.task === 'string' && c.task.length > 0);
     assert.ok(c.query === null || typeof c.query === 'string');
     assert.ok(Number.isInteger(c.limit) && c.limit > 0 && c.limit <= 200);
@@ -62,6 +64,7 @@ export function validateSuite(suite) {
     assert.equal(c.query, peer.query);
     assert.equal(c.limit, peer.limit);
     assert.equal(c.mode, peer.mode);
+    assert.equal(c.match_terms, peer.match_terms);
     for (const key of ['tags', 'grant_tags', 'since', 'until', 'expired', 'revoked', 'reopen']) {
       assert.deepEqual(c[key], peer[key], `ordering peers changed ${key}`);
     }

@@ -45,6 +45,11 @@ or secret use. Skip retrieval for a self-contained question; respect a stop.
   multiword discovery. Relevance is lexical word/prefix matching, not embeddings
   or a semantic answer. `hc find` also needs wording present in its target surface;
   MCP's relevance option is not a `hc find` flag.
+- If the live search schema advertises `match_terms`, use `match_terms: "all"`
+  with relevance mode when the entity and requested fact must appear in one
+  record, especially after broad matches exhaust candidate limits. The default
+  `any` preserves discovery across partial matches. An all-terms miss can require
+  separate queries when facts span records; it is not evidence of absence.
 - If results miss the fact or contain only incidental mentions, try a short
   alternative phrase for the same concept. Issue alternatives as separate queries,
   not one long string or invented OR syntax. Keep the entity when useful; broaden

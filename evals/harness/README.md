@@ -114,3 +114,68 @@ and both arms regraded; the original seven tasks and their point-read/action
 requirements remain unchanged. Keep original scores and the explicit oracle diff
 when applying this correction to an earlier report. A clipped excerpt alone still
 fails the complete-evidence requirement.
+
+## Paired outcome comparisons over time
+
+`npm run eval:harness:compare -- /absolute/path/report.json` performs offline,
+fixed-horizon analysis of externally executed and reviewed trials. It makes no
+model calls and creates no schedule. `compare.test.mjs` is grader calibration,
+not evidence of improved agent outcomes.
+
+Freeze a plan **before** running either arm. Store its canonical `planHash(plan)`
+alongside the original dated manifest and immutable execution receipts. Include:
+
+- `schema: 1`, `experiment_id`, `basis` (`fixture`, `actual_harness`, `real_use`),
+  `model`, `effort`, and `population` (`fixed_bank`, `temporal_holdout`,
+  `production_sample`). Do not mix populations into one claimed trend.
+- SHA-256 fields `suite_sha256`, `protocol_sha256`, `environment_sha256`,
+  `baseline_sha256`, `candidate_sha256`. The protocol fixes corpus as-of time,
+  permissions, model/tool exposure, budgets, graders, randomization and exclusions.
+  Preserve these artifacts; matching strings alone do not prove comparability.
+- `cases: [{id, family, slice, critical}]`, `repeats`, `minimum_families` (at least
+  30), `minimum_gain` (fraction, for example 0.05), `seed` (uint32), and
+  `bootstrap_samples` (2,000–100,000). Family membership must capture shared
+  scenarios/entities/templates. Repeated trials do not increase sample size.
+
+The report is `{schema:1, plan, plan_sha256, trials}`. Every planned case/repeat
+needs both arms. Each trial has `case_id`, zero-based `repeat`, `arm` (`baseline`
+or `candidate`), `plan_sha256`, `variant_sha256`, `status` (`completed`,
+`infrastructure_error`, `resource_exhausted`), `success_verified` (boolean/null),
+`boundary_violation` (boolean/null), `exposure_verified` (boolean), and
+`evidence_refs` (retained source/trace/review pointers, never private bodies).
+Success means source-grounded completion, including correct abstention or no
+change where required. An incomplete required task cannot pass as abstention.
+Use the existing source-aware scorer and blinded human review to establish these
+labels; this comparison tool does not grade answers or authenticate receipts.
+
+All planned trials remain in the verified-success denominator. Missing trials
+and unknown evidence block the gate. Operational errors count as unsuccessful
+and remain separately visible. The estimator averages repetitions within cases,
+cases within families, then weights families equally. Its paired 95% percentile
+bootstrap resamples families, not individual runs. It requires the declared
+minimum gain and a lower confidence bound above zero. Boundary violations,
+critical-case regressions and negative slice deltas block the gate even when
+aggregate quality improves. Fixtures can never pass an outcome gate.
+
+Thirty families is a minimum guard, **not** a power guarantee. Estimate sample
+size from a pilot's paired discordance and the predeclared effect size. Small or
+degenerate intervals require human inspection. This tool implements a quality
+gain path only; it cannot promote tied quality on a speed claim. Retain latency,
+cost and corrections separately, including timeouts. If efficiency with quality
+noninferiority is the goal, predeclare and analyze that experiment separately.
+Do not choose a different gate after seeing a failed result.
+
+Maintain three separate series: the frozen regression bank, a new temporal
+holdout, and randomly sampled later production tasks (including tasks that do
+not call HC). Keep challenge cases out of representative rates unless weighted
+by a predeclared sampling design. Gold facts must come from independent sources
+available as of the task, never later answers. Randomize arm execution order;
+use matched frozen infrastructure and corpus, blind reviewers, calibrate their
+false accepts/rejects, and retain all attempts. Neither version strings nor more
+HC calls establish improvement. The desired outcome is correct, supported task
+completion with appropriate HC/provider routing.
+
+Run this analysis at the planned endpoint. Repeatedly checking ordinary 95%
+intervals until they pass invalidates the inference. A continuously monitored
+experiment needs a separately justified sequential method or multiplicity plan.
+No deployment, publication or permission change is authorized by a passing score.

@@ -49,14 +49,14 @@
     {
       "id": "unicode_case",
       "group": "contract",
-      "task": "Find the café meeting record.",
+      "task": "Find the caf\u00e9 meeting record.",
       "records": [
         {
           "id": "answer",
-          "text": "Meet at CAFÉ ÉTOILE at noon."
+          "text": "Meet at CAF\u00c9 \u00c9TOILE at noon."
         }
       ],
-      "query": "café étoile",
+      "query": "caf\u00e9 \u00e9toile",
       "limit": 3,
       "expect": {
         "ids": [
@@ -1354,6 +1354,284 @@
       },
       "reverse_records": true,
       "same_order_as": "numeric_prefix_is_not_a_number_match"
+    },
+    {
+      "id": "all_terms_entity_fact",
+      "group": "contract",
+      "task": "Verify explicit conjunctive lexical retrieval without changing scope.",
+      "records": [
+        {
+          "id": "answer",
+          "text": "Aster resumed launch 2026."
+        },
+        {
+          "id": "person",
+          "text": "Aster meeting."
+        },
+        {
+          "id": "fact",
+          "text": "Other team resumed work."
+        }
+      ],
+      "query": "aster resume",
+      "limit": 5,
+      "mode": "relevance",
+      "match_terms": "all",
+      "expect": {
+        "ids": [
+          "answer"
+        ],
+        "denied": false,
+        "order": "any"
+      }
+    },
+    {
+      "id": "all_terms_stopwords",
+      "group": "contract",
+      "task": "Verify explicit conjunctive lexical retrieval without changing scope.",
+      "records": [
+        {
+          "id": "answer",
+          "text": "Aster resumed launch 2026."
+        },
+        {
+          "id": "person",
+          "text": "Aster meeting."
+        },
+        {
+          "id": "fact",
+          "text": "Other team resumed work."
+        }
+      ],
+      "query": "the aster and resume",
+      "limit": 5,
+      "mode": "relevance",
+      "match_terms": "all",
+      "expect": {
+        "ids": [
+          "answer"
+        ],
+        "denied": false,
+        "order": "any"
+      }
+    },
+    {
+      "id": "all_terms_duplicate_query",
+      "group": "contract",
+      "task": "Verify explicit conjunctive lexical retrieval without changing scope.",
+      "records": [
+        {
+          "id": "answer",
+          "text": "Aster resumed launch 2026."
+        },
+        {
+          "id": "person",
+          "text": "Aster meeting."
+        },
+        {
+          "id": "fact",
+          "text": "Other team resumed work."
+        }
+      ],
+      "query": "aster aster resume",
+      "limit": 5,
+      "mode": "relevance",
+      "match_terms": "all",
+      "expect": {
+        "ids": [
+          "answer"
+        ],
+        "denied": false,
+        "order": "any"
+      }
+    },
+    {
+      "id": "all_terms_numeric_exact",
+      "group": "contract",
+      "task": "Verify explicit conjunctive lexical retrieval without changing scope.",
+      "records": [
+        {
+          "id": "answer",
+          "text": "Aster resumed launch 2026."
+        },
+        {
+          "id": "person",
+          "text": "Aster meeting."
+        },
+        {
+          "id": "fact",
+          "text": "Other team resumed work."
+        }
+      ],
+      "query": "aster 202",
+      "limit": 5,
+      "mode": "relevance",
+      "match_terms": "all",
+      "expect": {
+        "ids": [],
+        "denied": false,
+        "order": "any"
+      }
+    },
+    {
+      "id": "all_terms_short_token",
+      "group": "contract",
+      "task": "Verify explicit conjunctive lexical retrieval without changing scope.",
+      "records": [
+        {
+          "id": "answer",
+          "text": "Aster resumed launch 2026."
+        },
+        {
+          "id": "person",
+          "text": "Aster meeting."
+        },
+        {
+          "id": "fact",
+          "text": "Other team resumed work."
+        }
+      ],
+      "query": "as resume",
+      "limit": 5,
+      "mode": "relevance",
+      "match_terms": "all",
+      "expect": {
+        "ids": [],
+        "denied": false,
+        "order": "any"
+      }
+    },
+    {
+      "id": "all_terms_unicode",
+      "group": "contract",
+      "task": "Verify explicit conjunctive lexical retrieval without changing scope.",
+      "records": [
+        {
+          "id": "answer",
+          "text": "CAF\u00c9 r\u00e9sum\u00e9 final"
+        },
+        {
+          "id": "noise",
+          "text": "caf\u00e9 snacks"
+        }
+      ],
+      "query": "caf\u00e9 r\u00e9sum\u00e9",
+      "limit": 5,
+      "mode": "relevance",
+      "match_terms": "all",
+      "expect": {
+        "ids": [
+          "answer"
+        ],
+        "denied": false,
+        "order": "any"
+      }
+    },
+    {
+      "id": "all_terms_split_evidence_is_not_one_match",
+      "group": "contract",
+      "task": "Verify explicit conjunctive lexical retrieval without changing scope.",
+      "records": [
+        {
+          "id": "person",
+          "text": "Aster meeting"
+        },
+        {
+          "id": "fact",
+          "text": "Budget approved"
+        }
+      ],
+      "query": "aster budget",
+      "limit": 5,
+      "mode": "relevance",
+      "match_terms": "all",
+      "expect": {
+        "ids": [],
+        "denied": false,
+        "order": "any"
+      }
+    },
+    {
+      "id": "all_terms_hidden_evidence",
+      "group": "contract",
+      "task": "Verify explicit conjunctive lexical retrieval without changing scope.",
+      "records": [
+        {
+          "id": "private",
+          "text": "Aster resume",
+          "sensitivity": 3
+        },
+        {
+          "id": "noise",
+          "text": "Aster meeting"
+        }
+      ],
+      "query": "aster resume",
+      "limit": 5,
+      "mode": "relevance",
+      "match_terms": "all",
+      "expect": {
+        "ids": [],
+        "denied": false,
+        "order": "any"
+      }
+    },
+    {
+      "id": "all_terms_revoked_grant",
+      "group": "contract",
+      "task": "Verify explicit conjunctive lexical retrieval without changing scope.",
+      "records": [
+        {
+          "id": "answer",
+          "text": "Aster resumed launch 2026."
+        },
+        {
+          "id": "person",
+          "text": "Aster meeting."
+        },
+        {
+          "id": "fact",
+          "text": "Other team resumed work."
+        }
+      ],
+      "query": "aster resume",
+      "limit": 5,
+      "mode": "relevance",
+      "match_terms": "all",
+      "expect": {
+        "ids": [],
+        "denied": true,
+        "order": "any"
+      },
+      "revoked": true
+    },
+    {
+      "id": "all_terms_current_version",
+      "group": "contract",
+      "task": "Verify explicit conjunctive lexical retrieval without changing scope.",
+      "records": [
+        {
+          "id": "old",
+          "text": "Aster resume",
+          "source": "project",
+          "version": 1
+        },
+        {
+          "id": "new",
+          "text": "Aster meeting",
+          "source": "project",
+          "version": 2
+        }
+      ],
+      "query": "aster resume",
+      "limit": 5,
+      "mode": "relevance",
+      "match_terms": "all",
+      "expect": {
+        "ids": [],
+        "denied": false,
+        "order": "any"
+      }
     }
   ]
 }
