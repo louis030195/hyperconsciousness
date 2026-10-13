@@ -27,6 +27,7 @@
     "hlc",
     "id",
     "identity",
+    "key_control",
     "keyring",
     "log",
     "offload",
@@ -74,5 +75,5 @@
     "x25519-dalek",
     "zeroize"
   ],
-  "inventory_reason": "Existing engine modules and runtime dependencies at the baseline. Additions need a mission-fit rationale in the PR; this inventory is a review tripwire, not a ban on useful additions. Health measurement queries use chrono/chrono-tz for explicit IANA timezones and DST-safe daily aggregation; a fixed-offset implementation would misgroup measurements. Health remains a grant-scoped deterministic read projection, not coaching or device control."
+  "inventory_reason": "Existing engine modules and runtime dependencies at the baseline. Additions need a mission-fit rationale in the PR; this inventory is a review tripwire, not a ban on useful additions. Health measurement queries use chrono/chrono-tz for explicit IANA timezones and DST-safe daily aggregation; a fixed-offset implementation would misgroup measurements. Health remains a grant-scoped deterministic read projection, not coaching or device control. key_control is an internal rebuildable encrypted index for the existing keyring membership/epoch fold; it adds no adapter, service, client surface, dependency, or authority source."
 }

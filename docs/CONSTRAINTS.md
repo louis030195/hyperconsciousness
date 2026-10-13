@@ -77,6 +77,18 @@ compromise of that trusted node can read it. Disable the endpoint when that
 resident plaintext is outside the host's threat model; streaming commands do
 not retain it between calls.
 
+Keyring reconstruction can reuse `cache/key-control-v1-EPOCH`, an encrypted,
+rebuildable index of signed membership, transition and enrollment records.
+The index is bound to its data-key epoch and exact signed author-head prefixes.
+An unchanged prefix requires no historical scan; an append verifies sequence,
+predecessor, record signature and final head for the new tail. Selected cached
+records are signature-checked and decrypted again, then pass the same root
+authority and epoch-chain checks as a cold scan. Corrupt, incompatible or
+rewound caches rebuild from history. Missing authors also force a rebuild.
+Cache reads are bounded to 64 MiB, and failure to persist derived state does
+not block an otherwise valid read. These local files do not replicate and
+introduce no signed-record or wire-format change.
+
 An oversized trusted node may instead persist encrypted search manifests and
 segments. The files expose sizes and update timing locally but not plaintext
 bodies, labels, record ids or gram postings without a usable brain key. Search

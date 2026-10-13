@@ -924,32 +924,20 @@ fn memberships_for_epoch(
     let authority = identity.grant_authority()?;
     let store = Store::open(root)?;
     let mut memberships = BTreeMap::new();
-    for author in store.authors()? {
-        for record in store.log(author)?.iter_records()? {
-            let record = record?;
-            if record.epoch != epoch {
-                continue;
-            }
-            let Ok(bytes) = record.open(key) else {
-                continue;
-            };
-            let Ok(value) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
-                continue;
-            };
-            if value["kind"].as_str() != Some("device_membership") {
-                continue;
-            }
-            let Some(encoded) = value["membership"].as_str() else {
-                continue;
-            };
-            let Ok(membership) = DeviceMembership::decode(encoded) else {
-                continue;
-            };
-            if membership.authority != authority || membership.joined_epoch != epoch {
-                continue;
-            }
-            merge_membership(&mut memberships, membership)?;
+    for value in crate::key_control::values(&store, epoch, key)? {
+        if value["kind"].as_str() != Some("device_membership") {
+            continue;
         }
+        let Some(encoded) = value["membership"].as_str() else {
+            continue;
+        };
+        let Ok(membership) = DeviceMembership::decode(encoded) else {
+            continue;
+        };
+        if membership.authority != authority || membership.joined_epoch != epoch {
+            continue;
+        }
+        merge_membership(&mut memberships, membership)?;
     }
     for membership in cached_memberships(root)? {
         if membership.joined_epoch != epoch {
@@ -1005,70 +993,58 @@ fn next_control(
     let store = Store::open(root)?;
     let mut transition: Option<Transition> = None;
     let mut enrollment: Option<Enrollment> = None;
-    for author in store.authors()? {
-        for record in store.log(author)?.iter_records()? {
-            let record = record?;
-            if record.epoch != keys.current_epoch() {
-                continue;
-            }
-            let Ok(bytes) = keys.open_record(&record) else {
-                continue;
-            };
-            let Ok(value) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
-                continue;
-            };
-            match value["kind"].as_str() {
-                Some(TRANSITION_KIND) if value["epoch"].as_u64() == Some(next_epoch as u64) => {
-                    let Some(encoded) = value["transition"].as_str() else {
-                        continue;
-                    };
-                    let Ok(found) = Transition::decode(encoded) else {
-                        continue;
-                    };
-                    if found.authority != state.authority()
-                        || found.epoch != next_epoch
-                        || found.previous != state.transition()
-                    {
-                        continue;
-                    }
-                    if transition
-                        .as_ref()
-                        .is_some_and(|existing| existing != &found)
-                    {
-                        return Err(Error::Denied(
-                            "competing root-signed epoch transitions are present",
-                        ));
-                    }
-                    transition = Some(found);
-                }
-                Some(ENROLLMENT_KIND)
-                    if value["epoch"].as_u64() == Some(next_epoch as u64)
-                        && value["device"].as_str() == Some(identity.device().hex().as_str()) =>
+    for value in crate::key_control::values(&store, keys.current_epoch(), keys.current_key())? {
+        match value["kind"].as_str() {
+            Some(TRANSITION_KIND) if value["epoch"].as_u64() == Some(next_epoch as u64) => {
+                let Some(encoded) = value["transition"].as_str() else {
+                    continue;
+                };
+                let Ok(found) = Transition::decode(encoded) else {
+                    continue;
+                };
+                if found.authority != state.authority()
+                    || found.epoch != next_epoch
+                    || found.previous != state.transition()
                 {
-                    let Some(encoded) = value["enrollment"].as_str() else {
-                        continue;
-                    };
-                    let Ok(found) = Enrollment::decode(encoded) else {
-                        continue;
-                    };
-                    if found.authority != state.authority()
-                        || found.epoch != next_epoch
-                        || found.device != identity.device()
-                    {
-                        continue;
-                    }
-                    if enrollment
-                        .as_ref()
-                        .is_some_and(|existing| existing != &found)
-                    {
-                        return Err(Error::Denied(
-                            "competing epoch enrollments address this device",
-                        ));
-                    }
-                    enrollment = Some(found);
+                    continue;
                 }
-                _ => {}
+                if transition
+                    .as_ref()
+                    .is_some_and(|existing| existing != &found)
+                {
+                    return Err(Error::Denied(
+                        "competing root-signed epoch transitions are present",
+                    ));
+                }
+                transition = Some(found);
             }
+            Some(ENROLLMENT_KIND)
+                if value["epoch"].as_u64() == Some(next_epoch as u64)
+                    && value["device"].as_str() == Some(identity.device().hex().as_str()) =>
+            {
+                let Some(encoded) = value["enrollment"].as_str() else {
+                    continue;
+                };
+                let Ok(found) = Enrollment::decode(encoded) else {
+                    continue;
+                };
+                if found.authority != state.authority()
+                    || found.epoch != next_epoch
+                    || found.device != identity.device()
+                {
+                    continue;
+                }
+                if enrollment
+                    .as_ref()
+                    .is_some_and(|existing| existing != &found)
+                {
+                    return Err(Error::Denied(
+                        "competing epoch enrollments address this device",
+                    ));
+                }
+                enrollment = Some(found);
+            }
+            _ => {}
         }
     }
     Ok(transition.map(|transition| (transition, enrollment)))

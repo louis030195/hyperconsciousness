@@ -33,6 +33,7 @@ pub mod guard;
 pub mod hlc;
 pub mod id;
 pub mod identity;
+mod key_control;
 pub mod keyring;
 pub mod log;
 pub mod offload;
