@@ -1,0 +1,35 @@
+# Hyperconsciousness (`hc`)
+
+> An encrypted, append-only knowledge store that keeps signed records in sync across devices and lets users grant agents scoped, expiring access through MCP or HTTP.
+
+Written in Rust (pinned to 1.88.0), installed via a verified installer script to ~/.local/bin, or built from source with Cargo; the package is `hyperconsciousness` and the command is `hc`. The repository contains the engine, CLI, MCP/HTTP server, agent skills, and an optional local dashboard called HC Atlas. It is a developer alpha with no independent security audit; APIs and commands may change, and `hc read` does not perform full integrity checks, so use documented recovery verification for validating backups.
+
+## Docs
+
+- [Hyperconsciousness (`hc`)](https://raw.githubusercontent.com/louis030195/hyperconsciousness/main/README.md): What HC is, one-command install, supported platforms, checksum verification, auto-updates, and alpha status.
+- [docs](https://raw.githubusercontent.com/louis030195/hyperconsciousness/main/docs/README.md): Two rules for the docs: durable format has zero library dependencies, and limits are documented honestly.
+- [Hyperconsciousness](https://raw.githubusercontent.com/louis030195/hyperconsciousness/main/docs/WHITEPAPER.md): The protocol's goals: one encrypted history across devices, scoped agent access, and why existing tools fall short.
+- [Mission and repository boundary](https://raw.githubusercontent.com/louis030195/hyperconsciousness/main/MISSION.md): What the repository contains and excludes: records, identity, grants, interfaces, tests, and the dashboard exception.
+- [Hyperconsciousness PRD](https://raw.githubusercontent.com/louis030195/hyperconsciousness/main/docs/PRD.md): Product requirements: the scattered-context problem, six core concepts, and the separate-client vision.
+- [SPEC](https://raw.githubusercontent.com/louis030195/hyperconsciousness/main/docs/SPEC.md): Normative format specification: primitives, key file permissions, and durable write rules implementable without the Rust source.
+- [CONSTRAINTS](https://raw.githubusercontent.com/louis030195/hyperconsciousness/main/docs/CONSTRAINTS.md): The seven invariants of the design, the review budgets, and what breaks the design if violated.
+- [EDGE CASES](https://raw.githubusercontent.com/louis030195/hyperconsciousness/main/docs/EDGE-CASES.md): 395 edge cases grouped by topic, their status against the code, and which open cases unblock the most.
+- [DECISIONS](https://raw.githubusercontent.com/louis030195/hyperconsciousness/main/docs/DECISIONS.md): Design decisions with chosen and rejected alternatives, from one log per device to the binary header format.
+- [ROADMAP](https://raw.githubusercontent.com/louis030195/hyperconsciousness/main/docs/ROADMAP.md): Verified test results across macOS, Windows and Ubuntu, the compile-input archive hash, and what remains to build.
+- [architecture](https://raw.githubusercontent.com/louis030195/hyperconsciousness/main/docs/ARCHITECTURE.md): The layer structure from domain to interfaces, dependency rules, and the separation of cloud storage roles from brain keys.
+- [Capture context and write receipts](https://raw.githubusercontent.com/louis030195/hyperconsciousness/main/docs/CAPTURE-CONTEXT.md): How adapters attach context to remember calls, the context field limits, and the write receipt behavior.
+- [Company gateway access](https://raw.githubusercontent.com/louis030195/hyperconsciousness/main/docs/COMPANY-ACCESS.md): Owner-signed member/group policies and signed device proofs gating MCP tool calls, with enrollment commands and group rules.
+- [HC as private context infrastructure for humans and harnesses](https://raw.githubusercontent.com/louis030195/hyperconsciousness/main/docs/HARNESS-CONTEXT-PLAN.md): Implementation plan for HC as encrypted context infrastructure, separating harness, adapter and blind-bucket roles.
+- [Connect to hosted HC](https://raw.githubusercontent.com/louis030195/hyperconsciousness/main/docs/HOSTED-ACCESS.md): Installing HC and registering the Codex MCP server using an organization connection file, including skill installation rules.
+- [Query a trusted node without replicating its brain](https://raw.githubusercontent.com/louis030195/hyperconsciousness/main/docs/QUERY-NODES.md): Querying a trusted node's brain over HTTP or MCP without local replication, with token provisioning and TLS guidance.
+- [Optional lexical relevance search](https://raw.githubusercontent.com/louis030195/hyperconsciousness/main/docs/RANKED_RECALL.md): The MCP search tool's relevance mode: BM25 scoring, tokenization, tie-breaking and excerpt rules for ranked results.
+- [Using recall from an external harness](https://raw.githubusercontent.com/louis030195/hyperconsciousness/main/docs/RECALL_CLIENT.md): Bounded retrieval policy for external harnesses: query formulation, match_terms, alias handling and evidence interpretation.
+- [HC alpha.13: recover safely from stale permission snapshots](https://raw.githubusercontent.com/louis030195/hyperconsciousness/main/docs/RELEASE-NOTES.md): What changed in alpha.13: stale permission snapshot recovery, the optional trusted query-node adapter, and unchanged retry limits.
+- [Publishing HC](https://raw.githubusercontent.com/louis030195/hyperconsciousness/main/docs/RELEASING.md): How to publish HC: version bumping, the release workflow, five-runner builds, and installer behavior with HC_VERSION and HC_INSTALL_DIR.
+- [HC scalability and privacy improvements](https://raw.githubusercontent.com/louis030195/hyperconsciousness/main/docs/SCALABILITY-BENCHMARK.md): Benchmark results for retrieval, storage, build times, and active writes across 27 isolated synthetic scenarios.
+- [Screenpipe backup adapter](https://raw.githubusercontent.com/louis030195/hyperconsciousness/main/docs/SCREENPIPE-ADAPTER.md): How the hc screenpipe archive CLI adapter backs up Screenpipe data, with retention, descriptor, and size requirements.
+
+## Optional
+
+- [Changelog](https://raw.githubusercontent.com/louis030195/hyperconsciousness/main/CHANGELOG.md): User-visible changes per release, following semantic versioning, including unreleased policy, package naming, and client removals.
+- [Contributing](https://raw.githubusercontent.com/louis030195/hyperconsciousness/main/CONTRIBUTING.md): How to contribute: development setup, required checks, dashboard workflow, mission and scope review, and dependency inventory rules.
