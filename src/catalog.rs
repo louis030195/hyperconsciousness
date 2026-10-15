@@ -212,6 +212,9 @@ fn extend_catalog<K: DataKeys + ?Sized>(
     cached: Snapshot,
 ) -> Result<Snapshot> {
     let (old_heads, mut versions) = cached;
+    let mut checkpoint_heads = old_heads.clone();
+    let fingerprint = keys.cache_identity();
+    let mut since_checkpoint = 0usize;
     let heads = store.cache_heads()?;
     for (author, old) in &old_heads {
         if !heads.iter().any(|(id, head)| {
@@ -267,12 +270,32 @@ fn extend_catalog<K: DataKeys + ?Sized>(
                 id: record.id(),
                 empty: false,
             };
+            since_checkpoint += 1;
+            if since_checkpoint >= 128 {
+                // Persist only the verified prefix, never the target heads.
+                // A deadline/process interruption can resume this encrypted
+                // derived fold; callers still receive no partial catalog.
+                set_checkpoint_head(&mut checkpoint_heads, *author, previous);
+                if let Some(id) = fingerprint {
+                    let _ = save_cache(store, keys, id, &checkpoint_heads, &versions);
+                }
+                since_checkpoint = 0;
+            }
         }
         if previous != *expected {
             return Err(Error::Denied("file catalog head changed during read"));
         }
+        set_checkpoint_head(&mut checkpoint_heads, *author, previous);
     }
     Ok((heads, versions))
+}
+
+fn set_checkpoint_head(heads: &mut Vec<(DeviceId, Head)>, author: DeviceId, head: Head) {
+    if let Some((_, current)) = heads.iter_mut().find(|(id, _)| *id == author) {
+        *current = head;
+    } else {
+        heads.push((author, head));
+    }
 }
 
 fn load_cache<K: DataKeys + ?Sized>(
@@ -593,6 +616,54 @@ mod tests {
             FileCatalog::scan(&store, &keys).unwrap().newest(),
             updated.newest()
         );
+    }
+
+    #[test]
+    fn interrupted_cold_catalog_resumes_without_publishing_complete_coverage() {
+        struct InterruptedKeys(CachedKeys);
+        impl DataKeys for InterruptedKeys {
+            fn current_epoch(&self) -> u32 {
+                self.0.current_epoch()
+            }
+            fn key(&self, epoch: u32) -> Result<&[u8; 32]> {
+                self.0.key(epoch)
+            }
+            fn cache_identity(&self) -> Option<Hash> {
+                self.0.cache_identity()
+            }
+            fn open_record(&self, record: &Record) -> Result<Vec<u8>> {
+                assert!(
+                    self.0.inner.opened.get() < 300,
+                    "synthetic process interruption"
+                );
+                self.0.open_record(record)
+            }
+        }
+        let root = tempdir().unwrap();
+        let store = Store::open(root.path()).unwrap();
+        let signing = SigningKey::generate(&mut OsRng);
+        add_records(&store, &signing, 600, "resume.md");
+        let interrupted = InterruptedKeys(cached_keys());
+        assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            FileCatalog::scan(&store, &interrupted).unwrap();
+        }))
+        .is_err());
+        let keys = cached_keys();
+        let (heads, versions) = load_cache(&store, &keys, keys.cache_identity().unwrap()).unwrap();
+        assert!(heads[0].1.seq < 300);
+        assert!(
+            versions.is_empty(),
+            "the unread final file cannot appear in a partial fold"
+        );
+        let complete = FileCatalog::scan(&store, &keys).unwrap();
+        assert_eq!(complete.version_count("resume.md"), 1);
+        assert!(
+            keys.inner.opened.get() < 400,
+            "verified prefix must survive interruption"
+        );
+        keys.inner.opened.set(0);
+        FileCatalog::scan(&store, &keys).unwrap();
+        assert_eq!(keys.inner.opened.get(), 0);
     }
     #[test]
     fn cache_corruption_key_view_changes_and_author_removal_rebuild_safely() {
