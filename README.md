@@ -240,3 +240,12 @@ cargo package --locked
 ```
 
 MIT licensed. See [LICENSE](LICENSE).
+
+### Searchable text file archives
+
+`hc add notes.json --index-text` archives the exact UTF-8 bytes and includes the
+same text in the encrypted file record for HC search. This is opt-in, limited to
+1 MiB, and marks the indexed file as personal sensitivity. Binary and oversized
+inputs are rejected before creating a brain or writing an archive. Ordinary
+`hc add` keeps its existing filename-only discovery behavior. This does not run
+a model, extract media text, infer speakers, or make source content trusted.
