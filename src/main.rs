@@ -91,7 +91,7 @@ short command: hc.
   hc authority harden      separate an old brain's grant and data keys
   hc write <text> [opts]   append a note
   hc read [n]              read the last n notes, default 20
-  hc add <file> [--archive peer]
+  hc add <file> [--index-text] [--archive peer]
                                   store a file; optionally prove a remote encrypted copy
   hc screenpipe archive <peer> [--port 3030] [--staging folder]
                                   snapshot the live database into a proved remote archive
@@ -1630,7 +1630,7 @@ fn add_file(
         .unwrap_or_else(|| "unnamed".to_string());
 
     hyperconsciousness::guard::no_symlink(path)?;
-    add_reader(dir, File::open(path)?, &name, archive, source)
+    add_reader(dir, File::open(path)?, &name, archive, source, None)
 }
 
 /// Application adapters supply bytes; HC's signed file/blob format is generic.
@@ -1640,6 +1640,7 @@ fn add_reader(
     name: &str,
     archive: Option<&str>,
     source: Option<&str>,
+    indexed_text: Option<&str>,
 ) -> Result<BlobRef> {
     let identity = Identity::load_or_create(dir)?;
     let keys = runtime_keys(dir, &identity)?;
@@ -1651,6 +1652,11 @@ fn add_reader(
     value["kind"] = serde_json::json!("file");
     value["name"] = serde_json::json!(name);
     value["of"] = serde_json::json!(hyperconsciousness::id::Hash::of(name.as_bytes()).hex());
+    if let Some(text) = indexed_text {
+        value["text"] = serde_json::json!(text);
+        value["sensitivity"] = serde_json::json!(hyperconsciousness::grant::PERSONAL);
+        value["text_indexing"] = serde_json::json!("explicit_utf8_v1");
+    }
     if let Some(source) = source {
         value["source"] = serde_json::json!(source);
     }
@@ -1874,6 +1880,7 @@ fn archive_screenpipe_snapshot(
             snapshot.logical_name(),
             Some(host),
             Some(snapshot.source()),
+            None,
         )
     })
 }
@@ -5672,7 +5679,32 @@ fn run() -> Result<()> {
                         .ok_or(Error::Malformed("--archive needs a peer"))
                 })
                 .transpose()?;
-            add_file(&args.dir, &path, None, archive.as_deref(), None)?;
+            if args.rest.iter().any(|arg| arg == "--index-text") {
+                // An explicit bounded projection, never auto-extract arbitrary
+                // files or send bytes to a model. Read once so the searchable
+                // text and archived blob cannot describe different revisions.
+                hyperconsciousness::guard::no_symlink(&path)?;
+                let bytes = zeroize::Zeroizing::new(hyperconsciousness::durable::read_bounded(
+                    &path,
+                    1024 * 1024,
+                )?);
+                let text = std::str::from_utf8(&bytes)
+                    .map_err(|_| Error::Malformed("--index-text requires UTF-8"))?;
+                let name = path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .ok_or(Error::Malformed("indexed file needs a UTF-8 name"))?;
+                add_reader(
+                    &args.dir,
+                    std::io::Cursor::new(bytes.as_slice()),
+                    name,
+                    archive.as_deref(),
+                    None,
+                    Some(text),
+                )?;
+            } else {
+                add_file(&args.dir, &path, None, archive.as_deref(), None)?;
+            }
             Ok(())
         }
 

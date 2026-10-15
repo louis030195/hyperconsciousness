@@ -348,3 +348,68 @@ fn hc_find_index_matches_fallback_without_duplicates_and_sees_appended_notes() {
     drop(lock);
     assert_eq!(find(), fallback);
 }
+
+#[test]
+fn explicitly_indexed_text_files_are_searchable_and_restore_exactly() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path().join("brain");
+    let mut identity = hyperconsciousness::identity::Identity::load_or_create(&dir).unwrap();
+    identity.create_brain().unwrap();
+    let input = tmp.path().join("evidence.json");
+    let text = "{\"source\":\"synthetic\",\"text\":\"violet telescope receipt\"}";
+    fs::write(&input, text).unwrap();
+    let add = Command::new(binary())
+        .arg("add")
+        .arg(&input)
+        .arg("--index-text")
+        .arg("--dir")
+        .arg(&dir)
+        .env("BRAINMESH_NO_KEYSTORE", "1")
+        .output()
+        .unwrap();
+    assert!(
+        add.status.success(),
+        "{}",
+        String::from_utf8_lossy(&add.stderr)
+    );
+    let found = Command::new(binary())
+        .args(["find", "violet telescope", "--scope", "hc", "--dir"])
+        .arg(&dir)
+        .env("BRAINMESH_NO_KEYSTORE", "1")
+        .output()
+        .unwrap();
+    assert!(found.status.success());
+    assert!(String::from_utf8_lossy(&found.stdout).contains("violet telescope receipt"));
+    let dest = tmp.path().join("restored.json");
+    let get = Command::new(binary())
+        .args(["get", "evidence.json"])
+        .arg(&dest)
+        .arg("--dir")
+        .arg(&dir)
+        .env("BRAINMESH_NO_KEYSTORE", "1")
+        .output()
+        .unwrap();
+    assert!(get.status.success());
+    assert_eq!(fs::read_to_string(dest).unwrap(), text);
+}
+
+#[test]
+fn indexed_text_rejects_binary_and_oversize_before_creating_a_brain() {
+    for bytes in [vec![255u8; 4], vec![b'x'; 1024 * 1024 + 1]] {
+        let tmp = tempfile::tempdir().unwrap();
+        let input = tmp.path().join("input");
+        let dir = tmp.path().join("brain");
+        fs::write(&input, bytes).unwrap();
+        let result = Command::new(binary())
+            .arg("add")
+            .arg(&input)
+            .arg("--index-text")
+            .arg("--dir")
+            .arg(&dir)
+            .env("BRAINMESH_NO_KEYSTORE", "1")
+            .output()
+            .unwrap();
+        assert!(!result.status.success());
+        assert!(!dir.exists());
+    }
+}
