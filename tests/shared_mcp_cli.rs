@@ -241,7 +241,8 @@ fn shared_remote_keeps_denied_reads_out_of_personal_brain() {
     );
     assert_eq!(status, 200);
     let value: Value = serde_json::from_str(&reply).unwrap();
-    assert_eq!(value["error"]["code"], -32000);
+    assert_eq!(value["error"]["code"], -32004);
+    assert_eq!(value["error"]["message"], "not signed in; run hc login");
     assert!(!root.path().join("unused-personal").exists());
     assert!(!access.join("session.json").exists());
 }

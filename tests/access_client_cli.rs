@@ -69,7 +69,8 @@ fn hosted_setup_and_denied_mcp_never_initialize_or_fall_back_to_a_personal_brain
     assert!(output.status.success());
     let response: Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(response["id"], 7);
-    assert_eq!(response["error"]["code"], -32000);
+    assert_eq!(response["error"]["code"], -32004);
+    assert_eq!(response["error"]["message"], "not signed in; run hc login");
     assert!(!brain.exists());
     assert!(!config.join("session.json").exists());
 }

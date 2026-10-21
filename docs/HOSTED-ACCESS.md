@@ -15,6 +15,16 @@ Setup registers the native executable as the named Codex MCP server and installs
 
 The native client is included in HC; no Bun, JavaScript runtime, adapter download or API key is needed on the teammate's computer. The optional server access plugin selects the identity provider and enforces membership and native grants. There is no general plugin marketplace or dynamic code loader.
 
+If discovery fails, run `hc status --remote` on the same profile. MCP error
+`-32004` reports a missing, expired or rejected hosted session and directs you to
+`hc login`. Error `-32005` reports a host-confirmed membership/dataset denial;
+ask the host owner to check the assignment. Login does not grant permissions.
+Hosts opt into these distinctions through static `session_required` (HTTP 401)
+and `membership_denied` (HTTP 403) codes. An older or unclassified denial stays
+`-32001`; unavailable service stays `-32002`, and query budget exhaustion stays
+`-32003`. Unknown errors remain redacted. A provisioned node credential does
+not trigger hosted-login advice. No denied operation is automatically retried.
+
 Public connection file:
 
 ```json

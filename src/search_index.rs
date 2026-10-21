@@ -553,6 +553,47 @@ impl Index {
         Ok(bulk_withheld)
     }
 
+    /// Route an exact reference through its signed log segment rather than
+    /// opening every encrypted metadata shard. The selected entry remains
+    /// untrusted until record() verifies its signature and locator.
+    pub(crate) fn entry_by_ref<K: DataKeys + ?Sized>(
+        &self,
+        store: &Store,
+        keys: &K,
+        author: DeviceId,
+        sequence: u64,
+    ) -> Result<Option<Entry>> {
+        let log = store.log(author)?;
+        let Some(located) = log.iter_located_tail_from(sequence)?.next().transpose()? else {
+            return Ok(None);
+        };
+        if located.record.seq != sequence {
+            return Ok(None);
+        }
+        let mut found = None;
+        for descriptor in self
+            .segments
+            .iter()
+            .filter(|s| s.author == author && s.log_segment == located.location.segment)
+        {
+            for entry in self.open_segment(keys, descriptor)?.entries {
+                if entry.seq != sequence {
+                    continue;
+                }
+                if found.is_some() {
+                    return Err(Error::Malformed("duplicate indexed record reference"));
+                }
+                if entry.location != located.location || entry.id != located.record.id() {
+                    return Err(Error::Denied(
+                        "search index location no longer names its signed record",
+                    ));
+                }
+                found = Some(entry);
+            }
+        }
+        Ok(found)
+    }
+
     /// Resolve a selected cache entry through its local bounded log segment and
     /// recheck every signed identity field. A locator is never authority.
     pub(crate) fn record(&self, store: &Store, entry: &Entry) -> Result<Record> {
@@ -2120,6 +2161,70 @@ mod tests {
     use crate::hlc::Clock;
     use crate::query::{self, Filter};
     use crate::record::Record;
+
+    #[test]
+    fn point_reads_do_not_open_unrelated_metadata_shards() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::open(root.path()).unwrap();
+        let signing = SigningKey::generate(&mut OsRng);
+        let unrelated = SigningKey::generate(&mut OsRng);
+        let key = random_key();
+        let authority = DeviceId(signing.verifying_key().to_bytes());
+        let grant = Grant::issue(&signing, authority, Scope::everything(), READ, u64::MAX).unwrap();
+        append(
+            &store,
+            &signing,
+            &key,
+            &[r#"{"kind":"note","text":"selected"}"#.into()],
+        );
+        append(
+            &store,
+            &unrelated,
+            &key,
+            &[r#"{"kind":"note","text":"unrelated"}"#.into()],
+        );
+        let fingerprint = Hash::of(key.as_slice());
+        let index = Index::load_or_build(root.path(), &store, &key, fingerprint).unwrap();
+        let permissions =
+            crate::revocation::Index::load_or_build(root.path(), &store, &key, fingerprint)
+                .unwrap();
+        let other = index
+            .segments
+            .iter()
+            .find(|s| s.author != authority)
+            .unwrap();
+        fs::remove_file(segments_dir(root.path()).join(&other.file)).unwrap();
+        let reference = format!("{}:0", authority.short());
+        let answer = query::record_by_ref_indexed(
+            &store,
+            &key,
+            &index,
+            &permissions,
+            std::slice::from_ref(&grant),
+            authority,
+            1,
+            &reference,
+        )
+        .unwrap();
+        assert!(String::from_utf8_lossy(&answer.payload).contains("selected"));
+        append(
+            &store,
+            &signing,
+            &key,
+            &[serde_json::json!({"kind":"revoke","grant":grant.id().hex()}).to_string()],
+        );
+        assert!(query::record_by_ref_indexed(
+            &store,
+            &key,
+            &index,
+            &permissions,
+            &[grant],
+            authority,
+            1,
+            &reference
+        )
+        .is_err());
+    }
 
     struct CountingKeys {
         key: BrainKey,

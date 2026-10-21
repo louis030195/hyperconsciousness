@@ -2761,19 +2761,11 @@ pub fn record_by_ref_indexed<K: DataKeys + ?Sized>(
         ));
     }
 
-    let mut found = None;
-    index.visit(keys, None, |entry, _| {
-        if entry.author == author && entry.seq == sequence {
-            if found.is_some() {
-                return Err(Error::Malformed("duplicate indexed record reference"));
-            }
-            found = Some(entry.clone());
-        }
-        Ok(())
-    })?;
-    let entry = found.ok_or(Error::Denied(
-        "record reference is unavailable under this grant",
-    ))?;
+    let entry = index
+        .entry_by_ref(store, keys, author, sequence)?
+        .ok_or(Error::Denied(
+            "record reference is unavailable under this grant",
+        ))?;
     if !chain
         .iter()
         .all(|grant| grant.allows(&entry.item, READ, now))
