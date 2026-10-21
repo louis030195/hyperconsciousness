@@ -23,6 +23,8 @@ use storage::Storage;
 const MAX_RESPONSE: usize = 2 * 1024 * 1024;
 const MAX_REQUEST: usize = 65_536;
 const ACCESS_DENIED: &str = "HC access denied; check membership, session expiry and dataset scope";
+const SIGN_IN_REQUIRED: &str = "HC session expired or revoked; run hc login, then retry. If access remains denied, ask the host owner to check membership and assigned datasets";
+const SCOPE_DENIED: &str = "HC membership or dataset access denied; ask the host owner to check your assignment. Signing in again does not grant access";
 const RATE_LIMITED: &str = "HC query budget exhausted; wait before retrying";
 const UNAVAILABLE: &str =
     "HC service unavailable or timed out; retry later without changing permissions";
@@ -135,7 +137,21 @@ impl Client {
             request = request.set("Authorization", &format!("Bearer {access}"));
         }
         let response = request.send_bytes(&encoded).map_err(|error| match error {
-            ureq::Error::Status(401 | 403, _) => Error::Denied(ACCESS_DENIED),
+            ureq::Error::Status(status @ (401 | 403), response) => {
+                // Only closed diagnostic codes are trusted. Never echo a host
+                // error body, identity, token, or arbitrary recovery instruction.
+                let code: Value = serde_json::from_reader(response.into_reader().take(4096))
+                    .unwrap_or(Value::Null);
+                match (
+                    status,
+                    code["code"].as_str(),
+                    self.profile.credential_file.is_none(),
+                ) {
+                    (401, Some("session_required"), true) => Error::Denied(SIGN_IN_REQUIRED),
+                    (403, Some("membership_denied"), _) => Error::Denied(SCOPE_DENIED),
+                    _ => Error::Denied(ACCESS_DENIED),
+                }
+            }
             ureq::Error::Status(429, _) => Error::Denied(RATE_LIMITED),
             _ => Error::Denied(UNAVAILABLE),
         })?;
@@ -402,6 +418,13 @@ impl Client {
 // Emit only closed, static diagnostics, never an upstream body or IO message.
 fn rpc_failure(error: &Error) -> (i32, &'static str) {
     match error {
+        Error::Denied(
+            message @ ("HC sign-in expired; run hc login"
+            | "not signed in; run hc login"
+            | "HC session does not match this connection; run hc login"
+            | SIGN_IN_REQUIRED),
+        ) => (-32004, message),
+        Error::Denied(SCOPE_DENIED) => (-32005, SCOPE_DENIED),
         Error::Denied(ACCESS_DENIED) => (-32001, ACCESS_DENIED),
         Error::Denied(UNAVAILABLE) => (-32002, UNAVAILABLE),
         Error::Denied(RATE_LIMITED) => (-32003, RATE_LIMITED),
@@ -466,6 +489,43 @@ fn validate_status_reply(reply: &Value, id: u64, discovery: bool) -> Result<()> 
 mod tests {
     use super::*;
     #[test]
+    fn expired_sign_in_survives_mcp_initialization_without_private_details() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("client");
+        let store = Storage::open(root.clone()).unwrap();
+        let p = Profile::parse(br#"{"version":1,"origin":"https://example.com"}"#).unwrap();
+        store.install(&p).unwrap();
+        store
+            .save(
+                &p,
+                &Session {
+                    endpoint: p.endpoint(),
+                    access_token: "a".repeat(43),
+                    refresh_token: "b".repeat(43),
+                    expires_at: now() - 2,
+                    refresh_expires_at: now() - 1,
+                    email: "private@example.com".into(),
+                },
+            )
+            .unwrap();
+        let client = Client::open(root).unwrap();
+        let reply = client
+            .answer(&json!({"jsonrpc":"2.0","id":1,"method":"initialize"}))
+            .unwrap();
+        assert_eq!(reply["error"]["code"], -32004);
+        assert_eq!(
+            reply["error"]["message"],
+            "HC sign-in expired; run hc login"
+        );
+        assert!(!reply.to_string().contains("private@example.com"));
+        assert!(!reply.to_string().contains(&"b".repeat(43)));
+        assert_eq!(
+            client.status().unwrap_err().to_string(),
+            "denied: HC sign-in expired; run hc login"
+        );
+    }
+
+    #[test]
     fn safe_rpc_failures_distinguish_denial_from_unavailability() {
         assert_eq!(rpc_failure(&Error::Denied(ACCESS_DENIED)).0, -32001);
         assert_eq!(rpc_failure(&Error::Denied(UNAVAILABLE)).0, -32002);
@@ -473,6 +533,86 @@ mod tests {
         let (code, text) = rpc_failure(&private);
         assert_eq!(code, -32000);
         assert!(!text.contains("private upstream"));
+        assert_eq!(
+            rpc_failure(&Error::Denied(SCOPE_DENIED)),
+            (-32005, SCOPE_DENIED)
+        );
+        assert_eq!(
+            rpc_failure(&Error::Denied("not signed in; run hc login")).0,
+            -32004
+        );
+        assert_eq!(
+            rpc_failure(&Error::Denied("private host message")).0,
+            -32000
+        );
+    }
+
+    #[test]
+    fn hosted_http_denials_use_only_allowlisted_reason_codes() {
+        use std::net::TcpListener;
+        for (status, body, expected) in [
+            (
+                401,
+                r#"{"code":"session_required","error":"private host detail"}"#,
+                SIGN_IN_REQUIRED,
+            ),
+            (
+                403,
+                r#"{"code":"membership_denied","email":"private@example.com"}"#,
+                SCOPE_DENIED,
+            ),
+            (
+                401,
+                r#"{"code":"unknown","error":"private host detail"}"#,
+                ACCESS_DENIED,
+            ),
+            (401, r#"{"code":"membership_denied"}"#, ACCESS_DENIED),
+        ] {
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            let address = listener.local_addr().unwrap();
+            let host = std::thread::spawn(move || {
+                let (mut stream, _) = listener.accept().unwrap();
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(5)))
+                    .unwrap();
+                let mut reader = std::io::BufReader::new(&mut stream);
+                let mut length = 0;
+                loop {
+                    let mut line = String::new();
+                    assert!(reader.read_line(&mut line).unwrap() > 0);
+                    if line == "\r\n" {
+                        break;
+                    }
+                    if let Some((name, value)) = line.split_once(':') {
+                        if name.eq_ignore_ascii_case("content-length") {
+                            length = value.trim().parse::<usize>().unwrap();
+                        }
+                    }
+                }
+                let mut request_body = vec![0; length];
+                reader.read_exact(&mut request_body).unwrap();
+                write!(stream, "HTTP/1.1 {status} Denied\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
+            });
+            let temp = tempfile::tempdir().unwrap();
+            let store = Storage::open(temp.path().join("client")).unwrap();
+            let mut profile =
+                Profile::parse(br#"{"version":1,"origin":"https://example.com"}"#).unwrap();
+            // Only the isolated test transport uses HTTP; installed hosted profiles require TLS.
+            profile.origin = format!("http://{address}");
+            let client = Client {
+                store,
+                profile,
+                http: ureq::AgentBuilder::new().build(),
+            };
+            assert_eq!(
+                client
+                    .post("/mcp", &json!({}), None)
+                    .unwrap_err()
+                    .to_string(),
+                format!("denied: {expected}")
+            );
+            host.join().unwrap();
+        }
     }
 
     #[test]

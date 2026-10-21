@@ -1,7 +1,26 @@
 <!-- screenpipe — AI that knows everything you've seen, said, or heard -->
 <!-- https://screenpipe.com -->
 
-# HC alpha.14: keep reads usable during ordinary appends
+# HC alpha.15: actionable hosted access errors and targeted record reads
+
+Hosted MCP startup now preserves safe local sign-in diagnostics, including a
+missing or expired session. Hosts can distinguish invalid/expired sessions from
+membership or dataset denial using static response codes. Older hosts retain
+the generic access-denied fallback. Host error bodies and identity details are
+never forwarded as diagnostics. No sign-in, permission change, or request retry
+is performed automatically.
+
+Exact indexed record reads locate the signed log segment and open its matching
+metadata shard instead of scanning every metadata shard. Current grant and
+revocation checks, capture visibility, signed identity verification and release
+tail checks still apply. An unrelated missing metadata shard no longer prevents
+an otherwise valid exact read. This does not change ranking or eliminate cold
+index preparation and contention.
+
+Install with `hc update`, then reconnect your MCP client or start a new chat.
+HC remains a developer alpha.
+
+## Earlier alpha.14: keep reads usable during ordinary appends
 
 Indexed reads now validate their pinned search prefix when another writer
 appends while permissions are being prepared. Literal search, relevance search,
