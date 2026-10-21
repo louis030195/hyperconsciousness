@@ -1,7 +1,24 @@
 <!-- screenpipe — AI that knows everything you've seen, said, or heard -->
 <!-- https://screenpipe.com -->
 
-# HC alpha.13: recover safely from stale permission snapshots
+# HC alpha.14: keep reads usable during ordinary appends
+
+Indexed reads now validate their pinned search prefix when another writer
+appends while permissions are being prepared. Literal search, relevance search,
+record reads and overview can return that prefix after a bounded tail check.
+The response excludes records appended after the pinned heads.
+
+Current permissions are still required. Capture corrections, relevant grant
+revocations, changed prefixes and unreadable or over-budget tails refuse the
+response. Entry and release both check the tail. Resource limits and retry
+budgets are unchanged.
+
+This fixes a reproduced read conflict. Search relevance and contention from
+other causes still have limitations.
+
+Install with `hc update`. HC remains a developer alpha.
+
+## Earlier alpha.13: recover safely from stale permission snapshots
 
 Indexed reads now prepare the search index before refreshing their permission
 snapshot. A snapshot invalidated by a concurrent append reports a transient read

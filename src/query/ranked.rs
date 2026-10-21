@@ -365,9 +365,7 @@ pub fn look_indexed<K: DataKeys + ?Sized>(
     filter: &Filter,
 ) -> Result<Answer> {
     let effective = read_grant_indexed(store, keys, chain, authority, now, permissions)?;
-    if !index.is_current(store)? {
-        return Err(Error::Denied("search index changed during ranked read"));
-    }
+    index.validate_read(store, keys, chain)?;
     let captures = index.capture_state_shared(keys)?;
     let mut corpus = Corpus::new(filter)?;
     let terms = corpus.terms.clone();

@@ -2261,7 +2261,8 @@ pub fn look_snapshot<K: DataKeys + ?Sized>(
 /// Search through the persistent encrypted fold. Permission metadata is still
 /// evaluated for every readable record, while opaque trigram postings narrow
 /// exact payload decryption to a safe candidate superset. A stale permission
-/// or search fold fails closed and the caller may retry through `look`.
+/// fold fails closed. The search view is a signed prefix: bounded ordinary
+/// appends are safe; corrections, revocations and changed prefixes are not.
 // Keep the established grant/key/index API compatible with existing callers.
 #[allow(clippy::too_many_arguments)]
 pub fn look_indexed<K: DataKeys + ?Sized>(
@@ -2274,10 +2275,8 @@ pub fn look_indexed<K: DataKeys + ?Sized>(
     now: u64,
     filter: &Filter,
 ) -> Result<Answer> {
-    if !index.is_current(store)? {
-        return Err(Error::Denied("search index changed during query"));
-    }
     let effective = read_grant_indexed(store, keys, chain, authority, now, permissions)?;
+    index.validate_read(store, keys, chain)?;
     let captures = index.capture_state_shared(keys)?;
     let needle = filter.text.as_deref().map(PreparedNeedle::new);
     let limit = if filter.limit == 0 { 20 } else { filter.limit };
@@ -2746,10 +2745,8 @@ pub fn record_by_ref_indexed<K: DataKeys + ?Sized>(
     reference: &str,
 ) -> Result<RecordAnswer> {
     let (author_prefix, sequence) = parse_reference(reference)?;
-    if !index.is_current(store)? {
-        return Err(Error::Denied("search index changed during point read"));
-    }
     let effective = read_grant_indexed(store, keys, chain, authority, now, permissions)?;
+    index.validate_read(store, keys, chain)?;
     let captures = index.capture_state_shared(keys)?;
     let mut authors = store
         .authors()?
@@ -3010,10 +3007,8 @@ pub fn overview_indexed<K: DataKeys + ?Sized>(
     authority: DeviceId,
     now: u64,
 ) -> Result<Overview> {
-    if !index.is_current(store)? {
-        return Err(Error::Denied("search index changed during overview"));
-    }
     let effective = read_grant_indexed(store, keys, chain, authority, now, permissions)?;
+    index.validate_read(store, keys, chain)?;
     let captures = index.capture_state_shared(keys)?;
     let mut out = Overview {
         total: 0,

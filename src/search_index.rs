@@ -739,8 +739,8 @@ impl Index {
                 return Ok(true);
             }
         }
-        // This is a valid, publishable prefix. Query entry still requires current
-        // heads and release still validates revocations and capture corrections.
+        // This is a valid, publishable prefix. Query entry and release still
+        // validate bounded tails for revocations and capture corrections.
         // A retry advances only the remaining tail instead of rebuilding history.
         Ok(true)
     }
@@ -2233,6 +2233,114 @@ mod tests {
                 assert_eq!(result.unwrap().records.len(), 1);
             } else {
                 assert!(result.is_err(), "{mode} must invalidate the response");
+            }
+        }
+    }
+
+    #[test]
+    fn indexed_reads_allow_an_append_during_permission_preparation_but_reject_control_changes() {
+        for mode in ["ordinary", "revoke", "correction"] {
+            let root = tempfile::tempdir().unwrap();
+            let store = Store::open(root.path()).unwrap();
+            let signing = SigningKey::generate(&mut OsRng);
+            let key = random_key();
+            let authority = DeviceId(signing.verifying_key().to_bytes());
+            let grant =
+                Grant::issue(&signing, authority, Scope::everything(), READ, u64::MAX).unwrap();
+            append(
+                &store,
+                &signing,
+                &key,
+                &[r#"{"kind":"note","text":"needle evidence"}"#.into()],
+            );
+            let index =
+                Index::load_or_build(root.path(), &store, &key, Hash::of(key.as_slice())).unwrap();
+            // The search view is pinned first. Another writer can append while
+            // the independently current permission fold is being prepared.
+            let payload = match mode {
+                "revoke" => serde_json::json!({"kind":"revoke", "grant":grant.id().hex()}),
+                "correction" => serde_json::json!({"kind":"note", "provenance":"grant_write_v1",
+                    "grantee":authority.hex(), "context":{"producer":"test","source_id":"chat","record_id":"one"},
+                    "capture_change":{"version":2,"operation":"retract"}}),
+                _ => serde_json::json!({"kind":"note", "text":"later unrelated note"}),
+            }.to_string();
+            append(&store, &signing, &key, &[payload]);
+            let permissions = crate::revocation::Index::load_or_build(
+                root.path(),
+                &store,
+                &key,
+                Hash::of(key.as_slice()),
+            )
+            .unwrap();
+            let filter = query::Filter {
+                text: Some("needle evidence".into()),
+                ..Default::default()
+            };
+            let chain = [grant];
+            let reference = format!("{}:0", authority.hex());
+            let results = [
+                (
+                    "literal",
+                    query::look_indexed(
+                        &store,
+                        &key,
+                        &index,
+                        &permissions,
+                        &chain,
+                        authority,
+                        1,
+                        &filter,
+                    )
+                    .map(|a| a.records.len()),
+                ),
+                (
+                    "ranked",
+                    query::ranked::look_indexed(
+                        &store,
+                        &key,
+                        &index,
+                        &permissions,
+                        &chain,
+                        authority,
+                        1,
+                        &filter,
+                    )
+                    .map(|a| a.records.len()),
+                ),
+                (
+                    "record",
+                    query::record_by_ref_indexed(
+                        &store,
+                        &key,
+                        &index,
+                        &permissions,
+                        &chain,
+                        authority,
+                        1,
+                        &reference,
+                    )
+                    .map(|_| 1),
+                ),
+                (
+                    "overview",
+                    query::overview_indexed(
+                        &store,
+                        &key,
+                        &index,
+                        &permissions,
+                        &chain,
+                        authority,
+                        1,
+                    )
+                    .map(|a| a.total),
+                ),
+            ];
+            for (path, result) in results {
+                if mode == "ordinary" {
+                    assert_eq!(result.unwrap_or_else(|e| panic!("{path}: {e}")), 1);
+                } else {
+                    assert!(result.is_err(), "{path}: {mode} must deny the stale view");
+                }
             }
         }
     }

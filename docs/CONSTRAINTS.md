@@ -439,3 +439,14 @@ directory keeps older running binaries from replacing the new fold; it builds
 once from signed history and does not remove older cache files.
 
 The key-control index verifies signatures for every selected control record. Unrelated content is not used for authorization; cold indexing checks its author, sequence, predecessor and record-id chain against the persisted head, without repeating content signature verification already required at log append/import. A modified content record breaks that chain. This does not change root-signature, membership, transition or revocation validation.
+
+### Indexed reads during permission preparation
+
+Search-index preparation pins a signed prefix before the independent current
+permission fold is opened. Ordinary bounded appends between these steps do not
+invalidate literal, ranked, point or overview reads. Entry and release both
+validate the signed tail; capture changes, relevant revocations, changed
+prefixes and unreadable or over-budget tails still fail closed. Permissions
+must remain current at authorization. This snapshot does not include ordinary
+records appended after its pinned heads. MCP still refreshes its index before
+each request, and its release checks retain current keys and membership.
