@@ -550,23 +550,27 @@ mod tests {
     #[test]
     fn hosted_http_denials_use_only_allowlisted_reason_codes() {
         use std::net::TcpListener;
-        for (status, body, expected) in [
+        for (status, body, hosted, expected) in [
             (
                 401,
                 r#"{"code":"session_required","error":"private host detail"}"#,
+                true,
                 SIGN_IN_REQUIRED,
             ),
             (
                 403,
                 r#"{"code":"membership_denied","email":"private@example.com"}"#,
+                true,
                 SCOPE_DENIED,
             ),
             (
                 401,
                 r#"{"code":"unknown","error":"private host detail"}"#,
+                true,
                 ACCESS_DENIED,
             ),
-            (401, r#"{"code":"membership_denied"}"#, ACCESS_DENIED),
+            (401, r#"{"code":"membership_denied"}"#, true, ACCESS_DENIED),
+            (401, r#"{"code":"session_required"}"#, false, ACCESS_DENIED),
         ] {
             let listener = TcpListener::bind("127.0.0.1:0").unwrap();
             let address = listener.local_addr().unwrap();
@@ -599,6 +603,9 @@ mod tests {
                 Profile::parse(br#"{"version":1,"origin":"https://example.com"}"#).unwrap();
             // Only the isolated test transport uses HTTP; installed hosted profiles require TLS.
             profile.origin = format!("http://{address}");
+            if !hosted {
+                profile.credential_file = Some(temp.path().join("node-token"));
+            }
             let client = Client {
                 store,
                 profile,
