@@ -15,7 +15,7 @@ HC is a developer alpha, so APIs and commands may change. No independent
 security audit is claimed. Read the [security limits](docs/CONSTRAINTS.md) before
 using it for important data. The package is `hyperconsciousness`; run it with `hc`.
 
-Start with [HC for humans](HUMANS.md) for setup, everyday use and troubleshooting.
+Read [HC for humans](HUMANS.md) for permissions, sharing, privacy and working with agents.
 Agents can follow the [usage skill](skills/hyperconsciousness/SKILL.md).
 
 ## Install

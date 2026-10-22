@@ -4,84 +4,101 @@
 
 # HC for humans
 
-HC stores knowledge that you and your agents can retrieve later. Tell your agent
-which brain to use; it can handle searches and source references.
+HC stores knowledge for you and your agents. It holds records you can return
+to later, with references to where they came from. The main decisions are what
+belongs in each brain, who can access it, and what their agents may do.
 
-## Install
+## Your brain and a company brain
 
-On macOS or Linux:
+A personal brain holds information you intend to keep for yourself. A company
+brain holds information intended for work. They have separate connections and
+permissions. Joining a company brain does not automatically share your personal
+brain with your employer or teammates.
 
-```sh
-curl -fsSL https://raw.githubusercontent.com/louis030195/hyperconsciousness/main/install.sh | sh
-```
+Keep the destination explicit when asking an agent to read or save something.
+Separation also depends on the surrounding setup: an agent with access to your
+computer's files may be able to read material outside its HC connection.
 
-Follow the installer's PATH instructions. For Windows builds and platform
-requirements, see [installation](README.md#install).
+## Who can see what?
 
-## Join a shared brain
+The owner controls access. A permission can cover a selected set of records,
+allow particular actions, and expire at a chosen time. It can be restricted by
+record type, labels or sensitivity. You can give an agent access to useful
+context without giving it the owner's authority.
 
-Get the connection pack from your organization. From the folder containing its
-`company-hc.json` file, run the commands below. The `--codex` option requires the
-Codex CLI on your PATH.
-
-```sh
-hc setup company-hc.json --codex
-hc login
-hc status --remote
-```
-
-Sign in with your own account, then start a new Codex chat to discover HC and its
-bundled skills. Other AI clients use [hosted access setup](docs/HOSTED-ACCESS.md).
-
-You can read the datasets your host permits, without provider API keys on your
-computer. Status checks authentication and tool discovery. Ask your agent to open
-a source record to verify retrieval.
-
-For your own local brain, start with the [isolated store example](README.md#try-an-isolated-store).
-Keep its directory and agent connection separate from a shared company connection.
-
-## Use it in conversation
-
-Name the brain, the subject and the period you care about. For example:
-
-- "Explain this project's latest decision using the company brain. Link the evidence."
-- "Summarize last week's customer feedback, with source dates and coverage gaps."
-- "What company data can you access, and how fresh is it?"
-- "Save this decision to the company brain with this source link. Confirm whether it was published or queued for review."
-
-Your agent should distinguish when something happened from when HC received it.
-Check the original sources before acting on an important or uncertain answer.
-
-Hosts control dataset access and contribution review. Ask the owner about missing
-datasets. Keep personal material in your personal brain.
-
-## Quick commands
-
-| Task | Command |
+| Permission | What it allows |
 | --- | --- |
-| Check your installed version | `hc --version` |
-| Update now | `hc update` |
-| Check for an update without installing | `hc update --check` |
-| Check the shared connection | `hc status --remote` |
-| Sign in when the session needs renewal | `hc login` |
-| Revoke your current hosted session and sign out | `hc logout` |
-| See CLI commands | `hc --help` |
+| Read | Search and open records within the permitted scope. |
+| Write or capture | Add records within the permitted scope. Read access alone does not include this. |
+| Use a credential | Use an HC-managed credential for an authorized task. Permission to read notes does not grant this access. |
+| Administer access | Manage permissions using the required owner authority. Ordinary membership does not grant this. |
 
-Installer-managed copies check for updates automatically. Updates apply on the
-next launch; running sessions keep their current binary. See [update controls](docs/RELEASING.md#automatic-cli-updates).
+Your agent's instructions cannot expand these permissions. A request to read
+something outside its access should be refused. A successful sign-in identifies
+you; the host still decides what you may access.
 
-If HC is missing, check `hc status --remote`, restore the connection, then start a
-new chat. Membership denials and service outages need the owner's help. Repeated
-logins will not fix an outage. Revocation blocks the corresponding future reads
-once confirmed by the server; answers already saved elsewhere cannot be recalled.
+For example, a support agent could receive read access to approved customer
+context, while a finance agent receives a separate scope. These are access choices
+the owner must configure, not automatic roles created by HC.
 
-## Visual view and further help
+## What does sharing with a team mean?
 
-The optional [HC Atlas dashboard](dashboard/README.md) inspects local storage and
-access. An authenticated reader enables Records search. Start it separately and
-confirm the store. See [screenshots and shortcuts](dashboard/docs/ui/README.md).
+A hosted team brain may expose approved datasets instead of its entire source
+archive. Your membership determines which datasets are available to you.
+Connecting an email, chat or document source does not by itself make every
+record visible to every teammate.
 
-- [Agent usage instructions](skills/hyperconsciousness/SKILL.md): scoped retrieval and evidence.
-- [Operator instructions](skills/hyperconsciousness-ops/SKILL.md): administering stores and grants.
-- [Ingestion recipes](skills/README.md): authorized chat and tool imports. Installing a recipe does not start a sync or connect an account.
-- [Security and storage limits](docs/CONSTRAINTS.md).
+Hosts also decide how contributions work. Some notes need review before they
+become visible to the team; trusted contributors may publish directly. Ask your
+agent to confirm whether a contribution is stored, awaiting review or published.
+
+Permissions in the original source tool are not necessarily reproduced by the
+HC host. The owner must choose material appropriate for each shared audience.
+
+## What happens when access is removed?
+
+Revocation or expiry prevents future reads through the affected permission or
+session once enforced by the server. Removing company membership prevents future
+company reads governed by that membership.
+
+It cannot recall text someone already downloaded, copied into a document,
+received in an AI conversation or retained with a model provider. Revocation is
+not a remote wipe of someone's laptop. Share with that limit in mind.
+
+## What can an AI see or do?
+
+An AI can see the text returned through its authorized connection. If you use a
+hosted AI provider, that provider receives the context sent to it. HC encrypts
+stored records; recipients can read the information they are allowed to receive.
+
+HC permissions govern HC access. They do not sandbox an agent that already has
+access to your files, owner keys or other tools. Access to company knowledge also
+does not itself authorize sending messages, moving money or changing production
+systems. Those actions require their own tools and authorization.
+
+Installing HC or an ingestion recipe does not automatically collect everything
+on your computer. Sources, collection scope and recurring jobs need to be set up
+separately.
+
+## Can I trust an answer from the brain?
+
+Ask for the original source, when the event happened, and when the information
+was last collected. Something imported today may describe an old event.
+A missing search result can mean missing access or incomplete collection.
+
+HC preserves signed history, but a stored claim can still be wrong. Corrections
+add new history; earlier versions can remain stored. Check the source before
+acting on an important or uncertain answer.
+
+## Useful questions to ask your agent
+
+- "Which brain are you using, and what information can you access?"
+- "Can you only read, or can you also save and share information?"
+- "Who will be able to see this if I save it?"
+- "Show the sources, their dates and anything you could not verify."
+- "Was my contribution published, or does it still need review?"
+
+For setup, see the [README](README.md). The optional [dashboard](dashboard/README.md)
+provides a visual inspection of an existing store and authorized records.
+[Agent instructions](skills/hyperconsciousness/SKILL.md) and
+[security limits](docs/CONSTRAINTS.md) explain the technical contracts.
