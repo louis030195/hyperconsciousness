@@ -13,7 +13,7 @@
 | [CONSTRAINTS.md](CONSTRAINTS.md) | invariants, threat model, and the limits we state rather than hide |
 | [EDGE-CASES.md](EDGE-CASES.md) | failure cases, grouped, each with what it drives |
 | [DECISIONS.md](DECISIONS.md) | the choices made, and the ones rejected, with reasons |
-| [ROADMAP.md](ROADMAP.md) | what exists, what is next, in dependency order |
+| [ROADMAP.md](ROADMAP.md) | historical implementation record; check the central-only migration guide for current commands |
 
 Two rules the rest of this follows.
 

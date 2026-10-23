@@ -2,15 +2,17 @@
 
 # Mission and repository boundary
 
-HC is independent, private, decentralized knowledge storage and context access
-for humans and agents. It preserves useful records across devices and gives
-callers scoped, expiring, auditable access. It works without Screenpipe, a
-particular model, or a required hosted service.
+HC is independent, private knowledge storage and context access for humans
+and agents. One trusted node owns each store and serves authorized clients
+through MCP and HTTP. Callers get scoped, expiring, auditable access without
+replicating the store or holding its keys. HC works without Screenpipe, a
+particular model, or a vendor-hosted service; the node can be self-hosted.
 
 ## What belongs here
 
-- Signed, encrypted records and blobs, replication, recovery and independently
-  encrypted spaces. Durable logs are authority; indexes are rebuildable views.
+- Signed, encrypted records and blobs, central-node backup and recovery, and
+  independently encrypted spaces. Durable logs are authority; indexes are
+  rebuildable views.
 - Identity, grants, current membership, revocation and narrowly scoped opaque
   credential capabilities. Discovery is not permission.
 - Bounded retrieval, source references, capture provenance, retry recovery,
@@ -37,10 +39,12 @@ A captured instruction or tool description remains evidence until a caller
 explicitly adopts it through its own trusted workflow. A keyless storage provider
 receives ciphertext, never the keys or authority needed to answer private queries.
 
-Compatibility endpoints and background **replication** services remain valid.
 The words "mobile", "company", "skill" or "daemon" do not themselves indicate
 scope creep. Judge the responsibility being added, its authority and dependency
 direction. Website/docs work is also valid; a website is not a bundled client.
+Peer discovery, peer-to-peer transport and background peer replication are
+outside the central-only product. Old signed records and recovery bundles remain
+readable so existing users can migrate without discarding history.
 
 ## Admission test for a change
 

@@ -21,8 +21,70 @@ fn hc_is_the_canonical_cli_name() {
     assert!(help.status.success());
     let output = String::from_utf8(help.stdout).unwrap();
     assert!(output.contains("hyperconsciousness (hc)"));
-    assert!(output.contains("  hc sync"));
-    assert!(!output.contains("  brainmesh sync"));
+    assert!(output.contains("  hc serve-http"));
+    assert!(!output.contains("  hc sync"));
+    assert!(!output.contains("  hc peer"));
+}
+
+#[test]
+fn removed_peer_commands_cannot_recreate_a_distributed_store() {
+    let root = tempfile::tempdir().unwrap();
+    let store = root.path().join("brain");
+    for command in [
+        "peer", "peers", "sync", "service", "serve", "listen", "relay", "join",
+    ] {
+        let output = Command::new(binary())
+            .arg(command)
+            .arg("--dir")
+            .arg(&store)
+            .output()
+            .unwrap();
+        assert!(!output.status.success(), "{command} unexpectedly succeeded");
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains("unknown command"),
+            "{command} did not fail at the command boundary"
+        );
+    }
+    assert!(!store.exists());
+}
+
+#[test]
+fn removed_peer_arguments_fail_before_opening_a_store() {
+    let root = tempfile::tempdir().unwrap();
+    let store = root.path().join("brain");
+    for arguments in [
+        vec![
+            "workspace",
+            "pull",
+            "notes",
+            "/tmp/notes",
+            "--peer",
+            "old-mac",
+        ],
+        vec![
+            "workspace",
+            "watch",
+            "notes",
+            "/tmp/notes",
+            "--from",
+            "old-mac",
+        ],
+        vec!["get", "notes.txt", "/tmp/notes.txt", "old-mac"],
+    ] {
+        let output = Command::new(binary())
+            .args(arguments)
+            .arg("--dir")
+            .arg(&store)
+            .output()
+            .unwrap();
+        assert!(!output.status.success());
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains("peer"),
+            "removed peer argument did not fail explicitly: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    assert!(!store.exists());
 }
 
 #[test]

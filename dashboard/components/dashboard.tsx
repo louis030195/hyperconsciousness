@@ -10,7 +10,6 @@ import {
   type CSSProperties,
 } from "react";
 import {
-  ArrowDownLeft,
   ArrowUpRight,
   Check,
   ChevronRight,
@@ -537,14 +536,10 @@ export default function Dashboard() {
                   icon={<Network size={17} />}
                 />
                 <Metric
-                  label="CONFIGURED PEERS"
-                  value={
-                    ready && data.peersMeasured
-                      ? String(data.peers.length).padStart(2, "0")
-                      : "—"
-                  }
-                  note="Configuration, not verified liveness"
-                  icon={<ArrowDownLeft size={17} />}
+                  label="ACCESS MODEL"
+                  value={ready ? "NODE" : "—"}
+                  note="Clients use scoped MCP or HTTP access"
+                  icon={<Shield size={17} />}
                 />
               </div>
               <div className="overview-grid">
@@ -850,26 +845,12 @@ export default function Dashboard() {
                       ))}
                     </div>
                   </section>
-                  <section className="panel peers-panel">
-                    <SectionHead n="02 / ROUTES" title="Configured peers" />
-                    <div className="peer-grid">
-                      {data?.peers.map((peer) => (
-                        <div className="peer" key={peer}>
-                          <Network size={20} />
-                          <code>{peer}</code>
-                          <Badge>Not probed</Badge>
-                        </div>
-                      ))}
-                    </div>
-                    {data?.peersMeasured && !data.peers.length && (
-                      <p className="empty-copy">
-                        No peer routes are configured for this brain.
-                      </p>
-                    )}
-                    <p className="panel-footnote">
-                      This dashboard does not connect to peers or trigger
-                      replication. A configured route does not establish remote
-                      availability.
+                  <section className="panel access-panel">
+                    <SectionHead n="02 / ACCESS" title="One trusted node" />
+                    <p className="empty-copy">
+                      This store is served to clients through scoped MCP or HTTP
+                      access. This local view does not test a remote client's
+                      login, grant, or record access.
                     </p>
                   </section>
                 </>

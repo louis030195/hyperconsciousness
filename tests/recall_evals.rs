@@ -7,7 +7,7 @@
 
 use ed25519_dalek::SigningKey;
 use hyperconsciousness::{
-    grant::READ, id::ZERO_HASH, query, revocation, search_index, sync, DeviceId, Error, Grant,
+    grant::READ, id::ZERO_HASH, ingest, query, revocation, search_index, DeviceId, Error, Grant,
     Hash, Hlc, Record, Scope, Store,
 };
 use rand_core::OsRng;
@@ -119,7 +119,7 @@ impl Fixture {
             &KEY,
             &serde_json::to_vec(payload)?,
         )?;
-        sync::apply(&self.store, std::slice::from_ref(&record))?;
+        ingest::apply(&self.store, std::slice::from_ref(&record))?;
         self.previous = Some(record.clone());
         Ok(record)
     }

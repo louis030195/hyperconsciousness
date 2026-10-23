@@ -81,10 +81,8 @@ async function collectOverview(): Promise<Overview> {
     devices: [],
     records: 0,
     storage: [],
-    peers: [],
     issues: [],
     storageMeasured: false,
-    peersMeasured: false,
   };
   try {
     await existingStore();
@@ -92,7 +90,6 @@ async function collectOverview(): Promise<Overview> {
     const result: Overview = { ...empty, ...status, state: "ready" };
     const reads = await Promise.allSettled([
       hc(["--version"]),
-      hc(["peers"]),
       (async () => {
         const paths: string[] = [];
         for (const name of ["log", "blobs", "cache"]) {
@@ -127,17 +124,7 @@ async function collectOverview(): Promise<Overview> {
     if (reads[0].status === "fulfilled")
       result.version = reads[0].value.trim().slice(0, 80);
     if (reads[1].status === "fulfilled") {
-      // Discard peer command arguments, which are local operator configuration.
-      result.peers = reads[1].value
-        .trim()
-        .split("\n")
-        .filter(Boolean)
-        .map((line) => line.split("\t")[0])
-        .filter((host) => /^[a-zA-Z0-9@._:\[\]-]{1,200}$/.test(host));
-      result.peersMeasured = true;
-    } else result.issues.push("Peer configuration could not be inspected.");
-    if (reads[2].status === "fulfilled") {
-      result.storage = reads[2].value;
+      result.storage = reads[1].value;
       result.storageMeasured = true;
     } else result.issues.push("Disk usage could not be measured.");
     result.checkedAt = new Date().toISOString();

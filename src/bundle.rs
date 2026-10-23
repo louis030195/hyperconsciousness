@@ -18,10 +18,10 @@ use crate::error::{Error, Result};
 use crate::fsync;
 use crate::guard;
 use crate::identity::Identity;
+use crate::ingest;
 use crate::keyring::RuntimeKeys;
 use crate::log::Store;
 use crate::record::{Record, HEADER_LEN, MAX_PAYLOAD, SIG_LEN};
-use crate::sync;
 use crate::Hash;
 
 const MAGIC_V1: &[u8; 10] = b"BRNBUNDLE1";
@@ -41,7 +41,7 @@ pub struct Exported {
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Imported {
-    pub records: sync::Applied,
+    pub records: ingest::Applied,
     pub chunks: u64,
     pub chunks_already_had: u64,
     pub chunk_bytes: u64,
@@ -75,7 +75,7 @@ fn private_file(_path: &Path) -> Result<()> {
     Ok(())
 }
 
-fn add_applied(total: &mut sync::Applied, next: sync::Applied) -> Result<()> {
+fn add_applied(total: &mut ingest::Applied, next: ingest::Applied) -> Result<()> {
     total.accepted = total
         .accepted
         .checked_add(next.accepted)
@@ -255,9 +255,9 @@ fn export_path_inner(
 
 fn apply_records(
     store: &Store,
-    incoming: &mut Option<sync::Incoming>,
+    incoming: &mut Option<ingest::Incoming>,
     records: &mut Vec<Record>,
-    total: &mut sync::Applied,
+    total: &mut ingest::Applied,
 ) -> Result<()> {
     if records.is_empty() {
         return Ok(());
@@ -265,7 +265,7 @@ fn apply_records(
     if let Some(incoming) = incoming {
         incoming.push(records)?;
     } else {
-        add_applied(total, sync::apply(store, records)?)?;
+        add_applied(total, ingest::apply(store, records)?)?;
     }
     records.clear();
     Ok(())
@@ -274,8 +274,8 @@ fn apply_records(
 fn commit_records(
     root: Option<&Path>,
     store: &Store,
-    incoming: &mut Option<sync::Incoming>,
-    total: &mut sync::Applied,
+    incoming: &mut Option<ingest::Incoming>,
+    total: &mut ingest::Applied,
 ) -> Result<()> {
     if let (Some(root), Some(incoming)) = (root, incoming) {
         *total = incoming.commit_authorized(root, store)?;
@@ -307,7 +307,7 @@ fn apply_chunks(
 
 fn import_v1(root: Option<&Path>, store: &Store, mut input: impl Read) -> Result<Imported> {
     let mut imported = Imported::default();
-    let mut incoming = root.map(sync::Incoming::create).transpose()?;
+    let mut incoming = root.map(ingest::Incoming::create).transpose()?;
     let mut records = Vec::new();
     loop {
         let mut header = [0u8; HEADER_LEN];
@@ -381,7 +381,7 @@ fn import_inner(
     }
 
     let mut imported = Imported::default();
-    let mut incoming = root.map(sync::Incoming::create).transpose()?;
+    let mut incoming = root.map(ingest::Incoming::create).transpose()?;
     let mut records = Vec::new();
     loop {
         let len = read_len(&mut input)?;

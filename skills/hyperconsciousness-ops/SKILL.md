@@ -1,6 +1,6 @@
 ---
 name: hyperconsciousness-ops
-description: Operate, inspect, sync, recover, and connect agents or phones to a private HC store safely. Use for HC CLI work, second-brain replication across macOS/Windows/Linux, device or bucket sync, workspace projections, grants and revocation, MCP/HTTP access, mobile pairing, integrity checks, or determining whether a brain is actually running and current on a device.
+description: Operate, inspect, back up, recover, and serve a private HC store from one trusted node. Use for HC CLI work, central-node access, object-store backup, workspace projections, grants and revocation, MCP/HTTP access, and integrity checks.
 ---
 
 <!-- screenpipe — AI that knows everything you've seen, said, or heard -->
@@ -24,9 +24,7 @@ to operate HC; it does not grant that agent access to a brain.
    `scripts/hc-doctor.ps1 [-Store path]` on Windows.
 2. Inspect running process arguments. Do not assume a process uses `~/.brain`;
    `--dir` may select an isolated store or workspace projection.
-3. Read `hc status --dir <store>` and `hc peers --dir <store>`.
-   A configured peer is not proof that the peer is online or continuously
-   syncing.
+3. Read `hc status --dir <store>` and verify the intended MCP or HTTP endpoint separately. A configured client is not proof that its grant can read a record.
 4. Distinguish the encrypted brain store from a projected human-readable
    directory. A watcher synchronizes the projection only when its process and
    `workspace watch-status` are healthy.
@@ -36,9 +34,9 @@ to operate HC; it does not grant that agent access to a brain.
 
 ## Choose the narrow operation
 
-- **Inspect:** use `status`, `peers`, `grants`, `audit`, `files`, and
-  `workspace watch-status`. These do not establish remote liveness by
-  themselves; also check the process and transport.
+- **Inspect:** use `status`, `grants`, `audit`, `files`, and
+  `workspace watch-status`. These do not establish remote client access by
+  themselves; also test the authenticated endpoint.
 - **Append a durable learning:** use the standard `note` kind and a
   `durable-learning` tag so ordinary reads and existing note grants can find
   it, for example `hc write '<stable key and compact conclusion>'
@@ -48,12 +46,13 @@ to operate HC; it does not grant that agent access to a brain.
   invent a `durable-learning` kind merely to classify the record. Because the
   log is append-only, deduplicate the stable key before writing and verify it
   through the same read or grant path consumers will use.
-- **Sync trusted devices:** run `hc sync [peer] --dir <store>`, then read
-  status on both devices and compare every author head. Sync is successful only
-  when both views agree; command exit alone is weaker evidence.
-- **Repair bytes:** use ordinary sync first. For pinned archives, use
-  `hc blobs verify`, then `sync --strict`; never hand-copy ciphertext
-  into live object paths.
+- **Back up the central node:** configure its encrypted object store with
+  `hc remote`, run `hc push`, and prove a separate `hc pull` and exact-byte
+  restore in an isolated authorized recovery store. Do not make the bucket a
+  live second writer.
+- **Repair bytes:** use `hc blobs verify` to identify damaged chunks, then
+  restore from a separately verified object-store backup or recovery bundle.
+  Never hand-copy ciphertext into live object paths.
 - **Project a directory:** preview with `workspace status`, use `checkpoint` for
   unattended non-destructive capture, and require explicit human approval for
   deletions or conflict resolution.
@@ -145,141 +144,29 @@ provider as a brain device.
    recovery material, or the only remaining ciphertext copy merely because a
    listing succeeded.
 
-Do not run `relay listen` as a storage service. The rendezvous relay is bounded
-ephemeral transport and retains no vault objects. Do not give the provider a
-brain key merely to let it enforce grants; permission interpretation belongs
-on a trusted key-holding node.
+Do not give an object-storage provider a brain key merely to let it enforce
+grants; permission interpretation belongs on the trusted node.
 
-## Bound a device cache without deleting history
+## Bound central-node storage without deleting history
 
-Use this for a laptop or phone that should expose a large brain without keeping
-every ciphertext byte locally. This is cache eviction, never signed-history
-garbage collection.
-
-1. Keep at least one independent recovery source: preferably a key-holding
-   archive on `blobs pin all`, or a keyless remote plus separately verified
-   recovery material. Keep the constrained device on `blobs pin metadata`.
-   Run `blobs verify` on a key-holding archive before treating it as a recovery
-   source; a bucket inventory cannot replace that scrub.
-2. Inspect `hc files --json` and `hc blobs status --json`. Select
-   one exact logical file and version. Do not infer importance from entropy,
-   embeddings, filenames, recency, or an agent score.
-3. Produce a read-only `hc blobs offload <name> <peer|remote> --json`
-   plan, obtain approval, and execute only its returned `apply.arguments`.
-   Failed target proof, route drift, policy drift, or local inventory drift must
-   leave every selected local byte intact.
-4. Prove transparent recovery with `hc get <name> <fresh-destination>
-   <preferred-peer> --dir <store>` for a peer, or `hc pull` followed by
-   a separate `get` for a keyless remote. Compare the whole-file hash, then run
-   `blobs verify` on a key-holding archive again. Never restore over a live
-   source file.
-
-The current CLI has no automatic byte budget, LRU optimizer, keep/unkeep list,
-or whole-cache keyless eviction command. Do not invent `blobs cache`, `blobs
-optimize`, `blobs keep`, or `blobs unkeep`. Report that boundary and use the
-explicit single-file plan/apply path until those commands exist.
-
-Inventory is physical ciphertext, including duplicate loose and packed
-representations. Packed eviction is copy-on-write, so it may temporarily need
-space for old and replacement packs. Successful human-facing reads refresh
-recency; verification does not. Proof is point-in-time and one archive is not
-durability: keep independent archives or recovery media. A key-holding archive
-must reject an otherwise valid signed history that cannot decrypt with its
-brain key; signature-only acceptance is reserved for an intentional blind
-relay.
-
-For isolated physical tests, create fresh stores and candidate binaries under
-explicit temporary paths; never point a test peer command at a default live
-store. An SSH remote command must include both the candidate binary and its
-`--dir <temporary-archive>` before the transport appends `serve`. On Windows,
-OpenSSH may terminate a detached child after the launcher exits; keep a test
-listener in a supervised foreground session or forward to its loopback port,
-then stop and verify the exact PID and ports. Set `BRAINMESH_NO_KEYSTORE=1` only
-for a newly created test directory when the Windows credential manager cannot
-answer; never use it to guess around an existing identity.
-
-## Archive a live screenpipe database
-
-Use this when screenpipe must remain live while an encrypted historical copy is
-held by another hc device without a permanent second database-sized copy
-on the source.
-
-1. Never hardlink, reflink, clone, or directly copy `db.sqlite` and its WAL into
-   HC. Plaintext and encrypted ciphertext are different bytes, and only
-   screenpipe owns the transactional snapshot boundary.
-2. On the intended always-on archive node, set `hc blobs pin all --dir
-   <store>`. On the screenpipe machine, require `hc blobs pin metadata
-   --dir <store>`. Skill installation or pin-policy inspection does not grant
-   brain-key access.
-3. Prove an ordinary metadata sync and compare signed heads on both devices.
-   Then run `hc screenpipe archive <peer> --dir <store>`. Use `--port`
-   only for a known non-default local screenpipe port and `--staging` only for a
-   private local volume with enough temporary space.
-4. The command must obtain `screenpipe auth token` only through a captured pipe,
-   keep it in zeroizing process memory, and send it in the loopback HTTP header.
-   Never place the token in `curl`, process arguments, logs, a hc record,
-   or durable memory.
-5. Require the archive readiness handshake, signed-record offer, bounded chunk
-   upload, and final exact manifest inventory to all succeed. A failed command
-   must retain the named consistent snapshot for inspection or retry and must
-   not evict local ciphertext.
-6. Verify `hc history screenpipe.sqlite --dir <store>` names the new
-   version and check the archive node with `blobs status` and, periodically,
-   `blobs verify`. Steady state on the source is the live screenpipe database
-   plus metadata, but version one temporarily needs one plaintext snapshot and
-   one encrypted cache. Packed chunks shared with other manifests are not
-   deleted by this workflow.
-7. Prove recovery into a separate path with `hc get screenpipe.sqlite
-   <destination> <peer> --dir <store>` and run `sqlite3 <destination> 'pragma
-   integrity_check;'`. Never restore over the live database. Replacing a
-   screenpipe database requires screenpipe to be stopped, a retained original,
-   and a separate explicit recovery decision.
+Keep at least one independently verified recovery source. For a file already
+stored on the trusted node, inspect `hc files --json` and `hc blobs status
+--json`, then produce `hc blobs offload <name> remote --json`. Review its exact
+plan and blockers before applying the returned arguments. Offload proves the
+object-store ciphertext inventory before releasing local loose chunks. Follow
+it with `hc pull` in an isolated authorized recovery store and an exact-byte
+`hc get` check. A successful object listing is not a recovery test.
 
 ## Ingest an existing brain and agent skills
 
-Use distinct workspaces for the human-readable brain and for each device/runtime
-skill tree. Do not flatten Claude, Codex, Hermes, shared-agent, Gemini, and
-screenpipe roots into one directory: symlinks and duplicated names make that
-ambiguous, while device-qualified workspace names preserve provenance without
-manufacturing conflicts.
-
-1. Inventory source bytes, free disk, Git state, secret-shaped filenames,
-   symlinks, generated trees, the exact HC store, and every reachable
-   configured peer before writing. A historical author with no configured,
-   reachable route remains unverified.
-2. Preview every source with `workspace status <name> <folder> --summary`.
-   Workspace traversal already excludes `.git` and `.brainmesh`, skips
-   symlinks, and blocks credential-shaped filenames. Use a checked-in
-   `.brainmeshignore` for additional generated dependencies, builds, and
-   machine caches. Its rules are literal files/directories only; never paste
-   Git globs or negation into it.
-3. When legacy Git clones differ, prove the chosen canonical head is a strict
-   superset before treating it as primary. Preserve every remote uncommitted or
-   untracked non-secret file in a one-time device-qualified workspace before a
-   pull, branch change, or projection materialization. Keep deletions as an
-   explicit manifest. Do not overwrite or silently discard divergent work.
-4. Run `workspace checkpoint ... --skip-secret-files --summary`, then
-   `workspace verify ... --skip-secret-files` against the same source folder.
-   Checkpoint is non-destructive and defers files that change while read; rerun
-   it until no eligible changes remain.
-5. Give one intended always-on archive node `blobs pin all`; keep ordinary
-   clients `metadata` unless the user requests another full copy. First sync
-   signed history everywhere. A sync initiated by a metadata node may deliver
-   all records without filling the archive, so run ordinary sync from the
-   `pin all` node and require `blobs status` to reach zero missing chunks.
-   Finish with `blobs verify` on the archive.
-6. Same-subnet addresses are not proof of a usable direct route. Test the exact
-   private address first. If a temporary listener is justified, bind only that
-   address, never a wildcard, and close it after transfer. Fall back to the
-   authenticated tailnet route when client isolation rejects LAN traffic.
-7. Compare every signed author head on all reachable stores and prove an exact
-   restore/read. Matching record counts alone are insufficient.
-
-The store-scoped sync service moves encrypted history and chunks only. It does
-not notice future edits in the human-readable brain or skill folders. Ongoing
-source ingestion requires separately tracked projections and healthy workspace
-watchers (or an explicitly designed sequential checkpoint scheduler); report
-that boundary instead of calling a one-time checkpoint continuous sync.
+Use distinct workspaces for the human-readable brain and each runtime skill
+root. Inventory source bytes, free disk, Git state, secret-shaped filenames,
+symlinks, generated trees and the exact HC store. Preview with `workspace
+status`, checkpoint non-destructively, and verify against the same source
+folder. Keep deletions and conflicts explicit. For an existing multi-node brain,
+follow [central-only migration](../../docs/CENTRAL-ONLY-MIGRATION.md): transfer
+signed bundles to one chosen node, verify the merged history and exact file
+bytes there, then connect clients through grants and authenticated APIs.
 
 ## Prove recovery without mutating the live brain
 
@@ -306,89 +193,6 @@ bundle, import each space bundle with `--space <name>`, verify a separately
 held recovery witness, then create and verify a successor kit. Do not delete or
 overwrite the old artifacts during the proof.
 
-## Make sync continuous
-
-1. Prove one foreground sync over the exact intended transport before creating
-   a service. A tailnet listener should bind only the device's tailnet address,
-   not `0.0.0.0`; an SSH route must work with `BatchMode=yes` and no prompt.
-2. Configure at least one real peer in the exact store. A five-minute job that
-   runs `hc sync` against an empty peer list is healthy as a process but
-   does not replicate anything.
-3. Install the store-scoped outbound scheduler with `hc service install
-   --interval 300 --dir <store>`. It runs `sync --require-any` before
-   registration and refuses an empty or entirely unreachable peer set. Read
-   back `hc service status --dir <store>`; require both `registered
-   true` and `healthy true` after the first run.
-4. For rollback detection through the last locally observed heads, create a
-   witness on independent storage with `hc witness create <external
-   file> --dir <store>`, verify it, then add `--witness <external file>` to
-   `service install`. Never place it inside the protected store or silently
-   choose a cloud/volume for the user. A missing, read-only, stale or
-   concurrently replaced witness makes the scheduled result unhealthy after
-   sync; uninstall preserves it. This is a durable local lower bound, not proof
-   that an observed peer disclosed records this device has never seen.
-5. The CLI uses launchd on macOS, a systemd user timer on Linux and Task
-   Scheduler on Windows. Windows is intentionally an interactive-user task and
-   pauses while that user is logged out. An always-on Linux user service may
-   require an administrator to enable lingering; do not claim logged-out
-   coverage without testing it.
-6. A listener is separate from outbound sync. Supervise it only on a device
-   that must accept inbound sessions, bind only its tailnet or loopback address,
-   and verify the actual socket plus manager state. Do not create a public or
-   wildcard listener as a side effect of service installation. The direct TCP
-   listener admits 64 active workers globally, eight per observed source and
-   120 new workers per source per minute before brain-key proof; its 4,096
-   source windows reset on restart. A proxy collapses clients into one source.
-   Treat these as local resource bounds, not public DDoS protection.
-7. Trigger each scheduler after peers are configured, then foreground-sync
-   every route once more and compare all signed author heads. A service state,
-   last exit code, or reachable port alone is not convergence evidence.
-8. Test the partial-availability case: with at least one peer reachable and one
-   route unavailable, `hc sync --require-any --dir <store>` must exit
-   zero after the complete session. Unix exit 141 means a closed child SSH pipe
-   escaped as SIGPIPE and the scheduler is not reliable. `--strict` is the
-   separate all-routes boundary.
-9. Replacing the installed binary intentionally makes `service status` report
-   `binary matches false`. After hash read-back and rollback staging, rerun the
-   same `service install --interval ... --dir ...`, trigger it, and require
-   registered, binary-matching, configuration-matching and healthy state. On
-   Windows PowerShell/.NET, `System.IO.File.Replace` requires an explicit
-   backup path in this environment; passing `$null` as the third argument can
-   fail with `The path is not of a legal form`. Verify candidate and
-   predecessor hashes, then use the intended rollback path as that argument.
-
-Use `hc service uninstall --dir <store>` to remove only the scheduler.
-It preserves the brain and macOS diagnostic logs. Never delete the store as
-part of service troubleshooting.
-
-Do not replace or restart a healthy projection watcher merely to update an
-unrelated CLI path. Identify its exact binary and store first, stage a rollback
-binary, and preserve `workspace watch-status` before and after any restart.
-On macOS, a launchd job can remain `running` while privacy-gated `Documents`
-access is blocked inside `open(2)`; require the expected listening socket or a
-new successful watcher generation, not manager state alone. If the same command
-works interactively, treat that as a privacy boundary. For a disposable
-validation projection, an APFS clone under `Library/Caches` is acceptable; a
-real human workspace needs explicit user-granted access or a user-selected
-non-protected path. Tracking is bound to the exact folder path, so verify and
-run `workspace track` again after an intentional relocation, then require one
-fresh full watcher cycle.
-
-For a native-event latency proof, use a harmless unique file in a disposable
-tracked projection and preserve it as history. Record source creation and
-destination materialization times, require exact bytes, inspect both alternating
-watch-status slots, and prove `full: false` with one `checkpointed` source event
-and one `materialized` destination event. Test both directions. Then run full
-`workspace verify` on both folders. A source event that samples in
-`plan_with_keys -> local_files -> digest` is still hashing the entire vault; an
-incoming record that waits for `--interval` is not event-driven. Watch only the
-store's encrypted `log/` subtree for remote wakeups, never projection/status
-files, and keep the polling plus bounded full-content audit as the correctness
-backstop. On macOS canonicalize `/var` and `/private/var` watcher roots before
-classifying events. Multi-megabyte projection cursor JSON must be buffered; a
-raw `serde_json::from_reader(File)` can turn one cursor read into millions of
-small syscalls under launchd.
-
 ## Preserve the security model
 
 - Keep brain stores outside iCloud, Dropbox, OneDrive, and similar syncing
@@ -404,35 +208,27 @@ small syscalls under launchd.
   restarting `serve-http`, search its captured startup output for the actual
   pairing bearer and fail the deployment if it appears; do not paste the
   bearer into the diagnostic command or its report.
-- Treat each store's `peers` file as private local routing configuration. Do
-  not put passwords or bearer tokens in a peer command; after changing routes,
-  verify the file is a regular non-symlink and mode `0600` on Unix.
 - Use grants for agents and people. Scope by workspace/path, kind, tag,
   sensitivity, action, and expiry; default to read-only and short-lived.
 - Treat revocation as future access control. A recipient may retain plaintext
   already disclosed, and an offline former member may retain old keys.
-- Never infer “all devices are synced” from device enrollment, peer config,
-  Tailscale presence, a service process, or matching record counts alone.
-  Compare signed author heads and verify required blobs/projections.
 - Do not start a listener on a public interface without authentication and an
-  explicit network boundary. Prefer a tailnet; keep TLS termination on the
-  trusted node for public routes.
-- Do not delete stores, peers, grants, projections, quarantine evidence, or
+  explicit network boundary. Keep TLS termination on the trusted node for public routes.
+- Do not delete stores, grants, projections, quarantine evidence, or
   recovery artifacts without explicit approval and an exact target.
 
 ## Verification gates
 
-For a cross-device change, report each gate separately:
+For a central-node change, report each gate separately:
 
-1. device reachable;
-2. expected binary present and hash/version identified;
-3. expected store opens with protected keys;
-4. transport process is live, if continuous operation was requested;
-5. signed author heads converge after sync;
-6. required blobs pass verification;
+1. trusted node and expected binary are identified;
+2. intended store opens with protected keys;
+3. authenticated MCP/HTTP endpoint answers for an allowed client;
+4. a denied or expired grant remains denied;
+5. required blobs pass verification;
+6. object-store or bundle recovery returns exact expected bytes;
 7. workspace projection has no missing blobs or unresolved conflicts;
-8. a restore/read test returns exact expected bytes;
-9. agent access is grant-scoped and leaves a receipt.
+8. agent access is grant-scoped and leaves an audit receipt.
 
 If a gate was not run, call it unverified. Never convert unavailable access or
 a failed command into a healthy result.
@@ -508,11 +304,7 @@ For recovery-witness replacement changes, require native Windows and Unix tests
 that prove a complete successor atomically replaces the expected predecessor,
 a stale expected id cannot publish, and a successor cannot drop an author or
 move a head backwards. Cross-target compilation proves only that `ReplaceFileW`
-type-checks. For service integration, generate and inspect launchd, systemd and
-Task Scheduler arguments containing spaces and manager metacharacters; retain
-byte-exact version-1 configuration rendering so an existing service does not
-become unhealthy merely because the binary learned manifest version 2.
-
+type-checks.
 For an exact native Windows source validation, transfer every compile-time
 input, including `Cargo.toml`, `Cargo.lock`, `src/` and `tests/`, then
 compare a source manifest or digest before building. Extract into a new empty

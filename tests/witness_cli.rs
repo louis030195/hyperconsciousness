@@ -56,16 +56,6 @@ fn external_witness_advance_verifies_then_ratchets_the_file() {
         "verify failed: {}",
         String::from_utf8_lossy(&verified.stderr)
     );
-
-    let before_sync = std::fs::read(&witness).unwrap();
-    let synced = brainmesh(&["sync", "--witness", witness.to_str().unwrap()], &store);
-    assert!(
-        synced.status.success(),
-        "witnessed sync failed: {}",
-        String::from_utf8_lossy(&synced.stderr)
-    );
-    assert_ne!(std::fs::read(&witness).unwrap(), before_sync);
-    assert!(String::from_utf8_lossy(&synced.stdout).contains("old lower bound"));
 }
 
 #[test]

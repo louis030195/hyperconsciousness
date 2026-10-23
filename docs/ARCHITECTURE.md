@@ -12,10 +12,10 @@ not a collection of services that must agree on mutable state.
 1. **domain** defines identifiers, records, grants, manifests, and cryptography.
 2. **store** owns logs, keys, blobs, crash-safe local metadata, and derived
    catalogs.
-3. **operations** implement sync, archive, offload, recovery, workspaces, and
+3. **operations** implement validated bundle ingestion, backup, offload, recovery, workspaces, and
    permissions as plan and apply state machines.
-4. **adapters** carry those operations over SSH, TCP, relay, buckets, HTTP, and
-   MCP.
+4. **adapters** expose scoped access through HTTP and MCP, and send encrypted
+   backups to S3-compatible object storage.
 5. **interfaces** parse CLI or HTTP input and render typed outcomes.
 
 A lower layer never imports an interface. Transport code does not decide
@@ -29,21 +29,19 @@ The CLI keeps three roles separate:
 
 | role | brain key | persistent brain bytes | responsibility |
 | --- | --- | --- | --- |
-| rendezvous relay | no | no | pair two outbound encrypted streams |
-| object remote | no | signed ciphertext only | durable third-party storage and asynchronous exchange |
-| archive device | yes | signed ciphertext | validate authorized history, retain and scrub selected compartments |
+| trusted HC node | yes | authoritative signed log and encrypted blobs | enforce grants and serve MCP/HTTP clients |
+| object remote | no | signed ciphertext only | optional backup and recovery source |
+| remote client | no | permitted responses only | authenticate and call the node API |
 
 Storage credentials are capabilities for bucket operations, not brain keys.
-They remain device-local and may differ per encrypted space. An object remote
+They remain node-local and may differ per encrypted space. An object remote
 cannot evaluate grants, decide retention, decrypt manifests, or serve an agent
-query. Those decisions stay on a key-holding device.
+query. Those decisions stay on the trusted node.
 
-`blobs offload` preserves the same inspect, plan, apply, receipt state machine
-for both storage targets. The adapter differs only at the proof boundary: a
-trusted archive authenticates and promises `all` retention, while a keyless
-remote repeats the selected content-address and size inventory. Neither claim
-is permanent durability; recovery still requires independent copies and a
-verified restore.
+`blobs offload` preserves the inspect, plan, apply, receipt state machine for
+keyless object storage. It repeats the selected content-address and size
+inventory before evicting local loose ciphertext. That proof is not permanent
+durability; recovery still requires an independent copy and verified restore.
 
 ## authority and caches
 
@@ -104,7 +102,7 @@ Named files are old, new, or absent, never intentionally truncated in place.
 - Derived folds advance from a verified append tail instead of rescanning
   historical ciphertext after every tool call.
 - Trusted local agent receipts plan from the newest segment while holding the
-  exclusive author lock. Idempotent network imports and explicit integrity
+  exclusive author lock. Offline bundle imports and explicit integrity
   checks retain their full-history validation paths.
 - New append-only log segments roll at 1 MiB so head checks and tail repair are
   bounded. Older larger segments stay valid and are never rewritten.
@@ -120,7 +118,7 @@ Named files are old, new, or absent, never intentionally truncated in place.
 
 Human output stays concise. `--json` errors use
 `hyperconsciousness.error.v1` with a stable code, message, and retryable flag.
-Configured, reachable, authenticated, converged, durable, and verified are
+Configured, reachable, authenticated, durable, and verified are
 separate states and must not be collapsed into one healthy boolean.
 
 ## File receipt lookups and local write contention
@@ -137,12 +135,12 @@ prefix, corrupt cache, or different key view forces a rebuild. Concurrent append
 may advance beyond the read's captured heads; that later suffix is included on the
 next read. Cache writes are atomic and best effort, without holding an author
 write lock. A missing or unwritable cache affects performance, not availability.
-Before `get` opens or fetches a blob, it resolves the selected local record
+Before `get` opens a blob, it resolves the selected local record
 coordinates, verifies the signature, decrypts with the current keys, and compares
 all file metadata with the selected catalog version. Signed records and blobs
-remain authoritative. No wire or signed-record format changes are involved.
+remain authoritative. No signed-record format changes are involved.
 
-Local CLI appends use the existing locked-tail/new-batch path. Network imports
+Local CLI appends use the existing locked-tail/new-batch path. Bundle imports
 retain the full idempotent replay/fork validation path. A local CLI writer waits
 up to three seconds to acquire a busy author lock, including the first-use owner
 membership migration. Only lock-acquisition failures are retried; uncertain I/O
@@ -153,4 +151,4 @@ Regression coverage includes encrypted cache contents, warm reads without old
 payload opens, incremental versions, replayed cache snapshots, new/removed authors,
 key-view changes, corrupt source/cache bytes, torn tails, symlinks, concurrent
 CLI saves, and bounded lock failures without duplicate records. A successful local
-save/readback does not establish replication to another device or object store.
+save/readback does not establish backup to object storage.

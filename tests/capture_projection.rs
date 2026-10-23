@@ -5,7 +5,7 @@ use ed25519_dalek::SigningKey;
 use hyperconsciousness::{
     grant::{NORMAL, READ, SECRET},
     id::ZERO_HASH,
-    query, revocation, search_index, sync,
+    ingest, query, revocation, search_index,
 };
 use hyperconsciousness::{DeviceId, Grant, Hash, Hlc, Record, Scope, Store};
 use rand_core::OsRng;
@@ -191,17 +191,17 @@ fn remote_correction_and_retraction_survive_out_of_order_author_delivery_and_reb
     let a = SigningKey::generate(&mut OsRng);
     let b = SigningKey::generate(&mut OsRng);
     let original = f.event(&a, None, 1, "original", false);
-    sync::apply(&f.store, std::slice::from_ref(&original)).unwrap();
+    ingest::apply(&f.store, std::slice::from_ref(&original)).unwrap();
     f.assert_reads(&[original.id()], &[]);
     let corrected = f.event(&b, None, 2, "corrected", false);
-    sync::apply(&f.store, std::slice::from_ref(&corrected)).unwrap();
+    ingest::apply(&f.store, std::slice::from_ref(&corrected)).unwrap();
     f.assert_reads(&[corrected.id()], std::slice::from_ref(&original));
     let deleted = f.event(&a, Some(&original), 3, "", true);
     // A's tombstone arrives before another node's older correction.
     let other = Store::open(f.dir.path().join("replica")).unwrap();
-    sync::apply(&other, &[original.clone(), deleted.clone()]).unwrap();
-    sync::apply(&other, std::slice::from_ref(&corrected)).unwrap();
-    sync::apply(&f.store, std::slice::from_ref(&deleted)).unwrap();
+    ingest::apply(&other, &[original.clone(), deleted.clone()]).unwrap();
+    ingest::apply(&other, std::slice::from_ref(&corrected)).unwrap();
+    ingest::apply(&f.store, std::slice::from_ref(&deleted)).unwrap();
     assert_eq!(other.heads().unwrap(), f.store.heads().unwrap());
     f.assert_reads(&[], &[original.clone(), corrected.clone(), deleted.clone()]);
     std::fs::remove_dir_all(f.dir.path().join("cache")).unwrap();
@@ -225,10 +225,10 @@ fn invisible_replacement_suppresses_old_text_before_filtering_and_stale_caches_f
     let f = Fixture::new();
     let a = SigningKey::generate(&mut OsRng);
     let original = f.event(&a, None, 1, "old searchable wording", false);
-    sync::apply(&f.store, std::slice::from_ref(&original)).unwrap();
+    ingest::apply(&f.store, std::slice::from_ref(&original)).unwrap();
     let stale = query::Snapshot::build(&f.store, &f.key).unwrap().unwrap();
     let corrected = f.event(&a, Some(&original), 2, "new secret wording", true);
-    sync::apply(&f.store, std::slice::from_ref(&corrected)).unwrap();
+    ingest::apply(&f.store, std::slice::from_ref(&corrected)).unwrap();
     f.assert_reads(&[], &[original, corrected]);
     let filter = query::Filter {
         text: Some("old searchable".into()),
@@ -267,7 +267,7 @@ fn disconnected_identical_events_converge_and_conflicting_versions_fail_closed()
     let c = SigningKey::generate(&mut OsRng);
     let one = f.event(&a, None, 1, "identical", false);
     let two = f.event(&b, None, 1, "identical", false);
-    sync::apply(&f.store, &[one.clone(), two.clone()]).unwrap();
+    ingest::apply(&f.store, &[one.clone(), two.clone()]).unwrap();
     f.assert_reads(&[one.id().min(two.id())], &[]);
     for record in [&one, &two] {
         assert!(query::record_by_ref(
@@ -281,10 +281,10 @@ fn disconnected_identical_events_converge_and_conflicting_versions_fail_closed()
         .is_ok());
     }
     let conflict = f.event(&c, None, 1, "different", false);
-    sync::apply(&f.store, std::slice::from_ref(&conflict)).unwrap();
+    ingest::apply(&f.store, std::slice::from_ref(&conflict)).unwrap();
     f.assert_reads(&[], &[one.clone(), two.clone(), conflict.clone()]);
     let resolved = f.event(&a, Some(&one), 2, "explicit resolution", false);
-    sync::apply(&f.store, std::slice::from_ref(&resolved)).unwrap();
+    ingest::apply(&f.store, std::slice::from_ref(&resolved)).unwrap();
     f.assert_reads(&[resolved.id()], &[one, two, conflict]);
 }
 
@@ -294,6 +294,6 @@ fn retracted_inaccessible_versions_do_not_leak_through_bulk_withheld_counts() {
     let a = SigningKey::generate(&mut OsRng);
     let original = f.event(&a, None, 1, "secret", true);
     let deleted = f.event(&a, Some(&original), 2, "", true);
-    sync::apply(&f.store, &[original.clone(), deleted.clone()]).unwrap();
+    ingest::apply(&f.store, &[original.clone(), deleted.clone()]).unwrap();
     f.assert_reads(&[], &[original, deleted]);
 }

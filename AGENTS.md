@@ -19,7 +19,7 @@ pass. Keep model trials and private transcripts out of committed fixtures.
 ## Optional local dashboard
 
 HC includes [HC Atlas](dashboard/README.md), a read-only dashboard for storage,
-file metadata, identity/access and configured peers. An optional authenticated
+file metadata and identity/access. An optional authenticated
 MCP reader enables Records search and previews; see the dashboard README.
 Use it when a user wants a visual view of their HC store. The [UI guide](dashboard/docs/ui/README.md)
 includes screenshots and keyboard shortcuts.

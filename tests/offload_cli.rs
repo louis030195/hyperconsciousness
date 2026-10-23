@@ -138,7 +138,7 @@ fn run(args: &[String], store: &Path) -> Output {
 }
 
 #[test]
-fn offload_is_plan_first_machine_readable_and_failure_keeps_local_bytes() {
+fn peer_offload_is_refused_without_releasing_local_bytes() {
     let root = tempfile::tempdir().unwrap();
     let store = root.path().join("brain");
     let source = root.path().join("memory note.bin");
@@ -151,16 +151,6 @@ fn offload_is_plan_first_machine_readable_and_failure_keeps_local_bytes() {
         &["add".into(), source.to_string_lossy().into_owned()],
         &store,
     );
-    run(
-        &[
-            "peer".into(),
-            "add".into(),
-            "!exit 1".into(),
-            "ignored".into(),
-        ],
-        &store,
-    );
-
     let listed = run(&["files".into(), "--json".into()], &store);
     let inventory: serde_json::Value = serde_json::from_slice(&listed.stdout).unwrap();
     assert_eq!(inventory["schema"], "hyperconsciousness.file-inventory.v1");
@@ -172,72 +162,20 @@ fn offload_is_plan_first_machine_readable_and_failure_keeps_local_bytes() {
     assert_eq!(status["schema"], "hyperconsciousness.blob-status.v1");
     assert_eq!(status["retention"], "metadata");
 
-    let planned = run(
+    let refused = brainmesh(
         &[
             "blobs".into(),
             "offload".into(),
             "memory note.bin".into(),
-            "!exit 1".into(),
-            "--json".into(),
+            "peer-node".into(),
         ],
         &store,
     );
-    let plan: serde_json::Value = serde_json::from_slice(&planned.stdout).unwrap();
-    assert_eq!(plan["schema"], "hyperconsciousness.storage-offload-plan.v1");
-    assert_eq!(plan["file"]["name"], "memory note.bin");
-    assert_eq!(plan["apply"]["allowed"], true);
-    assert_eq!(
-        plan["apply"]["arguments"][2],
-        serde_json::Value::String("memory note.bin".into())
+    assert!(!refused.status.success());
+    assert!(
+        String::from_utf8_lossy(&refused.stderr).contains("supports only remote object storage")
     );
-    let plan_id = plan["plan_id"].as_str().unwrap().to_string();
-
-    let missing_expect = brainmesh(
-        &[
-            "blobs".into(),
-            "offload".into(),
-            "memory note.bin".into(),
-            "!exit 1".into(),
-            "--apply".into(),
-        ],
-        &store,
-    );
-    assert!(!missing_expect.status.success());
-    assert!(String::from_utf8_lossy(&missing_expect.stderr)
-        .contains("offload apply needs --expect <plan id>"));
-
-    let failed = brainmesh(
-        &[
-            "blobs".into(),
-            "offload".into(),
-            "memory note.bin".into(),
-            "!exit 1".into(),
-            "--apply".into(),
-            "--expect".into(),
-            plan_id,
-        ],
-        &store,
-    );
-    assert!(!failed.status.success());
-    let journal_path = store
-        .join("operations")
-        .join("offload")
-        .join(format!("{}.json", plan["plan_id"].as_str().unwrap()));
-    let journal: serde_json::Value =
-        serde_json::from_slice(&std::fs::read(&journal_path).unwrap()).unwrap();
-    assert_eq!(journal["progress"]["state"], "started");
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        assert_eq!(
-            std::fs::metadata(journal_path)
-                .unwrap()
-                .permissions()
-                .mode()
-                & 0o777,
-            0o600
-        );
-    }
+    assert!(!store.join("operations").join("offload").exists());
 
     run(
         &[

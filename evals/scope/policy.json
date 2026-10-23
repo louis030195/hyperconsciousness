@@ -27,6 +27,7 @@
     "hlc",
     "id",
     "identity",
+    "ingest",
     "key_control",
     "keyring",
     "log",
@@ -40,8 +41,6 @@
     "search_index",
     "secret",
     "space",
-    "sync",
-    "wire",
     "witness",
     "workspace"
   ],
@@ -63,7 +62,6 @@
     "serde",
     "serde_json",
     "sha2",
-    "tar",
     "tempfile",
     "thiserror",
     "ureq",
@@ -73,5 +71,5 @@
     "x25519-dalek",
     "zeroize"
   ],
-  "inventory_reason": "Existing engine modules and runtime dependencies at the baseline. Additions need a mission-fit rationale in the PR; this inventory is a review tripwire, not a ban on useful additions. key_control is an internal rebuildable encrypted index for the existing keyring membership/epoch fold; it adds no adapter, service, client surface, dependency, or authority source."
+  "inventory_reason": "Baseline engine inventory plus the reviewed central-only migration. ingest retains signed, authority-checked bundle import and rollback-witness views formerly embedded in sync; peer planning and wire transport are removed. The unused tar runtime dependency belonged to the retired peer backup adapter. key_control remains an internal rebuildable encrypted index for the existing keyring membership/epoch fold; it adds no adapter, service, client surface, dependency, or authority source. Future additions still need a mission-fit rationale in the PR."
 }

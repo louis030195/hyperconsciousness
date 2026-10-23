@@ -7,13 +7,13 @@ the [setup instructions](../../README.md#run-locally), then open
 <http://127.0.0.1:3217>.
 
 All screenshots below were captured from the real UI on September 25, 2026 using
-[synthetic sample metadata](fixtures.json). Names, identities, peers, counts,
+[synthetic sample metadata](fixtures.json). Names, identities, counts,
 and grants are examples, not a snapshot of anyone's personal brain.
 
 ## Overview
 
 The overview shows signed records, local disk usage, device histories, and
-configured peers. Below the hero, the composition and identity cards describe
+the central-node access model. Below the hero, the composition and identity cards describe
 the current device; the storage breakdown separates history, blobs, and indexes.
 
 ![HC Atlas overview with an Escher-inspired staircase and sample storage metrics](screenshots/overview.png)
@@ -23,10 +23,10 @@ the current device; the storage breakdown separates history, blobs, and indexes.
 | Signed records | Locally held history, including knowledge, policy, and audit records. |
 | Storage on disk | Allocated bytes in `log`, `blobs`, and `cache`. Projected folders and backups are excluded. |
 | Device histories | Distinct authors whose history is held locally. |
-| Configured peers | Saved routes. This does not establish that those peers are online or synchronized. |
+| Access model | Clients use scoped MCP or HTTP access to one trusted node. |
 
 The geometric illustration is decorative. It does not encode storage health or
-replication progress. The footer shows when the overview was inspected.
+client access. The footer shows when the overview was inspected.
 
 ## Stored files
 
@@ -64,12 +64,12 @@ Press **Escape** or the close button to return to the table.
 
 This view lists device histories held locally and the number of records from
 each author. **You** marks the current device; HC-reported frozen histories get
-a **Frozen** label. The peer section lists configured routes as **Not probed**.
+a **Frozen** label. The access section explains the central-node model.
 
 ![Topology view showing sample device histories and illustrative geometry](screenshots/topology.png)
 
-Opening this view does not connect to peers or trigger replication. It cannot
-confirm that another device has received the latest records.
+Opening this view does not authenticate as a remote client. It cannot confirm
+that another device has permission to read a record.
 
 ## Identity & access
 

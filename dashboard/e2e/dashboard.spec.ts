@@ -19,10 +19,8 @@ const overview = {
     { name: "log", bytes: 1024 },
     { name: "blobs", bytes: 4096 },
   ],
-  peers: [],
   issues: [],
   storageMeasured: true,
-  peersMeasured: true,
 };
 const files = {
   state: "ready",
@@ -95,7 +93,7 @@ test("navigation, availability filters and keyboard file inspection", async ({
   await expect(page.getByText("No issued grants were reported.")).toBeVisible();
   await page.getByRole("button", { name: /Your topology/ }).click();
   await expect(
-    page.getByText("No peer routes are configured for this brain."),
+    page.getByText("This store is served to clients through scoped MCP or HTTP access."),
   ).toBeVisible();
   expect(errors).toEqual([]);
 });

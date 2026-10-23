@@ -2,7 +2,7 @@
   "overview": {
     "state": "ready", "checkedAt": "2026-09-25T16:00:00Z", "name": "Example brain", "path": "/example/brain", "version": "hc demo", "device": "a1b2c3d4e5f6", "joined": true, "authority": "device owner", "keyStorage": "file, 0600",
     "devices": [{"id":"a1b2c3d4e5f6","records":8420,"local":true,"frozen":false},{"id":"b2c3d4e5f6a1","records":3210,"local":false,"frozen":false},{"id":"c3d4e5f6a1b2","records":850,"local":false,"frozen":false}], "records":12480,
-    "storage":[{"name":"log","bytes":805306368},{"name":"blobs","bytes":2147483648},{"name":"cache","bytes":100663296}], "peers":["archive.example","laptop.example"], "issues":[], "storageMeasured":true,"peersMeasured":true
+    "storage":[{"name":"log","bytes":805306368},{"name":"blobs","bytes":2147483648},{"name":"cache","bytes":100663296}], "issues":[], "storageMeasured":true
   },
   "files": {
     "state":"ready","checkedAt":"2026-09-25T16:00:00Z","total":4,"truncated":false,"refreshing":false,

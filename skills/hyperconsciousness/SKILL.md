@@ -78,15 +78,14 @@ or secret use. Skip retrieval for a self-contained question; respect a stop.
 
 Keep the cloud roles distinct:
 
-- `hc relay` is ephemeral routing. It stores no vault bytes and has no brain
-  key.
-- `hc remote` is persistent S3-compatible object storage. It receives a
+- The trusted HC node owns the store and enforces grants for remote clients
+  over authenticated MCP or HTTP.
+- `hc remote` is optional S3-compatible backup for that node. It receives a
   storage credential and signed ciphertext, but no brain key, device identity,
   grant authority, recovery material, or plaintext.
-- A peer with `blobs pin all` is a trusted, key-holding archive device. It can
-  validate authorized history and run full integrity scrubs.
 
-Configure a personal brain or separately encrypted space, then push normally:
+Configure backup for a personal brain or separately encrypted space on its
+trusted node, then push and prove an isolated restore:
 
 ```bash
 hc remote <endpoint> <region> <bucket> <prefix> <key-id> \
