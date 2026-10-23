@@ -22,10 +22,8 @@ export type Overview = {
   devices: Device[];
   records: number;
   storage: Storage[];
-  peers: string[];
   issues: string[];
   storageMeasured: boolean;
-  peersMeasured: boolean;
 };
 export type FileEntry = {
   name: string;

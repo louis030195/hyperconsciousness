@@ -1125,28 +1125,8 @@ tbody tr:hover {
   min-width: 75px;
   justify-content: center;
 }
-.peers-panel {
+.access-panel {
   margin-top: 24px;
-}
-.peer-grid {
-  padding: 22px 24px;
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 16px;
-}
-.peer {
-  display: flex;
-  align-items: center;
-  gap: 11px;
-  border: 1px solid var(--line);
-  padding: 16px;
-  border-radius: 3px;
-  min-width: 0;
-}
-.peer code {
-  font-size: 10px;
-  flex: 1;
-  overflow-wrap: anywhere;
 }
 .modal-backdrop {
   position: fixed;
@@ -1336,9 +1316,6 @@ tbody tr:hover {
   }
   .device-row > strong {
     margin-left: auto;
-  }
-  .peer-grid {
-    grid-template-columns: 1fr;
   }
 }
 @media (max-width: 950px) {
@@ -1717,16 +1694,6 @@ tbody tr:hover {
   .device-row > .micro {
     min-width: 0;
     font-size: 7px;
-  }
-  .peer-grid {
-    padding: 20px;
-  }
-  .peer {
-    flex-wrap: wrap;
-    padding: 15px;
-  }
-  .peer code {
-    font-size: 9px;
   }
   .file-dialog {
     padding: 26px;

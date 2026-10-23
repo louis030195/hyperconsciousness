@@ -5,10 +5,8 @@
 //! the same agent interface, over http, for clients that cannot spawn a
 //! process. which is every phone.
 //!
-//! a phone cannot run a binary and cannot read a local file, so it can never
-//! be a peer. it becomes a client of a machine that already is one: the always
-//! on box answers, and the phone holds nothing. that also means a phone loss is
-//! not a key loss.
+//! a phone connects as an authenticated client to the trusted HC node. The
+//! node answers within the caller's grant, and the phone holds no brain key.
 //!
 //! no tls here on purpose. this binds to loopback and something in front of it
 //! terminates tls **on this machine**, so nothing between sees plaintext. the

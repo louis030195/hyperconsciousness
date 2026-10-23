@@ -73,21 +73,18 @@ pub struct PlanRequest<'a> {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum TargetKind {
-    KeyHoldingPeer,
     KeylessRemote,
 }
 
 impl TargetKind {
     pub fn name(self) -> &'static str {
         match self {
-            Self::KeyHoldingPeer => "key_holding_peer",
             Self::KeylessRemote => "keyless_object_storage",
         }
     }
 
     fn required_retention(self) -> &'static str {
         match self {
-            Self::KeyHoldingPeer => "all",
             Self::KeylessRemote => "exact_ciphertext_inventory",
         }
     }
@@ -432,8 +429,8 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let request = PlanRequest {
             name: "memory.bin",
-            peer: "archive",
-            target_kind: TargetKind::KeyHoldingPeer,
+            peer: "remote",
+            target_kind: TargetKind::KeylessRemote,
             space: None,
             json: true,
         };
@@ -486,8 +483,8 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let request = PlanRequest {
             name: "memory.bin",
-            peer: "archive",
-            target_kind: TargetKind::KeyHoldingPeer,
+            peer: "remote",
+            target_kind: TargetKind::KeylessRemote,
             space: None,
             json: true,
         };

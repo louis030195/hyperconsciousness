@@ -56,6 +56,25 @@ struct Route {
 
 type Routes = Arc<Mutex<BTreeMap<String, Route>>>;
 
+fn copy_bidirectional(mut left: TcpStream, mut right: TcpStream) -> std::io::Result<()> {
+    left.set_read_timeout(None)?;
+    left.set_write_timeout(None)?;
+    right.set_read_timeout(None)?;
+    right.set_write_timeout(None)?;
+
+    let mut left_read = left.try_clone()?;
+    let mut right_write = right.try_clone()?;
+    let upstream = std::thread::spawn(move || {
+        let result = std::io::copy(&mut left_read, &mut right_write);
+        let _ = right_write.shutdown(Shutdown::Write);
+        result
+    });
+    let downstream = std::io::copy(&mut right, &mut left);
+    let _ = left.shutdown(Shutdown::Write);
+    let _ = upstream.join();
+    downstream.map(|_| ())
+}
+
 fn canonical_hostname(hostname: &str) -> Result<String> {
     let hostname = hostname.trim().to_ascii_lowercase();
     if hostname.is_empty()
@@ -483,7 +502,7 @@ fn handle_public(mut client: TcpStream, routes: &Routes) -> std::io::Result<()> 
         {
             continue;
         }
-        return crate::relay::copy_bidirectional(client, tunnel);
+        return copy_bidirectional(client, tunnel);
     }
     let _ = client.shutdown(Shutdown::Both);
     Ok(())
@@ -572,7 +591,7 @@ fn register(control: &str, route: &RouteFile) -> Result<TcpStream> {
 fn expose_one(control: &str, route: &RouteFile, target: SocketAddr) -> Result<()> {
     let tunnel = register(control, route)?;
     let local = TcpStream::connect_timeout(&target, REGISTER_TIMEOUT)?;
-    crate::relay::copy_bidirectional(local, tunnel)?;
+    copy_bidirectional(local, tunnel)?;
     Ok(())
 }
 

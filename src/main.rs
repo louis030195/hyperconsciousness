@@ -7,7 +7,6 @@
 
 use std::fs::File;
 use std::io::{self, Read, Write};
-use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -24,7 +23,6 @@ use hyperconsciousness::keyring::{DataKeys, RuntimeKeys};
 use hyperconsciousness::log::Store;
 use hyperconsciousness::record::Record;
 use hyperconsciousness::space;
-use hyperconsciousness::wire::{self, Peer};
 use zeroize::Zeroizing;
 
 mod access_cli;
@@ -41,17 +39,12 @@ mod http;
 mod mcp;
 mod oauth;
 mod permission;
-mod relay;
-mod screenpipe_adapter;
-mod service;
 mod sigv4;
-mod snapshot_archive;
-mod tcp;
 mod tunnel;
 mod updater;
 
 const USAGE: &str = "\
-hyperconsciousness (hc), one encrypted brain across your devices
+hyperconsciousness (hc), encrypted knowledge on one trusted server
 short command: hc.
 
   hc find <query> [--scope all|hc|skills|pkm|secrets] [--limit n]
@@ -66,7 +59,6 @@ short command: hc.
                                   install or manage native release updates
 
   hc start                 begin a new brain on this machine
-  hc join <ssh host>       join the brain on another machine
   hc recovery create <file> [--phrase-output <file>]
                                   encrypt every held key under 24 random words
   hc recovery verify <file> [--phrase-file <file>]
@@ -91,10 +83,7 @@ short command: hc.
   hc authority harden      separate an old brain's grant and data keys
   hc write <text> [opts]   append a note
   hc read [n]              read the last n notes, default 20
-  hc add <file> [--archive peer]
-                                  store a file; optionally prove a remote encrypted copy
-  hc screenpipe archive <peer> [--port 3030] [--staging folder]
-                                  snapshot the live database into a proved remote archive
+  hc add <file>            store a file on this node
   hc files [--space name] [--json]
                                   list stored files, newest version of each
   hc blobs pin metadata|all [--space name]
@@ -103,12 +92,12 @@ short command: hc.
                                   show the exact retained/missing chunk promise
   hc blobs verify [--space name]
                                   scrub every pinned manifest end to end
-  hc blobs offload <name> <archive peer|remote> [--version n] [--space name]
+  hc blobs offload <name> remote [--version n] [--space name]
                     [--json] [--apply --expect <plan id>]
                                   plan first; remote is keyless object storage
   hc history <name>        every version of one file
   hc get <name> [dest] [--version n]
-                                  write a file back out, fetching if needed
+                                  write locally available file bytes back out
   hc workspace status <name> <folder>
                                   preview a path-preserving directory scan
   hc workspace scan <name> <folder> [--allow-deletes] [--allow-mass-delete]
@@ -116,40 +105,29 @@ short command: hc.
                                   append changed files; deletes are guarded
   hc workspace checkpoint <name> <folder> [--skip-secret-files]
                                   append stable content; defer live files and deletes
-  hc workspace restore <name> <empty-folder> [--from peer]
+  hc workspace restore <name> <empty-folder>
                                   reconstruct the current conflict-free view
   hc workspace verify <name> <folder>
                                   hash-check a folder against the brain
   hc workspace track <name> <folder> [--skip-secret-files]
-                                  pin the exact local view before bidirectional sync
+                                  pin the exact local folder projection
   hc workspace track-status <name> <folder>
                                   show that folder's durable projection cursor
-  hc workspace pull <name> <folder> [--from peer]
-                                  materialize remote heads without overwriting edits
-  hc workspace watch <name> <folder> [--peer host] [--interval 300]
+  hc workspace pull <name> <folder>
+                                  materialize recorded heads without overwriting edits
+  hc workspace watch <name> <folder> [--interval 300]
                                   [--full-every 86400]
-                                  wake on local edits; poll/sync as a backstop
+                                  wake on local edits; poll as a backstop
   hc workspace watch-status <name> <folder>
                                   last attempt, last success and pending counts
   hc workspace conflicts <name>
                                   show divergent heads and their event ids
   hc workspace resolve <name> <object> <event>
                                   merge all heads by explicitly choosing one
-  hc sync [host] [--remote] [--witness file]
-                                  sync, then ratchet one external rollback bound
-  hc service install [--interval 300] [--remote] [--witness file]
-                                  prove a target, then register safe background sync
-  hc service status       scheduler identity and last known health
-  hc service uninstall    remove only the scheduler; preserve brain and logs
-  hc peer add <host> [cmd] another of YOUR machines, syncs everything
-  hc peer announce <addr>  tell the others how to reach THIS machine
-  hc space peer <name> <host> [cmd]
-                                  another PERSON, syncs only that space
   hc bundle <file> [--space name]
                                   write one encrypted brain/space for a usb stick
   hc import <file> [--space name]
                                   take one brain/space bundle, no network involved
-  hc peers                 list them
   hc ask <grant> [text]    read as that grant sees it, and log it
   hc mcp --as <grant>      serve that grant to an ai client
     --bind 127.0.0.1:PORT --token-file <private-file>
@@ -237,13 +215,6 @@ short command: hc.
                  --workspace name [--paths company,shared/project] [--space name]
   ask, mcp, serve-http, grants, revoke and audit also accept --space name
   hc id                    print this device, for manual pairing
-  hc invite <id>           wrap the brain key for a device
-  hc accept <invite>       take an invite that was wrapped for you
-  hc serve                 speak the protocol on stdin and stdout
-  hc listen [addr:port]    speak it on a socket, for peers without ssh
-  hc relay token           make an unguessable rendezvous room
-  hc relay listen [addr]   run a blind byte-forwarding rendezvous
-  hc relay expose <url>    wait outbound and serve peers through it
   hc tunnel route <file> <hostname>
                                   create one private HTTPS routing capability
   hc tunnel listen <public> <control> --route <file> ...
@@ -253,8 +224,8 @@ short command: hc.
   hc remote <endpoint> <region> <bucket> <prefix> <key>
                    --secret-file <private-file> [--space name]
                                   keep a copy in any s3 compatible bucket
-  hc push [--space name]   send the bucket what it lacks
-  hc pull [--space name]   take what it has and we lack
+  hc push [--space name]   back up encrypted records to object storage
+  hc pull [--space name]   restore encrypted records from object storage
 
   --dir <path>                    where the brain lives, default ~/.brain
 ";
@@ -602,7 +573,7 @@ fn advance_external_witness(
     let store = Store::open(dir)?;
     let keys = runtime_keys(dir, &identity)?;
     let visible = match keys.authority_state() {
-        Some(state) => hyperconsciousness::sync::have_authorized(&store, state)?,
+        Some(state) => hyperconsciousness::ingest::visible_heads(&store, state)?,
         None => store.heads()?.into_iter().collect(),
     };
     let check = previous.check_visible(brain, authority, &store, &visible)?;
@@ -612,37 +583,6 @@ fn advance_external_witness(
     let next = hyperconsciousness::witness::Witness::issue(brain, &signing, at, &heads)?;
     hyperconsciousness::witness::replace(path, &previous, &next)?;
     Ok((previous, next, check))
-}
-
-fn verify_external_witness(dir: &Path, path: &Path) -> Result<hyperconsciousness::witness::Check> {
-    let identity = Identity::load_for_brain(dir)?;
-    let brain = identity_space_id(&identity)?;
-    let authority = identity.grant_authority()?;
-    let witness = hyperconsciousness::witness::read(path)?;
-    let store = Store::open(dir)?;
-    let keys = runtime_keys(dir, &identity)?;
-    let visible = match keys.authority_state() {
-        Some(state) => hyperconsciousness::sync::have_authorized(&store, state)?,
-        None => store.heads()?.into_iter().collect(),
-    };
-    witness.check_visible(brain, authority, &store, &visible)
-}
-
-fn advance_witness_after_sync(dir: &Path, path: &Path) -> Result<()> {
-    let (previous, next, check) = advance_external_witness(dir, path)?;
-    println!(
-        "witness {} -> {} over {} heads after verifying the old lower bound",
-        previous.id()?.short(),
-        next.id()?.short(),
-        next.heads.len()
-    );
-    if check.newer > 0 {
-        println!(
-            "  {} witnessed authors advanced before this ratchet",
-            check.newer
-        );
-    }
-    Ok(())
 }
 
 fn recovery_phrase(rest: &[String]) -> Result<Zeroizing<String>> {
@@ -669,541 +609,8 @@ fn recovery_phrase(rest: &[String]) -> Result<Zeroizing<String>> {
     }
 }
 
-/// machines we sync with, one per line: `host<tab>remote command`.
-/// plain text on purpose, so it can be read and edited without the tool.
-///
-/// **peers are per brain.** the personal file lists your own devices, and a
-/// space lists the people in it. mixing them means two people's private logs
-/// end up on each other's disks, sealed and useless but kept forever, which
-/// is a leak waiting for a future key compromise.
-fn peers_path(dir: &Path) -> PathBuf {
-    dir.join("peers")
-}
-
-const MAX_PEERS_FILE: usize = 1024 * 1024;
-const MAX_PEERS: usize = 4096;
-const MAX_PEER_ADDRESS: usize = 2048;
-const MAX_PEER_COMMAND: usize = 16 * 1024;
-
-/// which command to run on the far side for a named host.
-///
-/// an explicit override wins, then whatever `peer add` recorded, then a bare
-/// name. the middle one is the whole point: the binary is rarely on a non
-/// interactive ssh PATH, which is why `peer add` takes a command at all.
-fn remote_for(peers: &[(String, String)], host: &str, override_: Option<String>) -> String {
-    override_
-        .or_else(|| {
-            peers
-                .iter()
-                .find(|(name, _)| name.split(',').any(|a| a.trim() == host))
-                .map(|(_, command)| command.clone())
-        })
-        .unwrap_or_else(|| "hc".to_string())
-}
-
-fn remote_override() -> Option<String> {
-    std::env::var("HC_REMOTE")
-        .ok()
-        .or_else(|| std::env::var("BRAINMESH_REMOTE").ok())
-}
-
-/// every device we have been told about, from the log, minus ourselves.
-///
-/// `peer add` is a local note. an announcement is a record, so it syncs, and a
-/// machine that has never met another learns how to reach it from a third that
-/// has. addresses are sealed like every other record, so only members read them.
-fn announced_peers(dir: &PathBuf, me: DeviceId) -> Vec<(String, String)> {
-    mesh_from(&payloads(dir, "peer").unwrap_or_default(), &me.hex())
-}
-
-fn mesh_from(records: &[serde_json::Value], me: &str) -> Vec<(String, String)> {
-    // one entry per device, not per announcement. a machine that announces
-    // both an ssh address and a socket is still one machine, and syncing it
-    // twice is invisible work billed by the round trip.
-    let mut by_device: Vec<(String, Vec<String>, String)> = Vec::new();
-
-    for value in records {
-        let (Some(device), Some(address)) = (value["device"].as_str(), value["address"].as_str())
-        else {
-            continue;
-        };
-
-        // never sync with yourself
-        if device == me {
-            continue;
-        }
-
-        let command = value["command"].as_str().unwrap_or("brainmesh").to_string();
-
-        match by_device.iter_mut().find(|(known, _, _)| known == device) {
-            Some((_, addresses, existing)) => {
-                // newest first. an old address is kept as a fallback rather
-                // than dropped, because a machine that moved may move back,
-                // but the one it last told us about is the one to try.
-                addresses.retain(|known| known != address);
-                addresses.insert(0, address.to_string());
-                if !address.starts_with(crate::tcp::SCHEME)
-                    && !address.starts_with(crate::relay::SCHEME)
-                {
-                    *existing = command;
-                }
-            }
-            None => by_device.push((device.to_string(), vec![address.to_string()], command)),
-        }
-    }
-
-    by_device
-        .into_iter()
-        .map(|(_, mut addresses, command)| {
-            // sockets first. a peer that cannot be reached over ssh usually
-            // fails slowly, and on windows it does not fail at all, it hangs.
-            // trying the transport that works first means never finding out.
-            addresses.sort_by_key(|address| {
-                !address.starts_with(crate::tcp::SCHEME)
-                    && !address.starts_with(crate::relay::SCHEME)
-            });
-            (addresses.join(","), command)
-        })
-        .collect()
-}
-
-/// what an ssh alias actually points at, so `macmini` and
-/// `user@100.64.0.10` are recognised as one machine rather than two.
-///
-/// `ssh -G` parses the same config ssh itself will use and touches no network,
-/// which makes it the cheapest honest answer available. an address we cannot
-/// resolve is returned as written, so an unknown shape is still compared.
-fn resolved(address: &str) -> String {
-    if address.starts_with('!')
-        || address.starts_with(tcp::SCHEME)
-        || address.starts_with(relay::SCHEME)
-    {
-        return address.to_string();
-    }
-
-    let Ok(output) = Command::new("ssh").arg("-G").arg(address).output() else {
-        return address.to_string();
-    };
-
-    let text = String::from_utf8_lossy(&output.stdout);
-    let mut host = None;
-    let mut user = None;
-
-    for line in text.lines() {
-        if let Some(value) = line.strip_prefix("hostname ") {
-            host = Some(value.trim().to_string());
-        } else if let Some(value) = line.strip_prefix("user ") {
-            user = Some(value.trim().to_string());
-        }
-    }
-
-    match (user, host) {
-        (Some(user), Some(host)) => format!("{user}@{host}"),
-        _ => address.to_string(),
-    }
-}
-
-fn validate_peer(address: &str, command: &str) -> Result<()> {
-    if address.is_empty()
-        || address.len() > MAX_PEER_ADDRESS
-        || address.chars().any(char::is_control)
-    {
-        return Err(Error::Malformed(
-            "peer address must be bounded text without control characters",
-        ));
-    }
-    if command.is_empty()
-        || command.len() > MAX_PEER_COMMAND
-        || command.chars().any(char::is_control)
-    {
-        return Err(Error::Malformed(
-            "peer command must be bounded text without control characters",
-        ));
-    }
-    Ok(())
-}
-
-fn read_peers(dir: &Path) -> Result<Vec<(String, String)>> {
-    let path = peers_path(dir);
-    hyperconsciousness::guard::no_symlink(&path)?;
-    let file = match File::open(&path) {
-        Ok(file) => file,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(error) => return Err(error.into()),
-    };
-    let metadata = file.metadata()?;
-    if !metadata.is_file() {
-        return Err(Error::Malformed("peer routes are not a regular file"));
-    }
-    if metadata.len() > MAX_PEERS_FILE as u64 {
-        return Err(Error::TooLarge {
-            got: usize::try_from(metadata.len()).unwrap_or(usize::MAX),
-            max: MAX_PEERS_FILE,
-        });
-    }
-    let mut text = String::new();
-    file.take((MAX_PEERS_FILE + 1) as u64)
-        .read_to_string(&mut text)?;
-    if text.len() > MAX_PEERS_FILE {
-        return Err(Error::TooLarge {
-            got: text.len(),
-            max: MAX_PEERS_FILE,
-        });
-    }
-    let mut out = Vec::new();
-
-    for line in text.lines() {
-        let line = line.trim();
-        if line.is_empty() || line.starts_with('#') {
-            continue;
-        }
-
-        let (host, command) = line.split_once('\t').unwrap_or((line, "brainmesh"));
-        validate_peer(host, command)?;
-        out.push((host.to_string(), command.to_string()));
-        if out.len() > MAX_PEERS {
-            return Err(Error::TooLarge {
-                got: out.len(),
-                max: MAX_PEERS,
-            });
-        }
-    }
-
-    Ok(out)
-}
-
-fn write_peers(dir: &Path, peers: &[(String, String)]) -> Result<()> {
-    if peers.len() > MAX_PEERS {
-        return Err(Error::TooLarge {
-            got: peers.len(),
-            max: MAX_PEERS,
-        });
-    }
-    let mut body = String::new();
-    for (host, command) in peers {
-        validate_peer(host, command)?;
-        body.push_str(host);
-        body.push('\t');
-        body.push_str(command);
-        body.push('\n');
-        if body.len() > MAX_PEERS_FILE {
-            return Err(Error::TooLarge {
-                got: body.len(),
-                max: MAX_PEERS_FILE,
-            });
-        }
-    }
-
-    hyperconsciousness::guard::no_symlink(dir)?;
-    std::fs::create_dir_all(dir)?;
-    let path = peers_path(dir);
-    hyperconsciousness::durable::write_private(&path, body.as_bytes())
-}
-
-/// spawn the same binary on another machine over ssh and talk to it.
-///
-/// there is no daemon, no port and no certificate, because ssh already
-/// answers who the peer is, and over a tailnet it is already reachable.
-/// build the process that gives us a pipe to the other machine.
-///
-/// ssh is only the default. an address beginning with `!` is run as a shell
-/// command instead, so the same code syncs through anything that can carry
-/// stdin and stdout: a jump host, kubectl exec, adb shell, a serial link.
-fn transport(address: &str, remote: &str) -> Command {
-    if let Some(raw) = address.strip_prefix('!') {
-        let mut command = Command::new("sh");
-        command.arg("-c").arg(raw);
-        return command;
-    }
-
-    let mut command = ssh_command();
-    command.arg(address).arg(format!("{remote} serve"));
-    command
-}
-
-fn ssh_command() -> Command {
-    let mut command = Command::new("ssh");
-    command.args([
-        "-o",
-        "BatchMode=yes",
-        "-o",
-        "ConnectionAttempts=1",
-        "-o",
-        "ConnectTimeout=10",
-        "-o",
-        "ServerAliveInterval=15",
-        "-o",
-        "ServerAliveCountMax=2",
-    ]);
-    command
-}
-
-// The CLI restores Unix's default SIGPIPE behavior so commands such as
-// `hc read | head` stop quietly. Internal SSH pipes are different: a
-// peer can disappear after spawn, and that must become an ordinary EPIPE so
-// sync can try the next route. Hold this process-wide guard only while one
-// child protocol session is active.
-#[cfg(unix)]
-static SIGPIPE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
-#[cfg(unix)]
-struct IgnoreSigpipe {
-    previous: libc::sighandler_t,
-    _lock: std::sync::MutexGuard<'static, ()>,
-}
-
-#[cfg(unix)]
-impl IgnoreSigpipe {
-    fn new() -> Result<Self> {
-        let lock = SIGPIPE_LOCK
-            .lock()
-            .map_err(|_| Error::Denied("SIGPIPE transport guard is poisoned"))?;
-        let previous = unsafe { libc::signal(libc::SIGPIPE, libc::SIG_IGN) };
-        if previous == libc::SIG_ERR {
-            return Err(std::io::Error::last_os_error().into());
-        }
-        Ok(Self {
-            previous,
-            _lock: lock,
-        })
-    }
-}
-
-#[cfg(unix)]
-impl Drop for IgnoreSigpipe {
-    fn drop(&mut self) {
-        unsafe {
-            libc::signal(libc::SIGPIPE, self.previous);
-        }
-    }
-}
-
-#[cfg(not(unix))]
-struct IgnoreSigpipe;
-
-#[cfg(not(unix))]
-impl IgnoreSigpipe {
-    fn new() -> Result<Self> {
-        Ok(Self)
-    }
-}
-
-struct PeerSync {
-    pulled: hyperconsciousness::sync::Applied,
-    pushed: u64,
-    pinned: usize,
-}
-
-/// Apply this brain's local retention promise over an already authenticated
-/// peer session. Partial peers contribute only chunks they report holding; a
-/// later peer can fill the rest without turning successful record sync into a
-/// misleading all-or-nothing transfer.
-fn hydrate_pinned<R: Read, W: Write>(peer: &mut Peer<R, W>, store: &Store) -> Result<usize> {
-    let root = store.root();
-    let identity = Identity::load_for_brain(root)?;
-    let keys = runtime_keys(root, &identity)?;
-    let blobs = Blobs::open(root)?;
-    hydrate_pinned_with(peer, store, &blobs, &keys)
-}
-
-fn hydrate_pinned_with<R: Read, W: Write, K: DataKeys + ?Sized>(
-    peer: &mut Peer<R, W>,
-    store: &Store,
-    blobs: &Blobs,
-    keys: &K,
-) -> Result<usize> {
-    let status = hyperconsciousness::pin::status(store.root(), store, blobs, keys)?;
-    if status.missing_chunks.is_empty() {
-        return Ok(0);
-    }
-    let available = peer.available_chunks(&status.missing_chunks)?;
-    peer.fetch_chunks(blobs, &available)
-}
-
-/// exchange with one peer, over whichever transport its address names.
-///
-/// `tcp://` exists because windows openssh will not forward piped stdin, so a
-/// machine can answer over ssh but never start a conversation on it.
-fn over_ssh(
-    host: &str,
-    remote: &str,
-    store: &Store,
-    space: Option<&hyperconsciousness::id::Hash>,
-) -> Result<PeerSync> {
-    if host.starts_with(tcp::SCHEME) || host.starts_with(relay::SCHEME) {
-        return over_tcp(host, store, space);
-    }
-
-    let mut child = transport(host, remote)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::inherit())
-        .spawn()?;
-    let _sigpipe = IgnoreSigpipe::new()?;
-
-    let mut peer = Peer {
-        input: child.stdout.take().expect("piped"),
-        output: child.stdin.take().expect("piped"),
-    };
-
-    // a space is a different brain on the same machine, so the session
-    // switches to it before anything is exchanged
-    if let Some(id) = space {
-        if let Err(error) = peer.enter_space(id) {
-            let _ = child.wait();
-            return Err(error);
-        }
-    }
-
-    // pull first so a fork shows up before we send anything, then push, so
-    // one machine that can open a connection is enough for both to converge
-    let pulled = peer.pull_into_root(store, store.root());
-    let pushed = if pulled.is_ok() {
-        peer.push_from_root(store, store.root())
-    } else {
-        Ok(0)
-    };
-    let pinned = if pulled.is_ok() && pushed.is_ok() {
-        hydrate_pinned(&mut peer, store)
-    } else {
-        Ok(0)
-    };
-
-    let _ = peer.bye();
-    let _ = child.wait();
-
-    Ok(PeerSync {
-        pulled: pulled?,
-        pushed: pushed?,
-        pinned: pinned?,
-    })
-}
-
-fn over_tcp(
-    address: &str,
-    store: &Store,
-    space: Option<&hyperconsciousness::id::Hash>,
-) -> Result<PeerSync> {
-    let identity = Identity::load_or_create(store.root())?;
-    let keys = runtime_keys(store.root(), &identity)?;
-    let stream = if address.starts_with(relay::SCHEME) {
-        relay::dial(address, keys.current_key()?)?
-    } else {
-        tcp::dial(address, keys.current_key()?)?
-    };
-
-    let mut peer = Peer {
-        input: stream.try_clone()?,
-        output: stream,
-    };
-
-    if let Some(id) = space {
-        peer.enter_space(id)?;
-    }
-
-    let pulled = peer.pull_into_root(store, store.root());
-    let pushed = if pulled.is_ok() {
-        peer.push_from_root(store, store.root())
-    } else {
-        Ok(0)
-    };
-    let pinned = if pulled.is_ok() && pushed.is_ok() {
-        hydrate_pinned(&mut peer, store)
-    } else {
-        Ok(0)
-    };
-    let _ = peer.bye();
-
-    Ok(PeerSync {
-        pulled: pulled?,
-        pushed: pushed?,
-        pinned: pinned?,
-    })
-}
-
-/// open a session and fetch the chunks of one blob we are missing
-fn fetch_session<R: io::Read, W: Write>(
-    mut peer: Peer<R, W>,
-    blobs: &Blobs,
-    references: &[BlobRef],
-) -> Result<(usize, usize)> {
-    let mut missing = std::collections::BTreeSet::new();
-    let mut completed = 0;
-    for reference in references {
-        if blobs.is_complete(reference) {
-            continue;
-        }
-        missing.extend(blobs.missing(reference));
-        completed += 1;
-    }
-    let missing: Vec<_> = missing.into_iter().collect();
-    let chunks = peer.fetch_chunks(blobs, &missing)?;
-    let _ = peer.bye();
-    Ok((chunks, completed))
-}
-
-fn archive_session<R: io::Read, W: Write>(
-    mut peer: Peer<R, W>,
-    store: &Store,
-    blobs: &Blobs,
-    reference: &BlobRef,
-) -> Result<usize> {
-    peer.push_from_root(store, store.root())?;
-    let stored = peer.archive_blob(blobs, reference)?;
-    peer.bye()?;
-    Ok(stored)
-}
-
-/// Replicate one already-recorded blob into a peer that explicitly promises
-/// all-history retention. Local ciphertext is eligible for eviction only
-/// after the same session proves every content hash is held remotely.
-fn archive_to_peer(
-    host: &str,
-    remote: &str,
-    store: &Store,
-    blobs: &Blobs,
-    reference: &BlobRef,
-    key: &[u8; 32],
-) -> Result<usize> {
-    if host.starts_with(tcp::SCHEME) || host.starts_with(relay::SCHEME) {
-        let stream = if host.starts_with(relay::SCHEME) {
-            relay::dial(host, key)?
-        } else {
-            tcp::dial(host, key)?
-        };
-        return archive_session(
-            Peer {
-                input: stream.try_clone()?,
-                output: stream,
-            },
-            store,
-            blobs,
-            reference,
-        );
-    }
-
-    let mut child = transport(host, remote)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::inherit())
-        .spawn()?;
-    let _sigpipe = IgnoreSigpipe::new()?;
-    let archived = archive_session(
-        Peer {
-            input: child.stdout.take().expect("piped"),
-            output: child.stdin.take().expect("piped"),
-        },
-        store,
-        blobs,
-        reference,
-    );
-    let status = child.wait()?;
-    if archived.is_ok() && !status.success() {
-        return Err(Error::Denied("archive transport exited unsuccessfully"));
-    }
-    archived
-}
-
+/// `peer` remains the on-disk receipt field name for compatibility with
+/// existing offload journals. New offloads accept only the keyless remote.
 #[derive(Debug)]
 struct OffloadOptions {
     name: String,
@@ -1225,9 +632,12 @@ fn parse_offload_options(rest: &[String]) -> Result<OffloadOptions> {
         .get(2)
         .filter(|value| !value.starts_with("--"))
         .cloned()
-        .ok_or(Error::Malformed(
-            "blobs offload needs an archive peer or remote",
-        ))?;
+        .ok_or(Error::Malformed("blobs offload needs remote"))?;
+    if peer != "remote" {
+        return Err(Error::Malformed(
+            "blobs offload supports only remote object storage",
+        ));
+    }
     let mut version = None;
     let mut space = None;
     let mut json = false;
@@ -1453,27 +863,14 @@ fn offload_file(dir: &PathBuf, rest: &[String]) -> Result<()> {
             }
         }
     }
-    let keyless_remote = if options.peer == "remote" {
-        Some(bucket::Remote::load(&target_dir)?)
-    } else {
-        None
-    };
-    let (route, target_kind) = match &keyless_remote {
-        Some(remote) => (
-            remote.binding(),
-            hyperconsciousness::offload::TargetKind::KeylessRemote,
-        ),
-        None => (
-            remote_for(&read_peers(dir)?, &options.peer, remote_override()),
-            hyperconsciousness::offload::TargetKind::KeyHoldingPeer,
-        ),
-    };
+    let remote = bucket::Remote::load(&target_dir)?;
+    let route = remote.binding();
     let policy = hyperconsciousness::pin::load(&target_dir)?;
     let preview = blobs.preview_evict_loose(&reference.chunks)?;
     let request = hyperconsciousness::offload::PlanRequest {
         name: &options.name,
         peer: &options.peer,
-        target_kind,
+        target_kind: hyperconsciousness::offload::TargetKind::KeylessRemote,
         space: options.space.as_deref(),
         json: options.json,
     };
@@ -1540,25 +937,13 @@ fn offload_file(dir: &PathBuf, rest: &[String]) -> Result<()> {
     let mut journal =
         existing_journal.unwrap_or_else(|| hyperconsciousness::offload::Journal::started(&plan));
     journal.save(&target_dir)?;
-    let stored = match keyless_remote {
-        Some(remote) => {
-            let proof = bucket::archive_reference(&target_dir, &remote, &blobs, reference)?;
-            if proof.confirmed_chunks != plan.file.unique_chunks {
-                return Err(Error::Denied(
-                    "the keyless remote proved a different ciphertext inventory",
-                ));
-            }
-            proof.uploaded_chunks
-        }
-        None => archive_to_peer(
-            &options.peer,
-            &route,
-            &store,
-            &blobs,
-            reference,
-            keys.current_key()?,
-        )?,
-    };
+    let proof = bucket::archive_reference(&target_dir, &remote, &blobs, reference)?;
+    if proof.confirmed_chunks != plan.file.unique_chunks {
+        return Err(Error::Denied(
+            "the keyless remote proved a different ciphertext inventory",
+        ));
+    }
+    let stored = proof.uploaded_chunks;
     journal.progress = hyperconsciousness::offload::Progress::RemoteProved {
         newly_stored_chunks: stored,
     };
@@ -1573,52 +958,10 @@ fn offload_file(dir: &PathBuf, rest: &[String]) -> Result<()> {
     )
 }
 
-/// Refuse an expensive application snapshot before its target has explicitly
-/// promised all-history retention. The final archive operation repeats this
-/// handshake and proves every exact chunk after upload.
-fn archive_preflight_peer(host: &str, remote: &str, store: &Store, key: &[u8; 32]) -> Result<()> {
-    if host.starts_with(tcp::SCHEME) || host.starts_with(relay::SCHEME) {
-        let stream = if host.starts_with(relay::SCHEME) {
-            relay::dial(host, key)?
-        } else {
-            tcp::dial(host, key)?
-        };
-        let mut peer = Peer {
-            input: stream.try_clone()?,
-            output: stream,
-        };
-        peer.archive_ready()?;
-        peer.push_from_root(store, store.root())?;
-        return peer.bye();
-    }
-
-    let mut child = transport(host, remote)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::inherit())
-        .spawn()?;
-    let _sigpipe = IgnoreSigpipe::new()?;
-    let ready = (|| {
-        let mut peer = Peer {
-            input: child.stdout.take().expect("piped"),
-            output: child.stdin.take().expect("piped"),
-        };
-        peer.archive_ready()?;
-        peer.push_from_root(store, store.root())?;
-        peer.bye()
-    })();
-    let status = child.wait()?;
-    if ready.is_ok() && !status.success() {
-        return Err(Error::Denied("archive transport exited unsuccessfully"));
-    }
-    ready
-}
-
 fn add_file(
     dir: &PathBuf,
     path: &Path,
     logical_name: Option<&str>,
-    archive: Option<&str>,
     source: Option<&str>,
 ) -> Result<BlobRef> {
     let name = logical_name
@@ -1630,7 +973,7 @@ fn add_file(
         .unwrap_or_else(|| "unnamed".to_string());
 
     hyperconsciousness::guard::no_symlink(path)?;
-    add_reader(dir, File::open(path)?, &name, archive, source)
+    add_reader(dir, File::open(path)?, &name, source)
 }
 
 /// Application adapters supply bytes; HC's signed file/blob format is generic.
@@ -1638,7 +981,6 @@ fn add_reader(
     dir: &PathBuf,
     reader: impl Read,
     name: &str,
-    archive: Option<&str>,
     source: Option<&str>,
 ) -> Result<BlobRef> {
     let identity = Identity::load_or_create(dir)?;
@@ -1661,351 +1003,9 @@ fn add_reader(
         reference.len,
         reference.chunks.len()
     );
-    if let Some(host) = archive {
-        let remote = remote_for(&read_peers(dir)?, host, remote_override());
-        let store = Store::open(dir)?;
-        let stored = archive_to_peer(
-            host,
-            &remote,
-            &store,
-            &blobs,
-            &reference,
-            keys.current_key()?,
-        )?;
-        let unique = reference
-            .chunks
-            .iter()
-            .copied()
-            .collect::<std::collections::BTreeSet<_>>()
-            .len();
-        println!("archive {host} confirmed all {unique} encrypted chunks ({stored} newly stored)");
-        if hyperconsciousness::pin::load(dir)? == hyperconsciousness::pin::Policy::Metadata {
-            let evicted = blobs.evict_loose(&reference.chunks)?;
-            println!(
-                "released {} local ciphertext bytes in {} chunks; {} packed chunks remain shared locally",
-                evicted.bytes, evicted.chunks, evicted.packed_only
-            );
-        } else {
-            println!("kept local ciphertext because this device promises all-history retention");
-        }
-    }
     Ok(reference)
 }
 
-const SCREENPIPE_RESPONSE_MAX: usize = 1024 * 1024;
-const SCREENPIPE_TOKEN_MAX: usize = 4096;
-const SCREENPIPE_ENCRYPTION_HEADROOM: u64 = 512 * 1024 * 1024;
-
-fn percent_encode_query(value: &str) -> String {
-    let mut encoded = String::with_capacity(value.len());
-    for byte in value.as_bytes() {
-        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~') {
-            encoded.push(*byte as char);
-        } else {
-            use std::fmt::Write as _;
-            let _ = write!(encoded, "%{byte:02X}");
-        }
-    }
-    encoded
-}
-
-fn parse_screenpipe_token(mut output: Zeroizing<Vec<u8>>) -> Result<Zeroizing<Vec<u8>>> {
-    while matches!(output.last(), Some(b'\n' | b'\r')) {
-        output.pop();
-    }
-    if output.is_empty()
-        || output.len() > SCREENPIPE_TOKEN_MAX
-        || output.iter().any(|byte| !(0x21..=0x7e).contains(byte))
-    {
-        return Err(Error::Denied(
-            "screenpipe returned an invalid local API token",
-        ));
-    }
-    Ok(output)
-}
-
-fn screenpipe_token(binary: &std::ffi::OsStr) -> Result<Zeroizing<Vec<u8>>> {
-    let mut child = Command::new(binary)
-        .arg("auth")
-        .arg("token")
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()?;
-    let mut output = Zeroizing::new(Vec::new());
-    child
-        .stdout
-        .take()
-        .expect("piped")
-        .take((SCREENPIPE_TOKEN_MAX + 1) as u64)
-        .read_to_end(&mut output)?;
-    if output.len() > SCREENPIPE_TOKEN_MAX {
-        let _ = child.kill();
-    }
-    let status = child.wait()?;
-    if !status.success() {
-        return Err(Error::Denied(
-            "screenpipe auth token failed; make sure screenpipe is running",
-        ));
-    }
-    parse_screenpipe_token(output)
-}
-
-fn parse_screenpipe_backup_response(response: &[u8], expected: &Path) -> Result<u64> {
-    let split = response
-        .windows(4)
-        .position(|window| window == b"\r\n\r\n")
-        .ok_or(Error::Malformed(
-            "screenpipe returned a malformed HTTP response",
-        ))?;
-    let header = std::str::from_utf8(&response[..split])
-        .map_err(|_| Error::Malformed("screenpipe returned a malformed HTTP header"))?;
-    let status = header
-        .lines()
-        .next()
-        .and_then(|line| line.split_whitespace().nth(1))
-        .and_then(|code| code.parse::<u16>().ok())
-        .ok_or(Error::Malformed(
-            "screenpipe returned a malformed HTTP status",
-        ))?;
-    if status != 200 {
-        return Err(Error::Denied("screenpipe database backup request failed"));
-    }
-    let value: serde_json::Value = serde_json::from_slice(&response[split + 4..])?;
-    if value["success"].as_bool() != Some(true) {
-        return Err(Error::Denied(
-            "screenpipe did not confirm its database backup",
-        ));
-    }
-    let path = value["path"].as_str().ok_or(Error::Malformed(
-        "screenpipe backup response omitted its path",
-    ))?;
-    if Path::new(path) != expected {
-        return Err(Error::Denied(
-            "screenpipe confirmed a different backup path than requested",
-        ));
-    }
-    value["size_bytes"].as_u64().ok_or(Error::Malformed(
-        "screenpipe backup response omitted its size",
-    ))
-}
-
-fn request_screenpipe_backup(port: u16, token: &[u8], destination: &Path) -> Result<u64> {
-    let address = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, port));
-    let mut stream = TcpStream::connect_timeout(&address, Duration::from_secs(3))?;
-    stream.set_read_timeout(Some(Duration::from_secs(60 * 60)))?;
-    stream.set_write_timeout(Some(Duration::from_secs(30)))?;
-
-    let path = destination
-        .to_str()
-        .ok_or(Error::Malformed("screenpipe staging path is not UTF-8"))?;
-    let mut request = Zeroizing::new(Vec::new());
-    request.extend_from_slice(b"GET /data/backup?path=");
-    request.extend_from_slice(percent_encode_query(path).as_bytes());
-    request.extend_from_slice(b" HTTP/1.1\r\nHost: 127.0.0.1:");
-    request.extend_from_slice(port.to_string().as_bytes());
-    request.extend_from_slice(b"\r\nAuthorization: Bearer ");
-    request.extend_from_slice(token);
-    request.extend_from_slice(b"\r\nAccept: application/json\r\nConnection: close\r\n\r\n");
-    stream.write_all(&request)?;
-    stream.flush()?;
-
-    let mut response = Vec::new();
-    stream
-        .take((SCREENPIPE_RESPONSE_MAX + 1) as u64)
-        .read_to_end(&mut response)?;
-    if response.len() > SCREENPIPE_RESPONSE_MAX {
-        return Err(Error::TooLarge {
-            got: response.len(),
-            max: SCREENPIPE_RESPONSE_MAX,
-        });
-    }
-    parse_screenpipe_backup_response(&response, destination)
-}
-
-fn prepare_screenpipe_staging(path: &Path) -> Result<PathBuf> {
-    if let Some(parent) = path.parent() {
-        hyperconsciousness::guard::no_symlink(parent)?;
-        std::fs::create_dir_all(parent)?;
-    }
-    hyperconsciousness::guard::no_symlink(path)?;
-    std::fs::create_dir_all(path)?;
-    if !std::fs::symlink_metadata(path)?.is_dir() {
-        return Err(Error::Malformed(
-            "screenpipe staging path is not a directory",
-        ));
-    }
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))?;
-    }
-    path.canonicalize().map_err(Error::from)
-}
-
-fn screenpipe_snapshot_path(staging: &Path) -> Result<PathBuf> {
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_err(|_| Error::Denied("system clock is before the Unix epoch"))?
-        .as_nanos();
-    for attempt in 0..100u32 {
-        let path = staging.join(format!(
-            "screenpipe-{}-{now}-{attempt}.sqlite",
-            std::process::id()
-        ));
-        if !path.exists() {
-            return Ok(path);
-        }
-    }
-    Err(Error::Denied(
-        "could not allocate a unique screenpipe staging path",
-    ))
-}
-
-fn archive_screenpipe_snapshot(
-    dir: &PathBuf,
-    snapshot: &screenpipe_adapter::Snapshot,
-    host: &str,
-) -> Result<BlobRef> {
-    snapshot.with_reader(|reader| {
-        add_reader(
-            dir,
-            reader,
-            snapshot.logical_name(),
-            Some(host),
-            Some(snapshot.source()),
-        )
-    })
-}
-
-fn screenpipe_archive(dir: &PathBuf, host: &str, port: u16, staging: &Path) -> Result<()> {
-    if hyperconsciousness::pin::load(dir)? != hyperconsciousness::pin::Policy::Metadata {
-        return Err(Error::Denied(
-            "screenpipe archive needs local blob pin metadata so it can release duplicate ciphertext",
-        ));
-    }
-    let identity = Identity::load_or_create(dir)?;
-    let keys = runtime_keys(dir, &identity)?;
-    keys.ensure_writer(identity.device())?;
-    let remote = remote_for(&read_peers(dir)?, host, remote_override());
-    let store = Store::open(dir)?;
-    archive_preflight_peer(host, &remote, &store, keys.current_key()?)?;
-
-    let staging = prepare_screenpipe_staging(staging)?;
-    let snapshot = screenpipe_snapshot_path(&staging)?;
-    let binary = std::env::var_os("SCREENPIPE_BIN").unwrap_or_else(|| "screenpipe".into());
-    let token = screenpipe_token(&binary)?;
-    let reported = match request_screenpipe_backup(port, &token, &snapshot) {
-        Ok(size) => size,
-        Err(error) => {
-            if snapshot.exists() {
-                eprintln!(
-                    "incomplete snapshot kept for inspection at {}",
-                    snapshot.display()
-                );
-            }
-            return Err(error);
-        }
-    };
-    drop(token);
-    let backup = match screenpipe_adapter::Snapshot::open(&snapshot, reported) {
-        Ok(backup) => backup,
-        Err(error) => {
-            eprintln!("snapshot kept for inspection at {}", snapshot.display());
-            return Err(error);
-        }
-    };
-    let available = match fs4::available_space(dir) {
-        Ok(available) => available,
-        Err(error) => {
-            eprintln!(
-                "consistent snapshot kept for retry at {}",
-                snapshot.display()
-            );
-            return Err(error.into());
-        }
-    };
-    let required = backup
-        .encryption_bytes()
-        .saturating_add(SCREENPIPE_ENCRYPTION_HEADROOM);
-    if available < required {
-        eprintln!(
-            "consistent snapshot kept for retry at {}",
-            snapshot.display()
-        );
-        return Err(Error::Denied(
-            "not enough free space to encrypt the snapshot safely; free snapshot size plus 512 MiB",
-        ));
-    }
-
-    if let Err(error) = archive_screenpipe_snapshot(dir, &backup, host) {
-        eprintln!(
-            "consistent snapshot kept for retry at {}",
-            snapshot.display()
-        );
-        return Err(error);
-    }
-    if let Err(error) = backup.remove() {
-        eprintln!(
-            "archive is complete but the temporary snapshot remains at {}",
-            snapshot.display()
-        );
-        return Err(error);
-    }
-    println!(
-        "removed temporary plaintext snapshot; restore with: hc get {} <destination> {host}",
-        backup.logical_name()
-    );
-    if backup.logical_name().ends_with(".tar") {
-        println!("extract the tar into a fresh directory, then use Screenpipe's storage restore command; never replace a live database");
-    }
-    Ok(())
-}
-
-/// Fetch many blob manifests in one peer session. Opening one SSH connection
-/// per file makes a directory restore slower than the bytes themselves.
-fn fetch_from_peer(
-    host: &str,
-    blobs: &Blobs,
-    references: &[BlobRef],
-    remote: &str,
-    key: &[u8; 32],
-) -> Result<(usize, usize)> {
-    if host.starts_with(tcp::SCHEME) || host.starts_with(relay::SCHEME) {
-        let stream = if host.starts_with(relay::SCHEME) {
-            relay::dial(host, key)?
-        } else {
-            tcp::dial(host, key)?
-        };
-        return fetch_session(
-            Peer {
-                input: stream.try_clone()?,
-                output: stream,
-            },
-            blobs,
-            references,
-        );
-    }
-
-    let mut child = transport(host, remote)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::inherit())
-        .spawn()?;
-    let _sigpipe = IgnoreSigpipe::new()?;
-
-    let peer = Peer {
-        input: child.stdout.take().expect("piped"),
-        output: child.stdin.take().expect("piped"),
-    };
-
-    let fetched = fetch_session(peer, blobs, references);
-    let _ = child.wait();
-    fetched
-}
-
-/// name to id, from the personal brain, so a space can be called something
-/// a person would say out loud
 fn current_space(dir: &PathBuf, name: &str) -> Result<(hyperconsciousness::id::Hash, u32)> {
     let mut found = None;
     for value in payloads(dir, "space")? {
@@ -3392,14 +2392,6 @@ fn selected_brain(dir: &PathBuf, rest: &[String]) -> Result<(Identity, PathBuf)>
     Ok((Identity::load_existing_for_brain(dir)?, dir.clone()))
 }
 
-fn local_blob_status(root: &Path) -> Result<hyperconsciousness::pin::Status> {
-    let identity = Identity::load_existing_for_brain(root)?;
-    let keys = runtime_keys_read_only(root, &identity)?;
-    let store = Store::open(root)?;
-    let blobs = Blobs::open(root)?;
-    hyperconsciousness::pin::status(root, &store, &blobs, &keys)
-}
-
 #[derive(serde::Serialize)]
 struct BlobStatusView {
     schema: &'static str,
@@ -3455,83 +2447,10 @@ fn print_blob_status(status: &hyperconsciousness::pin::Status) {
     if status.satisfied() {
         println!("archive inventory satisfied; run `hc blobs verify` for a full scrub");
     } else {
-        println!("archive incomplete; ordinary sync fetches chunks from peers that hold them");
+        println!("archive incomplete; restore missing ciphertext from the configured object store");
     }
 }
 
-fn report_incomplete_pins(root: &Path) -> Result<usize> {
-    let mut missing = 0usize;
-    let personal = local_blob_status(root)?;
-    if personal.policy == hyperconsciousness::pin::Policy::All && !personal.satisfied() {
-        eprintln!(
-            "personal blob archive incomplete: {} required chunks still missing",
-            personal.missing_chunks.len()
-        );
-        missing = personal.missing_chunks.len();
-    }
-    for id in space::list(root)? {
-        let dir = space::dir_of(root, &id);
-        let status = local_blob_status(&dir)?;
-        if status.policy == hyperconsciousness::pin::Policy::All && !status.satisfied() {
-            eprintln!(
-                "space {} blob archive incomplete: {} required chunks still missing",
-                id.short(),
-                status.missing_chunks.len()
-            );
-            missing = missing
-                .checked_add(status.missing_chunks.len())
-                .ok_or(Error::Malformed("missing pinned chunk count overflow"))?;
-        }
-    }
-    Ok(missing)
-}
-
-#[derive(Default)]
-struct ArchiveScrub {
-    damaged_chunks: usize,
-    failed_manifests: usize,
-}
-
-/// A strict sync treats integrity as part of synchronization, not as a
-/// separate dashboard warning. The preflight shadows exact damaged hashes so
-/// peers can replace them; the postflight proves the replacements and every
-/// complete manifest before success is reported.
-fn scrub_pinned_archives(root: &Path) -> Result<ArchiveScrub> {
-    let mut roots = vec![("personal".to_string(), root.to_path_buf())];
-    for id in space::list(root)? {
-        roots.push((format!("space {}", id.short()), space::dir_of(root, &id)));
-    }
-
-    let mut summary = ArchiveScrub::default();
-    for (label, dir) in roots {
-        let identity = Identity::load_for_brain(&dir)?;
-        let keys = runtime_keys(&dir, &identity)?;
-        let store = Store::open(&dir)?;
-        let blobs = Blobs::open(&dir)?;
-        let status = hyperconsciousness::pin::status(&dir, &store, &blobs, &keys)?;
-        if status.policy != hyperconsciousness::pin::Policy::All {
-            continue;
-        }
-        let verified = hyperconsciousness::pin::verify(&status, &blobs, &keys)?;
-        if !verified.damaged_chunks.is_empty() {
-            eprintln!(
-                "{label} blob archive quarantined {} corrupt chunks for peer repair",
-                verified.damaged_chunks.len()
-            );
-        }
-        summary.damaged_chunks = summary
-            .damaged_chunks
-            .checked_add(verified.damaged_chunks.len())
-            .ok_or(Error::Malformed("damaged pinned chunk count overflow"))?;
-        summary.failed_manifests = summary
-            .failed_manifests
-            .checked_add(verified.failed_manifests.len())
-            .ok_or(Error::Malformed("failed pinned manifest count overflow"))?;
-    }
-    Ok(summary)
-}
-
-/// every locally decryptable payload, grouped by signed author order.
 fn filtered_payloads(dir: &PathBuf, kind: Option<&str>) -> Result<Vec<serde_json::Value>> {
     let identity = Identity::load_existing_for_brain(dir)?;
     let keys = runtime_keys_read_only(dir, &identity)?;
@@ -3600,8 +2519,7 @@ fn decoded_payloads(dir: &PathBuf) -> Result<Vec<serde_json::Value>> {
 
 /// every payload of one kind, oldest first
 fn payloads(dir: &PathBuf, kind: &str) -> Result<Vec<serde_json::Value>> {
-    // Discard unrelated plaintext immediately; peer discovery must not retain
-    // every note/file just to find a handful of announcements.
+    // Discard unrelated plaintext immediately when filtering record kinds.
     filtered_payloads(dir, Some(kind))
 }
 
@@ -3781,28 +2699,6 @@ fn print_workspace_plan(plan: &hyperconsciousness::workspace::Plan, detailed: bo
     }
 }
 
-fn merge_workspace_pull(
-    mut earlier: hyperconsciousness::workspace::Pull,
-    mut later: hyperconsciousness::workspace::Pull,
-) -> hyperconsciousness::workspace::Pull {
-    later.applied += earlier.applied;
-    later.adopted += earlier.adopted;
-    later.pending_deletes.append(&mut earlier.pending_deletes);
-    later.conflicts.append(&mut earlier.conflicts);
-    later.ignored.append(&mut earlier.ignored);
-    later.blocked_secrets.append(&mut earlier.blocked_secrets);
-    for paths in [
-        &mut later.pending_deletes,
-        &mut later.conflicts,
-        &mut later.ignored,
-        &mut later.blocked_secrets,
-    ] {
-        paths.sort();
-        paths.dedup();
-    }
-    later
-}
-
 fn print_workspace_pull(pulled: &hyperconsciousness::workspace::Pull) {
     println!(
         "materialized {}, adopted {}, {} blobs missing",
@@ -3811,10 +2707,10 @@ fn print_workspace_pull(pulled: &hyperconsciousness::workspace::Pull) {
         pulled.missing.len()
     );
     for path in &pulled.pending_deletes {
-        println!("- remote deletion pending: {path}");
+        println!("- stored deletion pending: {path}");
     }
     for path in &pulled.conflicts {
-        println!("! local and remote both changed: {path}");
+        println!("! workspace and stored history both changed: {path}");
     }
     for path in &pulled.ignored {
         println!("! remote path is locally ignored: {path}");
@@ -3896,25 +2792,11 @@ fn pull_workspace(
     dir: &Path,
     name: &str,
     folder: &Path,
-    host: Option<&str>,
 ) -> Result<hyperconsciousness::workspace::Pull> {
     let identity = Identity::load_or_create(dir)?;
     let keys = runtime_keys(dir, &identity)?;
-    let mut pulled =
+    let pulled =
         hyperconsciousness::workspace::pull_projection_with_keys(dir, &keys, name, folder)?;
-    if !pulled.missing.is_empty() {
-        let host = host.ok_or(Error::Malformed(
-            "remote workspace blobs are missing; pull needs --from <peer>",
-        ))?;
-        let blobs = Blobs::open(dir)?;
-        let remote = remote_for(&read_peers(dir)?, host, remote_override());
-        let (chunks, completed) =
-            fetch_from_peer(host, &blobs, &pulled.missing, &remote, keys.current_key()?)?;
-        println!("fetched {chunks} chunks for {completed} files from {host}");
-        let after =
-            hyperconsciousness::workspace::pull_projection_with_keys(dir, &keys, name, folder)?;
-        pulled = merge_workspace_pull(pulled, after);
-    }
     print_workspace_pull(&pulled);
     Ok(pulled)
 }
@@ -3923,55 +2805,20 @@ fn pull_workspace_incremental(
     dir: &Path,
     name: &str,
     folder: &Path,
-    host: Option<&str>,
 ) -> Result<hyperconsciousness::workspace::Pull> {
     let identity = Identity::load_or_create(dir)?;
     let keys = runtime_keys(dir, &identity)?;
-    let mut pulled = hyperconsciousness::workspace::pull_projection_incremental_with_keys(
+    let pulled = hyperconsciousness::workspace::pull_projection_incremental_with_keys(
         dir, &keys, name, folder,
     )?;
-    if !pulled.missing.is_empty() {
-        let host = host.ok_or(Error::Malformed(
-            "remote workspace blobs are missing; pull needs --from <peer>",
-        ))?;
-        let blobs = Blobs::open(dir)?;
-        let remote = remote_for(&read_peers(dir)?, host, remote_override());
-        let (chunks, completed) =
-            fetch_from_peer(host, &blobs, &pulled.missing, &remote, keys.current_key()?)?;
-        println!("fetched {chunks} chunks for {completed} files from {host}");
-        let after = hyperconsciousness::workspace::pull_projection_incremental_with_keys(
-            dir, &keys, name, folder,
-        )?;
-        pulled = merge_workspace_pull(pulled, after);
-    }
     print_workspace_pull(&pulled);
     Ok(pulled)
-}
-
-fn sync_peer_required(dir: &Path, host: &str) -> Result<()> {
-    let status = Command::new(std::env::current_exe()?)
-        .arg("sync")
-        .arg(host)
-        // A watcher must prove its named peer was reached, but it must not
-        // scrub every pinned archive on every folder cycle. Full integrity
-        // verification belongs to the scheduler and explicit strict syncs;
-        // doing it here makes independent workspace watchers contend for the
-        // same blob-pack writer.
-        .arg("--require-any")
-        .arg("--dir")
-        .arg(dir)
-        .status()?;
-    if !status.success() {
-        return Err(Error::Denied("workspace peer sync failed"));
-    }
-    Ok(())
 }
 
 struct WorkspaceWatchCycle<'a> {
     dir: &'a Path,
     name: &'a str,
     folder: &'a Path,
-    peer: Option<&'a str>,
     skip_secret_files: bool,
     previous: Option<&'a hyperconsciousness::workspace::WatchStatus>,
     full_every: Duration,
@@ -3985,17 +2832,12 @@ fn workspace_watch_cycle(
         dir,
         name,
         folder,
-        peer,
         skip_secret_files,
         previous,
         full_every,
         changed,
     } = request;
-    let mut update = hyperconsciousness::workspace::WatchUpdate {
-        peer: peer.map(str::to_string),
-        ..hyperconsciousness::workspace::WatchUpdate::default()
-    };
-    let mut network_error = peer.and_then(|host| sync_peer_required(dir, host).err());
+    let mut update = hyperconsciousness::workspace::WatchUpdate::default();
 
     let before = match hyperconsciousness::workspace::quick_state(dir, name, folder) {
         Ok(state) => state,
@@ -4032,7 +2874,7 @@ fn workspace_watch_cycle(
         changed.is_some_and(|hint| !hint.precise || (!hint.external && hint.paths.is_empty()));
 
     if !full_due && !heads_unchanged && local_unchanged && !force_full {
-        let pulled = match pull_workspace_incremental(dir, name, folder, peer) {
+        let pulled = match pull_workspace_incremental(dir, name, folder) {
             Ok(pulled) => pulled,
             Err(error) => return (update, Err(error)),
         };
@@ -4063,10 +2905,7 @@ fn workspace_watch_cycle(
         update.files = after.files;
         update.local_fingerprint = Some(after.local_fingerprint);
         update.heads_fingerprint = Some(after.heads_fingerprint);
-        return match network_error {
-            Some(error) => (update, Err(error)),
-            None => (update, Ok(())),
-        };
+        return (update, Ok(()));
     }
     if !full_due && heads_unchanged {
         if let Some(hint) = changed.filter(|hint| !hint.paths.is_empty()) {
@@ -4098,11 +2937,6 @@ fn workspace_watch_cycle(
                         update.checkpointed += checkpoint.checkpoint.appended;
                         update.pending_deletes += checkpoint.pending_deletes;
                         update.unstable += checkpoint.checkpoint.unstable.len();
-                        if checkpoint.checkpoint.appended > 0 {
-                            if let Some(host) = peer {
-                                network_error = sync_peer_required(dir, host).err();
-                            }
-                        }
                         if update.unstable > 0 {
                             return (
                                 update,
@@ -4121,10 +2955,7 @@ fn workspace_watch_cycle(
                             update.files = after.files;
                             update.local_fingerprint = Some(after.local_fingerprint);
                             update.heads_fingerprint = Some(after.heads_fingerprint);
-                            return match network_error {
-                                Some(error) => (update, Err(error)),
-                                None => (update, Ok(())),
-                            };
+                            return (update, Ok(()));
                         }
                         force_full = true;
                     } else {
@@ -4137,14 +2968,11 @@ fn workspace_watch_cycle(
         }
     }
     if unchanged && !full_due && !force_full {
-        return match network_error {
-            Some(error) => (update, Err(error)),
-            None => (update, Ok(())),
-        };
+        return (update, Ok(()));
     }
     update.full = true;
 
-    let pulled = match pull_workspace(dir, name, folder, peer) {
+    let pulled = match pull_workspace(dir, name, folder) {
         Ok(pulled) => pulled,
         Err(error) => return (update, Err(error)),
     };
@@ -4176,11 +3004,6 @@ fn workspace_watch_cycle(
     update.pending_deletes += checkpoint.pending_deletes;
     update.unstable += checkpoint.checkpoint.unstable.len();
 
-    if checkpoint.checkpoint.appended > 0 {
-        if let Some(host) = peer {
-            network_error = sync_peer_required(dir, host).err();
-        }
-    }
     if update.pending_deletes > 0 {
         return (
             update,
@@ -4204,10 +3027,7 @@ fn workspace_watch_cycle(
     update.files = after.files;
     update.local_fingerprint = Some(after.local_fingerprint);
     update.heads_fingerprint = Some(after.heads_fingerprint);
-    match network_error {
-        Some(error) => (update, Err(error)),
-        None => (update, Ok(())),
-    }
+    (update, Ok(()))
 }
 
 fn append(dir: &PathBuf, payload: &str) -> Result<()> {
@@ -4522,7 +3342,7 @@ fn run() -> Result<()> {
                         "restored {} compartments and {} organizations",
                         restored.spaces, restored.organizations
                     );
-                    println!("import or sync encrypted history next");
+                    println!("import encrypted history next");
                     Ok(())
                 }
                 "drill" => {
@@ -4610,7 +3430,7 @@ fn run() -> Result<()> {
                     let store = Store::open(&args.dir)?;
                     let keys = runtime_keys(&args.dir, &identity)?;
                     let heads = match keys.authority_state() {
-                        Some(state) => hyperconsciousness::sync::have_authorized(&store, state)?
+                        Some(state) => hyperconsciousness::ingest::visible_heads(&store, state)?
                             .into_iter()
                             .collect::<Vec<_>>(),
                         None => store.heads()?,
@@ -4654,7 +3474,7 @@ fn run() -> Result<()> {
                     let store = Store::open(&args.dir)?;
                     let keys = runtime_keys(&args.dir, &identity)?;
                     let visible = match keys.authority_state() {
-                        Some(state) => hyperconsciousness::sync::have_authorized(&store, state)?,
+                        Some(state) => hyperconsciousness::ingest::visible_heads(&store, state)?,
                         None => store.heads()?.into_iter().collect(),
                     };
                     let check = witness.check_visible(brain, authority, &store, &visible)?;
@@ -4845,85 +3665,6 @@ fn run() -> Result<()> {
             Ok(())
         }
 
-        "invite" => {
-            let identity = Identity::load_or_create(&args.dir)?;
-            let joiner = Introduction::decode(
-                args.rest
-                    .first()
-                    .ok_or(Error::Malformed("invite needs a device id"))?,
-            )?;
-
-            let invite = identity.invite(&joiner)?;
-            if let Some(membership) = invite.membership() {
-                record_device_membership(&args.dir, &identity, membership)?;
-            }
-            println!("{}", invite.encode());
-            Ok(())
-        }
-
-        "accept" => {
-            let mut identity = Identity::load_or_create(&args.dir)?;
-            let invite = Invite::decode(
-                args.rest
-                    .first()
-                    .ok_or(Error::Malformed("accept needs an invite"))?,
-            )?;
-
-            identity.accept(&invite)?;
-            Store::open(&args.dir)?;
-            println!("joined. device {}", identity.device().short());
-            Ok(())
-        }
-
-        // one command instead of three copy pastes: ask the other machine to
-        // wrap the key for us, over the ssh trust that already exists
-        "join" => {
-            let mut identity = Identity::load_or_create(&args.dir)?;
-            Store::open(&args.dir)?;
-
-            if identity.has_brain() {
-                println!("already joined, device {}", identity.device().short());
-                return Ok(());
-            }
-
-            let host = args
-                .rest
-                .first()
-                .ok_or(Error::Malformed("join needs a host, for example join mini"))?;
-            let remote = args
-                .rest
-                .get(1)
-                .cloned()
-                .or_else(remote_override)
-                .unwrap_or_else(|| "hc".to_string());
-
-            let output = ssh_command()
-                .arg(host)
-                .arg(format!(
-                    "{remote} invite {}",
-                    identity.introduction().encode()
-                ))
-                .output()?;
-
-            if !output.status.success() {
-                eprint!("{}", String::from_utf8_lossy(&output.stderr));
-                return Err(Error::Malformed("the other machine refused to invite us"));
-            }
-
-            let text = String::from_utf8_lossy(&output.stdout);
-            identity.accept(&Invite::decode(text.trim())?)?;
-
-            // remember it, so sync needs no arguments from here on
-            let mut peers = read_peers(&args.dir)?;
-            peers.retain(|(existing, _)| existing != host);
-            peers.push((host.clone(), remote));
-            write_peers(&args.dir, &peers)?;
-
-            println!("joined the brain on {host}");
-            println!("device {}", identity.device().short());
-            Ok(())
-        }
-
         "status" => {
             let identity = Identity::load_or_create(&args.dir)?;
             let store = Store::open(&args.dir)?;
@@ -5072,6 +3813,15 @@ fn run() -> Result<()> {
         }
 
         "workspace" => {
+            if args
+                .rest
+                .iter()
+                .any(|arg| arg == "--peer" || arg == "--from")
+            {
+                return Err(Error::Malformed(
+                    "workspace peer options were removed; use the central node and hc pull for backup recovery",
+                ));
+            }
             let action = args
                 .rest
                 .first()
@@ -5183,27 +3933,9 @@ fn run() -> Result<()> {
                     missing.sort_by_key(|reference| reference.id);
                     missing.dedup_by_key(|reference| reference.id);
                     if !missing.is_empty() {
-                        let host = args
-                            .rest
-                            .iter()
-                            .position(|arg| arg == "--from")
-                            .and_then(|index| args.rest.get(index + 1))
-                            .ok_or(Error::Malformed(
-                                "workspace blobs are missing; restore needs --from <peer>",
-                            ))?;
-                        let remote = remote_for(
-                            &read_peers(&args.dir)?,
-                            host,
-                            remote_override(),
-                        );
-                        let (chunks, completed) = fetch_from_peer(
-                            host,
-                            &blobs,
-                            &missing,
-                            &remote,
-                            workspace_keys.current_key()?,
-                        )?;
-                        println!("fetched {chunks} chunks for {completed} files from {host}");
+                        return Err(Error::Denied(
+                            "workspace blobs are missing; restore the central object-store backup with hc pull",
+                        ));
                     }
                     let restored = hyperconsciousness::workspace::restore_with_keys(
                         &args.dir,
@@ -5329,13 +4061,7 @@ fn run() -> Result<()> {
                             .get(2)
                             .ok_or(Error::Malformed("workspace pull needs a folder"))?,
                     );
-                    let host = args
-                        .rest
-                        .iter()
-                        .position(|arg| arg == "--from")
-                        .and_then(|index| args.rest.get(index + 1))
-                        .map(String::as_str);
-                    let pulled = pull_workspace(&args.dir, name, &folder, host)?;
+                    let pulled = pull_workspace(&args.dir, name, &folder)?;
                     if !pulled.missing.is_empty() {
                         return Err(Error::Denied("workspace blobs are still missing"));
                     }
@@ -5382,9 +4108,6 @@ fn run() -> Result<()> {
                                     .map(|at| format!("{at} unix ms"))
                                     .unwrap_or_else(|| "never".to_string())
                             );
-                            if let Some(peer) = &status.peer {
-                                println!("peer {peer}");
-                            }
                             if let Some(error) = &status.error {
                                 println!("last error: {error}");
                             }
@@ -5404,17 +4127,6 @@ fn run() -> Result<()> {
                             "workspace is not tracked; verify it, then run workspace track",
                         ));
                     }
-                    let peer = args
-                        .rest
-                        .iter()
-                        .position(|arg| arg == "--peer")
-                        .map(|index| {
-                            args.rest
-                                .get(index + 1)
-                                .ok_or(Error::Malformed("--peer needs a host"))
-                        })
-                        .transpose()?
-                        .cloned();
                     let interval = match args.rest.iter().position(|arg| arg == "--interval") {
                         Some(index) => args
                             .rest
@@ -5482,7 +4194,6 @@ fn run() -> Result<()> {
                             dir: &args.dir,
                             name,
                             folder: &folder,
-                            peer: peer.as_deref(),
                             skip_secret_files,
                             previous: previous.as_ref(),
                             full_every: Duration::from_secs(full_every),
@@ -5645,7 +4356,7 @@ fn run() -> Result<()> {
                 }
                 if !verified.failed_manifests.is_empty() {
                     return Err(Error::Denied(
-                        "one or more pinned manifests failed verification; ordinary sync can repair quarantined chunks",
+                        "one or more pinned manifests failed verification; recover quarantined chunks from a verified object-store backup with hc pull",
                     ));
                 }
             } else {
@@ -5655,83 +4366,16 @@ fn run() -> Result<()> {
         }
 
         "add" => {
+            if args.rest.len() != 1 {
+                return Err(Error::Malformed("add needs exactly one file path"));
+            }
             let path = PathBuf::from(
                 args.rest
                     .first()
                     .ok_or(Error::Malformed("add needs a file"))?,
             );
-            let archive = args
-                .rest
-                .iter()
-                .position(|argument| argument == "--archive")
-                .map(|index| {
-                    args.rest
-                        .get(index + 1)
-                        .filter(|value| !value.starts_with("--"))
-                        .cloned()
-                        .ok_or(Error::Malformed("--archive needs a peer"))
-                })
-                .transpose()?;
-            add_file(&args.dir, &path, None, archive.as_deref(), None)?;
+            add_file(&args.dir, &path, None, None)?;
             Ok(())
-        }
-
-        "screenpipe" => {
-            let action = args
-                .rest
-                .first()
-                .ok_or(Error::Malformed("screenpipe needs archive"))?;
-            if action != "archive" {
-                return Err(Error::Malformed("screenpipe needs archive"));
-            }
-            let host = args
-                .rest
-                .get(1)
-                .filter(|host| !host.starts_with("--"))
-                .ok_or(Error::Malformed("screenpipe archive needs a peer"))?;
-            let mut port = 3030u16;
-            let mut staging = home().join(".screenpipe").join("brainmesh-staging");
-            let mut index = 2usize;
-            let mut saw_port = false;
-            let mut saw_staging = false;
-            while index < args.rest.len() {
-                match args.rest[index].as_str() {
-                    "--port" if !saw_port => {
-                        let value = args
-                            .rest
-                            .get(index + 1)
-                            .ok_or(Error::Malformed("--port needs a number"))?;
-                        port = value
-                            .parse()
-                            .map_err(|_| Error::Malformed("--port must be 1 through 65535"))?;
-                        if port == 0 {
-                            return Err(Error::Malformed("--port must be 1 through 65535"));
-                        }
-                        saw_port = true;
-                        index += 2;
-                    }
-                    "--staging" if !saw_staging => {
-                        staging = PathBuf::from(
-                            args.rest
-                                .get(index + 1)
-                                .ok_or(Error::Malformed("--staging needs a folder"))?,
-                        );
-                        saw_staging = true;
-                        index += 2;
-                    }
-                    "--port" | "--staging" => {
-                        return Err(Error::Malformed(
-                            "screenpipe archive options cannot be repeated",
-                        ));
-                    }
-                    _ => {
-                        return Err(Error::Malformed(
-                            "screenpipe archive accepts only --port and --staging",
-                        ));
-                    }
-                }
-            }
-            screenpipe_archive(&args.dir, host, port, &staging)
         }
 
         "files" => {
@@ -5871,11 +4515,31 @@ fn run() -> Result<()> {
                 .rest
                 .first()
                 .ok_or(Error::Malformed("get needs a file name"))?;
-            let dest = args
-                .rest
-                .get(1)
-                .map(PathBuf::from)
-                .unwrap_or_else(|| PathBuf::from(wanted));
+            let (dest, asked): (PathBuf, Option<usize>) = match &args.rest[1..] {
+                [] => (PathBuf::from(wanted), None),
+                [dest] if !dest.starts_with("--") => (PathBuf::from(dest), None),
+                [flag, version] if flag == "--version" => (
+                    PathBuf::from(wanted),
+                    Some(
+                        version
+                            .parse()
+                            .map_err(|_| Error::Malformed("invalid version"))?,
+                    ),
+                ),
+                [dest, flag, version] if !dest.starts_with("--") && flag == "--version" => (
+                    PathBuf::from(dest),
+                    Some(
+                        version
+                            .parse()
+                            .map_err(|_| Error::Malformed("invalid version"))?,
+                    ),
+                ),
+                _ => {
+                    return Err(Error::Malformed(
+                        "get no longer accepts a peer; restore missing bytes with hc pull",
+                    ));
+                }
+            };
 
             let identity = Identity::load_existing_for_brain(&args.dir)?;
             let keys = runtime_keys_read_only(&args.dir, &identity)?;
@@ -5885,14 +4549,7 @@ fn run() -> Result<()> {
 
             // --version reaches back. nothing was ever overwritten, so an
             // older one is still whole rather than reconstructed from diffs.
-            let asked: Option<usize> = args
-                .rest
-                .iter()
-                .position(|a| a == "--version")
-                .and_then(|i| args.rest.get(i + 1))
-                .and_then(|n| n.parse().ok());
-
-            let (name, reference) = match asked {
+            let reference = match asked {
                 Some(which) => {
                     let all = catalog.versions(wanted);
                     if all.is_empty() {
@@ -5905,14 +4562,14 @@ fn run() -> Result<()> {
 
                     println!("version {which} of {} for {wanted}", all.len());
                     FileCatalog::verify_version(&store, &keys, picked)?;
-                    (wanted.clone(), picked.reference.clone())
+                    picked.reference.clone()
                 }
                 None => {
                     let version = catalog
                         .latest_named(wanted)
                         .ok_or(Error::Malformed("no file by that name"))?;
                     FileCatalog::verify_version(&store, &keys, version)?;
-                    (version.name.clone(), version.reference.clone())
+                    version.reference.clone()
                 }
             };
 
@@ -5920,33 +4577,9 @@ fn run() -> Result<()> {
             // elsewhere, name the machine to pull them from.
             let missing = blobs.missing(&reference).len();
             if missing > 0 {
-                match args.rest.get(2).filter(|h| !h.starts_with("--")) {
-                    Some(host) => {
-                        let remote = read_peers(&args.dir)?
-                            .into_iter()
-                            .find(|(known, _)| known == host)
-                            .map(|(_, command)| command)
-                            .or_else(remote_override)
-                            .unwrap_or_else(|| "hc".to_string());
-
-                        let (fetched, _) = fetch_from_peer(
-                            host,
-                            &blobs,
-                            std::slice::from_ref(&reference),
-                            &remote,
-                            keys.current_key()?,
-                        )?;
-                        println!("fetched {fetched} chunks from {host}");
-                    }
-                    None => {
-                        println!(
-                            "{name} is here as an entry but {missing} chunks live on another \
-                             machine. run: hc get {name} {} <machine>",
-                            dest.display()
-                        );
-                        return Ok(());
-                    }
-                }
+                return Err(Error::Denied(
+                    "file chunks are missing; restore the central object-store backup with hc pull",
+                ));
             }
 
             blobs.get(
@@ -6005,8 +4638,7 @@ fn run() -> Result<()> {
             Ok(())
         }
 
-        // a grant is a record, so it syncs to every device and is as
-        // auditable as the reads it authorises
+        // A grant is a signed record, auditable like the reads it authorizes.
         "grant" => {
             let to = DeviceId::from_hex(
                 args.rest
@@ -6605,48 +5237,7 @@ fn run() -> Result<()> {
             http::serve(&bind, endpoint)
         }
 
-        // for machines whose ssh cannot start a conversation, which is
-        // windows, measured rather than assumed
-        "listen" => {
-            // loopback unless told otherwise. the handshake means a stranger
-            // learns nothing, but a default that opens every interface is
-            // still a default nobody chose.
-            let bind = args
-                .rest
-                .first()
-                .cloned()
-                .unwrap_or_else(|| "127.0.0.1:7778".to_string());
-            let identity = Identity::load_or_create(&args.dir)?;
-            let keys = runtime_keys(&args.dir, &identity)?;
-            let key = *keys.current_key()?;
-            tcp::listen(&args.dir, &bind, key)
-        }
-
-        "relay" => match args.rest.first().map(String::as_str) {
-            Some("token") => {
-                println!("{}", relay::token());
-                Ok(())
-            }
-            Some("listen") => {
-                let bind = args
-                    .rest
-                    .get(1)
-                    .map(String::as_str)
-                    .unwrap_or("127.0.0.1:7779");
-                relay::listen(bind)
-            }
-            Some("expose") => {
-                let endpoint = args
-                    .rest
-                    .get(1)
-                    .ok_or(Error::Malformed("relay expose needs a relay:// URL"))?;
-                let identity = Identity::load_or_create(&args.dir)?;
-                let keys = runtime_keys(&args.dir, &identity)?;
-                relay::expose(&args.dir, endpoint, *keys.current_key()?)
-            }
-            _ => Err(Error::Malformed("relay needs token, listen or expose")),
-        },
-
+        // Forward authenticated client traffic to the trusted central node.
         "tunnel" => match args.rest.first().map(String::as_str) {
             Some("route") => {
                 let path = args
@@ -6735,8 +5326,8 @@ fn run() -> Result<()> {
             _ => Err(Error::Malformed("tunnel needs route, listen or expose")),
         },
 
-        // object storage as a peer that never talks back. it holds sealed,
-        // signed bytes, so the provider stores noise it cannot read or forge.
+        // Object storage holds sealed, signed backup bytes; it does not serve
+        // live reads or join the brain as another writer.
         "remote" => {
             if args.rest.len() < 6 {
                 return Err(Error::Malformed(
@@ -9251,28 +7842,6 @@ fn run() -> Result<()> {
                     Ok(())
                 }
 
-                "peer" => {
-                    let address = args
-                        .rest
-                        .get(2)
-                        .ok_or(Error::Malformed("space peer needs a host"))?;
-                    let command = args
-                        .rest
-                        .get(3)
-                        .cloned()
-                        .unwrap_or_else(|| "hc".to_string());
-
-                    let (_, space_dir) = space_identity(&args.dir, &name)?;
-
-                    let mut peers = read_peers(&space_dir)?;
-                    peers.retain(|(existing, _)| existing != address);
-                    peers.push((address.clone(), command));
-                    write_peers(&space_dir, &peers)?;
-
-                    println!("{address} will sync the space {name}, and nothing else");
-                    Ok(())
-                }
-
                 "read" => {
                     let (identity, space_dir) = space_identity(&args.dir, &name)?;
                     let store = Store::open(&space_dir)?;
@@ -9298,7 +7867,7 @@ fn run() -> Result<()> {
                 }
 
                 _ => Err(Error::Malformed(
-                    "space new, rotate, invite, join, harden, peer or read",
+                    "space new, rotate, invite, join, harden or read",
                 )),
             }
         }
@@ -9356,491 +7925,6 @@ fn run() -> Result<()> {
             Ok(())
         }
 
-        "peer" => {
-            let action = args.rest.first().map(String::as_str).unwrap_or("");
-
-            // announce how THIS machine is reached, into the log, so every
-            // other device learns it. three devices need six directions and
-            // nobody is going to configure six directions by hand. a device
-            // only ever announces itself, because that is the one address it
-            // can actually be sure of.
-            if action == "announce" {
-                let address = args
-                    .rest
-                    .get(1)
-                    .ok_or(Error::Malformed("peer announce <address> [remote command]"))?;
-                let command = args
-                    .rest
-                    .get(2)
-                    .cloned()
-                    .unwrap_or_else(|| "hc".to_string());
-
-                let identity = Identity::load_or_create(&args.dir)?;
-                append(
-                    &args.dir,
-                    &serde_json::json!({
-                        "kind": "peer",
-                        "sensitivity": hyperconsciousness::grant::PERSONAL,
-                        "device": identity.device().hex(),
-                        "address": address,
-                        "command": command,
-                    })
-                    .to_string(),
-                )?;
-
-                println!("announced {} as {address}", identity.device().short());
-                println!("other devices will try it after their next sync");
-                return Ok(());
-            }
-
-            if action != "add" {
-                return Err(Error::Malformed(
-                    "peer add <host> [cmd], or peer announce <address> [cmd]",
-                ));
-            }
-
-            let host = args
-                .rest
-                .get(1)
-                .ok_or(Error::Malformed("peer add needs a host"))?;
-            let command = args
-                .rest
-                .get(2)
-                .cloned()
-                .unwrap_or_else(|| "hc".to_string());
-
-            let mut peers = read_peers(&args.dir)?;
-            peers.retain(|(existing, _)| existing != host);
-            peers.push((host.clone(), command));
-            write_peers(&args.dir, &peers)?;
-
-            println!("will sync with {host}");
-            Ok(())
-        }
-
-        "peers" => {
-            for (host, command) in read_peers(&args.dir)? {
-                println!("{host}\t{command}");
-            }
-            Ok(())
-        }
-
-        "sync" => {
-            let store = Store::open(&args.dir)?;
-            let mut strict = false;
-            let mut require_any = false;
-            let mut push_remote = false;
-            let mut witness_path = None;
-            let mut explicit_host = None;
-            let mut index = 0usize;
-            while index < args.rest.len() {
-                match args.rest[index].as_str() {
-                    "--strict" => {
-                        strict = true;
-                        index += 1;
-                    }
-                    "--require-any" => {
-                        require_any = true;
-                        index += 1;
-                    }
-                    "--remote" => {
-                        if push_remote {
-                            return Err(Error::Malformed("--remote may be supplied once"));
-                        }
-                        push_remote = true;
-                        index += 1;
-                    }
-                    "--witness" => {
-                        if witness_path.is_some() {
-                            return Err(Error::Malformed("--witness may be supplied once"));
-                        }
-                        let supplied =
-                            PathBuf::from(args.rest.get(index + 1).ok_or(Error::Malformed(
-                                "--witness needs an external witness file",
-                            ))?);
-                        witness_path = Some(external_witness_path(&args.dir, &supplied)?);
-                        index += 2;
-                    }
-                    argument if argument.starts_with("--") => {
-                        return Err(Error::Malformed("unexpected sync option"));
-                    }
-                    host => {
-                        if explicit_host.replace(host.to_string()).is_some() {
-                            return Err(Error::Malformed("sync accepts at most one explicit host"));
-                        }
-                        index += 1;
-                    }
-                }
-            }
-            let preflight_scrub = if strict {
-                let scrub = scrub_pinned_archives(&args.dir)?;
-                if scrub.damaged_chunks > 0 {
-                    eprintln!(
-                        "strict sync will ask peers to replace {} corrupt chunks",
-                        scrub.damaged_chunks
-                    );
-                }
-                Some(scrub)
-            } else {
-                None
-            };
-
-            // an explicit host wins, otherwise sync everything we know.
-            //
-            // a named host still uses the command recorded for it. `peer add`
-            // exists precisely because the binary is rarely on a non
-            // interactive ssh PATH, and ignoring that here made `sync mini`
-            // fail while a bare `sync` worked, which is a confusing way to
-            // find out.
-            let targets: Vec<(String, String)> = match explicit_host.as_ref() {
-                Some(host) => vec![(
-                    host.clone(),
-                    remote_for(&read_peers(&args.dir)?, host, remote_override()),
-                )],
-                None => {
-                    let identity = Identity::load_or_create(&args.dir)?;
-                    let mut all = read_peers(&args.dir)?;
-
-                    // the local file wins, so a hand written command is never
-                    // overridden by something the log heard about. comparison
-                    // is on what an address resolves to, or an alias and the
-                    // announcement for the same machine both get synced, which
-                    // doubles every round trip and looks like nothing at all.
-                    let mut known: Vec<String> = all
-                        .iter()
-                        .flat_map(|(host, _)| host.split(',').map(|a| resolved(a.trim())))
-                        .collect();
-
-                    for (addresses, command) in announced_peers(&args.dir, identity.device()) {
-                        let targets: Vec<String> =
-                            addresses.split(',').map(|a| resolved(a.trim())).collect();
-
-                        if targets.iter().any(|target| known.contains(target)) {
-                            continue;
-                        }
-
-                        known.extend(targets);
-                        all.push((addresses, command));
-                    }
-
-                    all
-                }
-            };
-
-            // people in a space are peers of that space only, never of the
-            // personal brain
-            let mut space_targets = Vec::new();
-            for id in space::list(&args.dir)? {
-                let dir = space::dir_of(&args.dir, &id);
-                for (host, command) in read_peers(&dir)? {
-                    space_targets.push((id, dir.clone(), host, command));
-                }
-            }
-
-            if targets.is_empty() && space_targets.is_empty() && !push_remote {
-                println!("no peers yet. run: hc peer add <host>");
-                if require_any {
-                    return Err(Error::Denied(
-                        "no configured peer is available for required sync",
-                    ));
-                }
-                let missing_pins = report_incomplete_pins(&args.dir)?;
-                if missing_pins > 0 && strict {
-                    return Err(Error::Denied("one or more blob archives remain incomplete"));
-                }
-                if preflight_scrub.is_some_and(|scrub| scrub.failed_manifests > 0) {
-                    return Err(Error::Denied(
-                        "one or more blob archives failed full integrity verification",
-                    ));
-                }
-                if let Some(path) = witness_path.as_ref() {
-                    advance_witness_after_sync(&args.dir, path)?;
-                }
-                return Ok(());
-            }
-
-            // one unreachable machine must never stop the others, because
-            // this runs on a timer and laptops are closed most of the day
-            let mut failed = 0;
-            let mut reached_any = 0u64;
-            for (host, remote) in targets {
-                // a peer can list several ways to reach it, tried in order.
-                // that is how the same machine is found over a tailnet at a
-                // cafe and over the lan at home, without anyone choosing.
-                let addresses: Vec<&str> = host.split(',').map(str::trim).collect();
-                let mut reached = false;
-                let mut last = String::new();
-
-                for address in &addresses {
-                    match over_ssh(address, &remote, &store, None) {
-                        Ok(result) => {
-                            println!(
-                                "{address}: pulled {}, pushed {}, already had {}",
-                                result.pulled.accepted, result.pushed, result.pulled.already_had
-                            );
-                            if result.pinned > 0 {
-                                println!("  retained {} newly fetched chunks", result.pinned);
-                            }
-                            reached = true;
-                            reached_any = reached_any.saturating_add(1);
-
-                            // then every shared space we both hold. a peer
-                            // that lacks one simply refuses, which is not an
-                            // error, it just means they are not a member.
-                            for id in space::list(&args.dir)? {
-                                let dir = space::dir_of(&args.dir, &id);
-                                let Ok(space_store) = Store::open(&dir) else {
-                                    continue;
-                                };
-
-                                match over_ssh(address, &remote, &space_store, Some(&id)) {
-                                    Ok(result)
-                                        if result.pulled.accepted
-                                            + result.pushed
-                                            + result.pinned as u64
-                                            > 0 =>
-                                    {
-                                        println!(
-                                            "  space {}: pulled {}, pushed {}, retained {} chunks",
-                                            id.short(),
-                                            result.pulled.accepted,
-                                            result.pushed,
-                                            result.pinned
-                                        );
-                                    }
-                                    _ => {}
-                                }
-                            }
-
-                            break;
-                        }
-                        Err(error) => last = error.to_string(),
-                    }
-                }
-
-                if !reached {
-                    failed += 1;
-                    eprintln!("{host}: unreachable, last tried {last}");
-                }
-            }
-
-            for (id, dir, host, remote) in space_targets {
-                let Ok(space_store) = Store::open(&dir) else {
-                    continue;
-                };
-
-                for address in host.split(',').map(str::trim) {
-                    if let Ok(result) = over_ssh(address, &remote, &space_store, Some(&id)) {
-                        reached_any = reached_any.saturating_add(1);
-                        println!(
-                            "space {}: pulled {}, pushed {}, retained {} chunks",
-                            id.short(),
-                            result.pulled.accepted,
-                            result.pushed,
-                            result.pinned
-                        );
-                        break;
-                    }
-                }
-            }
-
-            if push_remote {
-                let remote = bucket::Remote::load(&args.dir)?;
-                let (sent, skipped) = bucket::push(&args.dir, &remote)?;
-                println!("remote: sent {sent}, already there {skipped}");
-                reached_any = reached_any.saturating_add(1);
-            }
-
-            let final_scrub = if strict {
-                Some(scrub_pinned_archives(&args.dir)?)
-            } else {
-                None
-            };
-            let missing_pins = report_incomplete_pins(&args.dir)?;
-            if require_any && reached_any == 0 {
-                return Err(Error::Denied(
-                    "no configured peer was reachable for required sync",
-                ));
-            }
-            if failed > 0 && strict {
-                return Err(Error::Denied("one or more peers were unreachable"));
-            }
-            if missing_pins > 0 && strict {
-                return Err(Error::Denied("one or more blob archives remain incomplete"));
-            }
-            if final_scrub.is_some_and(|scrub| scrub.failed_manifests > 0) {
-                return Err(Error::Denied(
-                    "one or more blob archives failed full integrity verification",
-                ));
-            }
-            if let Some(path) = witness_path.as_ref() {
-                advance_witness_after_sync(&args.dir, path)?;
-            }
-
-            Ok(())
-        }
-
-        "service" => {
-            let action = args.rest.first().map(String::as_str).unwrap_or("");
-            match action {
-                "install" => {
-                    Store::open(&args.dir)?;
-                    Identity::load_for_brain(&args.dir)?;
-                    let mut interval = service::DEFAULT_INTERVAL_SECONDS;
-                    let mut interval_supplied = false;
-                    let mut witness = None;
-                    let mut remote = false;
-                    let mut index = 1usize;
-                    while index < args.rest.len() {
-                        match args.rest[index].as_str() {
-                            "--interval" => {
-                                if interval_supplied {
-                                    return Err(Error::Malformed(
-                                        "--interval may be supplied once",
-                                    ));
-                                }
-                                interval = args
-                                    .rest
-                                    .get(index + 1)
-                                    .ok_or(Error::Malformed("--interval needs seconds"))?
-                                    .parse::<u64>()
-                                    .map_err(|_| {
-                                        Error::Malformed("--interval needs whole seconds")
-                                    })?;
-                                interval_supplied = true;
-                                index += 2;
-                            }
-                            "--witness" => {
-                                if witness.is_some() {
-                                    return Err(Error::Malformed("--witness may be supplied once"));
-                                }
-                                let supplied = PathBuf::from(args.rest.get(index + 1).ok_or(
-                                    Error::Malformed(
-                                        "--witness needs an existing external witness file",
-                                    ),
-                                )?);
-                                witness = Some(external_witness_path(&args.dir, &supplied)?);
-                                index += 2;
-                            }
-                            "--remote" => {
-                                if remote {
-                                    return Err(Error::Malformed("--remote may be supplied once"));
-                                }
-                                remote = true;
-                                index += 1;
-                            }
-                            _ => {
-                                return Err(Error::Malformed("unexpected service install option"));
-                            }
-                        }
-                    }
-                    if let Some(path) = witness.as_ref() {
-                        verify_external_witness(&args.dir, path)?;
-                    }
-                    let executable = std::env::current_exe()?.canonicalize()?;
-
-                    println!(
-                        "proving at least one configured replication target before scheduling sync"
-                    );
-                    let mut preflight = Command::new(&executable);
-                    preflight.arg("sync").arg("--require-any");
-                    if remote {
-                        preflight.arg("--remote");
-                    }
-                    if let Some(path) = witness.as_ref() {
-                        preflight.arg("--witness").arg(path);
-                    }
-                    let status = preflight
-                        .arg("--dir")
-                        .arg(&args.dir)
-                        .stdin(Stdio::null())
-                        .stdout(Stdio::inherit())
-                        .stderr(Stdio::inherit())
-                        .status()?;
-                    if !status.success() {
-                        return Err(Error::Denied(
-                            "background sync was not installed because no replication target completed preflight",
-                        ));
-                    }
-
-                    let installed = service::install(
-                        &args.dir,
-                        &executable,
-                        &home(),
-                        interval,
-                        witness.as_deref(),
-                        remote,
-                    )?;
-                    println!("installed {}", installed.name);
-                    println!("binary {}", installed.executable.display());
-                    println!("store {}", installed.store.display());
-                    println!("interval {} seconds", installed.interval_seconds);
-                    match &installed.witness {
-                        Some(path) => println!("witness {}", path.display()),
-                        None => println!("witness disabled"),
-                    }
-                    println!(
-                        "keyless remote {}",
-                        if installed.remote {
-                            "enabled"
-                        } else {
-                            "disabled"
-                        }
-                    );
-                    println!(
-                        "verify with: hc service status --dir {}",
-                        installed.store.display()
-                    );
-                    Ok(())
-                }
-                "status" => {
-                    let status = service::status(&args.dir, &home())?;
-                    println!("service {}", status.manifest.name);
-                    println!("platform {}", status.manifest.platform);
-                    println!("binary {}", status.manifest.executable.display());
-                    println!("store {}", status.manifest.store.display());
-                    println!("interval {} seconds", status.manifest.interval_seconds);
-                    match &status.manifest.witness {
-                        Some(path) => println!("witness {}", path.display()),
-                        None => println!("witness disabled"),
-                    }
-                    println!(
-                        "keyless remote {}",
-                        if status.manifest.remote {
-                            "enabled"
-                        } else {
-                            "disabled"
-                        }
-                    );
-                    println!("registered {}", status.registered);
-                    println!("binary matches {}", status.binary_matches);
-                    println!("configuration matches {}", status.configuration_matches);
-                    println!("healthy {}", status.healthy);
-                    println!("detail {}", status.detail);
-                    Ok(())
-                }
-                "uninstall" => {
-                    let removed = service::uninstall(&args.dir, &home())?;
-                    println!("removed {}", removed.name);
-                    println!("brain data and sync logs were preserved");
-                    Ok(())
-                }
-                _ => Err(Error::Malformed(
-                    "service needs install, status, or uninstall",
-                )),
-            }
-        }
-
-        "serve" => {
-            let store = Store::open(&args.dir)?;
-            let _ = store;
-            let stdin = io::stdin();
-            let stdout = io::stdout();
-
-            // serve the whole root, so a peer can ask for a space by id
-            wire::serve_root(&args.dir, &mut stdin.lock(), &mut stdout.lock())
-        }
-
         "help" | "--help" | "-h" => {
             print!("{}", usage());
             Ok(())
@@ -9892,227 +7976,6 @@ mod cli_brand_tests {
         assert!(help.contains("short command: hc."));
         assert!(help.contains("\n  hc start"));
         assert!(!help.to_lowercase().contains("brainmesh"));
-    }
-}
-
-#[cfg(test)]
-mod screenpipe_archive_tests {
-    use super::{
-        archive_preflight_peer, archive_screenpipe_snapshot, parse_screenpipe_backup_response,
-        parse_screenpipe_token, prepare_screenpipe_staging, request_screenpipe_backup,
-        screenpipe_adapter::Snapshot,
-    };
-    use hyperconsciousness::blob::Blobs;
-    use hyperconsciousness::identity::Identity;
-    use hyperconsciousness::keyring::{DataKeys, RuntimeKeys};
-    use hyperconsciousness::log::Store;
-    use std::io::{Read, Write};
-    use std::net::TcpListener;
-    use std::thread;
-    use zeroize::Zeroizing;
-
-    #[test]
-    fn live_backup_request_stays_on_loopback_and_authenticates_in_a_header() {
-        let temp = tempfile::tempdir().unwrap();
-        let destination = temp.path().join("snapshot with space.sqlite");
-        let server_destination = destination.clone();
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let port = listener.local_addr().unwrap().port();
-        let server = thread::spawn(move || {
-            let (mut stream, address) = listener.accept().unwrap();
-            assert!(address.ip().is_loopback());
-            let mut request = Vec::new();
-            let mut byte = [0u8; 1];
-            while !request.ends_with(b"\r\n\r\n") {
-                stream.read_exact(&mut byte).unwrap();
-                request.push(byte[0]);
-                assert!(request.len() < 64 * 1024);
-            }
-            let request = String::from_utf8(request).unwrap();
-            assert!(request.contains("Authorization: Bearer private-token\r\n"));
-            assert!(request.contains("snapshot%20with%20space.sqlite"));
-
-            std::fs::write(&server_destination, b"consistent sqlite fixture").unwrap();
-            let body = serde_json::json!({
-                "success": true,
-                "path": server_destination.to_string_lossy(),
-                "size_bytes": 25,
-            })
-            .to_string();
-            write!(
-                stream,
-                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-                body.len(),
-                body
-            )
-            .unwrap();
-        });
-
-        assert_eq!(
-            request_screenpipe_backup(port, b"private-token", &destination).unwrap(),
-            25
-        );
-        server.join().unwrap();
-        assert_eq!(Snapshot::open(&destination, 25).unwrap().bytes, 25);
-    }
-
-    #[test]
-    fn hybrid_backup_directory_is_accepted() {
-        let temp = tempfile::tempdir().unwrap();
-        let snapshot = temp.path().join("hybrid.screenpipe");
-        let size = super::screenpipe_adapter::fixture(&snapshot);
-        assert_eq!(Snapshot::open(&snapshot, size).unwrap().bytes, size);
-    }
-
-    #[test]
-    fn token_and_backup_response_parsers_fail_closed_without_echoing_secrets() {
-        let token = parse_screenpipe_token(Zeroizing::new(b"abc-123\r\n".to_vec())).unwrap();
-        assert_eq!(&*token, b"abc-123");
-        let error = parse_screenpipe_token(Zeroizing::new(b"secret\ninjected".to_vec()))
-            .unwrap_err()
-            .to_string();
-        assert!(!error.contains("secret"));
-
-        let expected = std::path::Path::new("/expected.sqlite");
-        let response = b"HTTP/1.1 200 OK\r\n\r\n{\"success\":true,\"path\":\"/other.sqlite\",\"size_bytes\":1}";
-        assert!(parse_screenpipe_backup_response(response, expected).is_err());
-    }
-
-    #[test]
-    fn a_private_staged_snapshot_is_removed_only_by_the_exact_cleanup_step() {
-        let temp = tempfile::tempdir().unwrap();
-        let staging = prepare_screenpipe_staging(&temp.path().join("stage")).unwrap();
-        let snapshot = staging.join("one.sqlite");
-        std::fs::write(&snapshot, b"snapshot").unwrap();
-        let backup = Snapshot::open(&snapshot, 8).unwrap();
-        assert!(snapshot.exists());
-        backup.remove().unwrap();
-        assert!(!snapshot.exists());
-    }
-
-    #[test]
-    fn proved_archive_releases_source_ciphertext_and_restores_exact_snapshot() {
-        prove_archive_roundtrip(false);
-    }
-
-    #[test]
-    fn proved_hybrid_archive_restores_every_bundle_member() {
-        prove_archive_roundtrip(true);
-    }
-
-    #[test]
-    fn refused_hybrid_archive_retains_staging_and_source_ciphertext() {
-        std::env::set_var("BRAINMESH_NO_KEYSTORE", "1");
-        let source_temp = tempfile::tempdir().unwrap();
-        let source_dir = source_temp.path().to_path_buf();
-        let mut source = Identity::load_or_create(&source_dir).unwrap();
-        source.create_brain().unwrap();
-        let archive_temp = tempfile::tempdir().unwrap();
-        let archive_dir = archive_temp.path().to_path_buf();
-        let mut archive = Identity::load_or_create(&archive_dir).unwrap();
-        archive
-            .accept(&source.invite(&archive.introduction()).unwrap())
-            .unwrap();
-        // The default metadata policy must refuse archive retention proof.
-        let key = *source.brain_key().unwrap();
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let host = format!("tcp://{}", listener.local_addr().unwrap());
-        let server = thread::spawn(move || {
-            let (stream, _) = listener.accept().unwrap();
-            let _ = super::tcp::serve_stream(&archive_dir, stream, &key);
-        });
-        let path = source_temp.path().join("staged.screenpipe");
-        let size = super::screenpipe_adapter::fixture(&path);
-        let backup = Snapshot::open(&path, size).unwrap();
-        assert!(archive_screenpipe_snapshot(&source_dir, &backup, &host).is_err());
-        server.join().unwrap();
-        assert!(Snapshot::open(&path, size).is_ok());
-        assert!(!Blobs::open(&source_dir)
-            .unwrap()
-            .chunk_hashes()
-            .unwrap()
-            .is_empty());
-    }
-
-    fn prove_archive_roundtrip(hybrid: bool) {
-        std::env::set_var("BRAINMESH_NO_KEYSTORE", "1");
-        let source_temp = tempfile::tempdir().unwrap();
-        let archive_temp = tempfile::tempdir().unwrap();
-        let source_dir = source_temp.path().to_path_buf();
-        let archive_dir = archive_temp.path().to_path_buf();
-        Identity::load_or_create(&source_dir).unwrap();
-        let legacy_key = source_dir.join("identity").join("brain.key");
-        std::fs::write(&legacy_key, hyperconsciousness::crypto::random_key()).unwrap();
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&legacy_key, std::fs::Permissions::from_mode(0o600)).unwrap();
-        }
-        let source = Identity::load_or_create(&source_dir).unwrap();
-        Store::open(&source_dir).unwrap();
-
-        let mut archive = Identity::load_or_create(&archive_dir).unwrap();
-        Store::open(&archive_dir).unwrap();
-        let invite = source.invite(&archive.introduction()).unwrap();
-        archive.accept(&invite).unwrap();
-        hyperconsciousness::pin::save(&archive_dir, hyperconsciousness::pin::Policy::All).unwrap();
-
-        let key = *source.brain_key().unwrap();
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let host = format!("tcp://{}", listener.local_addr().unwrap());
-        let server_dir = archive_dir.clone();
-        let server = thread::spawn(move || {
-            for _ in 0..2 {
-                let (stream, _) = listener.accept().unwrap();
-                super::tcp::serve_stream(&server_dir, stream, &key).unwrap();
-            }
-        });
-
-        let snapshot = source_temp.path().join("consistent.sqlite");
-        let contents = b"a consistent sqlite snapshot, not a live WAL copy";
-        let size = if hybrid {
-            super::screenpipe_adapter::fixture(&snapshot)
-        } else {
-            std::fs::write(&snapshot, contents).unwrap();
-            contents.len() as u64
-        };
-        let backup = Snapshot::open(&snapshot, size).unwrap();
-        archive_preflight_peer(&host, "brainmesh", &Store::open(&source_dir).unwrap(), &key)
-            .unwrap();
-        let reference = archive_screenpipe_snapshot(&source_dir, &backup, &host).unwrap();
-        server.join().unwrap();
-
-        assert!(!Blobs::open(&source_dir).unwrap().is_complete(&reference));
-        assert!(Blobs::open(&archive_dir).unwrap().is_complete(&reference));
-        let archive_keys = RuntimeKeys::open(&archive_dir, &archive).unwrap();
-        let mut restored = Vec::new();
-        Blobs::open(&archive_dir)
-            .unwrap()
-            .get(
-                &reference,
-                archive_keys.key(reference.epoch).unwrap(),
-                &mut restored,
-            )
-            .unwrap();
-        if hybrid {
-            let destination = source_temp.path().join("restored.screenpipe");
-            tar::Archive::new(restored.as_slice())
-                .unpack(&destination)
-                .unwrap();
-            let restored_backup = Snapshot::open(&destination, size).unwrap();
-            assert_eq!(restored_backup.logical_name(), "screenpipe.backup.tar");
-            // The validated manifest binds every payload's exact bytes, not
-            // just the tar's entry count or the existence of an index file.
-            assert_eq!(
-                std::fs::read(destination.join("manifest.json")).unwrap(),
-                std::fs::read(snapshot.join("manifest.json")).unwrap()
-            );
-        } else {
-            assert_eq!(restored, contents);
-        }
-        assert!(snapshot.exists());
-        backup.remove().unwrap();
-        assert!(!snapshot.exists());
     }
 }
 
@@ -10187,8 +8050,8 @@ mod offload_plan_tests {
         let preview = blobs.preview_evict_loose(&reference.chunks).unwrap();
         let request = hyperconsciousness::offload::PlanRequest {
             name: "memory.bin",
-            peer: "archive",
-            target_kind: hyperconsciousness::offload::TargetKind::KeyHoldingPeer,
+            peer: "remote",
+            target_kind: hyperconsciousness::offload::TargetKind::KeylessRemote,
             space: None,
             json: true,
         };
@@ -10228,7 +8091,7 @@ mod offload_plan_tests {
         let missing = vec![
             "offload".into(),
             "memory.bin".into(),
-            "archive".into(),
+            "remote".into(),
             "--apply".into(),
         ];
         assert!(matches!(
@@ -10239,7 +8102,7 @@ mod offload_plan_tests {
         let repeated = vec![
             "offload".into(),
             "memory.bin".into(),
-            "archive".into(),
+            "remote".into(),
             "--json".into(),
             "--json".into(),
         ];
@@ -10247,343 +8110,6 @@ mod offload_plan_tests {
             parse_offload_options(&repeated),
             Err(Error::Malformed(_))
         ));
-    }
-}
-
-#[cfg(test)]
-mod pin_hydration_tests {
-    use super::*;
-    use ed25519_dalek::SigningKey;
-    use hyperconsciousness::blob::CHUNK;
-    use hyperconsciousness::crypto::random_key;
-    use hyperconsciousness::hlc::Clock;
-    use hyperconsciousness::id::{DeviceId, ZERO_HASH};
-    use hyperconsciousness::record::Record;
-    use hyperconsciousness::wire::{read_frame, write_frame, V_BLOB, V_GET_BLOB, V_HAS_BLOB};
-    use rand_core::OsRng;
-
-    #[test]
-    fn an_archive_sync_takes_what_a_partial_peer_has_and_keeps_the_gap_visible() {
-        let source = tempfile::tempdir().unwrap();
-        let target = tempfile::tempdir().unwrap();
-        let source_blobs = Blobs::open(source.path()).unwrap();
-        let target_store = Store::open(target.path()).unwrap();
-        let target_blobs = Blobs::open(target.path()).unwrap();
-        let key = random_key();
-        let reference = source_blobs.put(&vec![7u8; CHUNK + 17][..], &key).unwrap();
-        assert_eq!(reference.chunks.len(), 2);
-
-        let signing = SigningKey::generate(&mut OsRng);
-        let mut value: serde_json::Value = serde_json::from_str(&reference.to_json()).unwrap();
-        value["kind"] = serde_json::json!("file");
-        value["name"] = serde_json::json!("archive.bin");
-        let record = Record::create(
-            &signing,
-            0,
-            ZERO_HASH,
-            Clock::new().now(),
-            1,
-            &key,
-            value.to_string().as_bytes(),
-        )
-        .unwrap();
-        target_store
-            .log_for_write(DeviceId(signing.verifying_key().to_bytes()))
-            .unwrap()
-            .append(&record)
-            .unwrap();
-        hyperconsciousness::pin::save(target.path(), hyperconsciousness::pin::Policy::All).unwrap();
-
-        let before =
-            hyperconsciousness::pin::status(target.path(), &target_store, &target_blobs, &key)
-                .unwrap();
-        assert_eq!(before.missing_chunks.len(), 2);
-        let available = before.missing_chunks[0];
-        let stored = source_blobs.get_chunk(&available).unwrap().unwrap();
-        let mut replies = Vec::new();
-        write_frame(&mut replies, V_BLOB, &[1, 0]).unwrap();
-        write_frame(&mut replies, V_BLOB, &stored).unwrap();
-        let mut peer = Peer {
-            input: std::io::Cursor::new(replies),
-            output: Vec::new(),
-        };
-
-        assert_eq!(
-            hydrate_pinned_with(&mut peer, &target_store, &target_blobs, &key).unwrap(),
-            1
-        );
-        let after =
-            hyperconsciousness::pin::status(target.path(), &target_store, &target_blobs, &key)
-                .unwrap();
-        assert_eq!(after.held_chunks(), 1);
-        assert_eq!(after.missing_chunks.len(), 1);
-        assert!(!after.satisfied());
-
-        let mut requests = std::io::Cursor::new(peer.output);
-        let (verb, inventory) = read_frame(&mut requests).unwrap();
-        assert_eq!(verb, V_HAS_BLOB);
-        assert_eq!(inventory.len(), 64);
-        let (verb, requested) = read_frame(&mut requests).unwrap();
-        assert_eq!(verb, V_GET_BLOB);
-        assert_eq!(requested, available.0);
-    }
-
-    #[test]
-    fn a_scrubbed_archive_sync_repairs_corrupt_ciphertext_from_a_peer() {
-        let source = tempfile::tempdir().unwrap();
-        let target = tempfile::tempdir().unwrap();
-        let source_blobs = Blobs::open(source.path()).unwrap();
-        let target_store = Store::open(target.path()).unwrap();
-        let target_blobs = Blobs::open(target.path()).unwrap();
-        let key = random_key();
-        let reference = source_blobs.put(&b"repair me from peer"[..], &key).unwrap();
-        let chunk = reference.chunks[0];
-        let stored = source_blobs.get_chunk(&chunk).unwrap().unwrap();
-        target_blobs.put_chunk(&chunk, &stored).unwrap();
-
-        let signing = SigningKey::generate(&mut OsRng);
-        let mut value: serde_json::Value = serde_json::from_str(&reference.to_json()).unwrap();
-        value["kind"] = serde_json::json!("file");
-        let record = Record::create(
-            &signing,
-            0,
-            ZERO_HASH,
-            Clock::new().now(),
-            1,
-            &key,
-            value.to_string().as_bytes(),
-        )
-        .unwrap();
-        target_store
-            .log_for_write(DeviceId(signing.verifying_key().to_bytes()))
-            .unwrap()
-            .append(&record)
-            .unwrap();
-        hyperconsciousness::pin::save(target.path(), hyperconsciousness::pin::Policy::All).unwrap();
-
-        let hex = chunk.hex();
-        std::fs::write(
-            target.path().join("blobs").join(&hex[..2]).join(&hex[2..]),
-            b"corrupt",
-        )
-        .unwrap();
-        let present =
-            hyperconsciousness::pin::status(target.path(), &target_store, &target_blobs, &key)
-                .unwrap();
-        assert!(present.satisfied());
-        let damaged = hyperconsciousness::pin::verify(&present, &target_blobs, &key).unwrap();
-        assert_eq!(damaged.damaged_chunks, vec![chunk]);
-        let repairable =
-            hyperconsciousness::pin::status(target.path(), &target_store, &target_blobs, &key)
-                .unwrap();
-        assert_eq!(repairable.missing_chunks, vec![chunk]);
-
-        let mut replies = Vec::new();
-        write_frame(&mut replies, V_BLOB, &[1]).unwrap();
-        write_frame(&mut replies, V_BLOB, &stored).unwrap();
-        let mut peer = Peer {
-            input: std::io::Cursor::new(replies),
-            output: Vec::new(),
-        };
-        assert_eq!(
-            hydrate_pinned_with(&mut peer, &target_store, &target_blobs, &key).unwrap(),
-            1
-        );
-        let repaired =
-            hyperconsciousness::pin::status(target.path(), &target_store, &target_blobs, &key)
-                .unwrap();
-        assert!(repaired.satisfied());
-        let verified = hyperconsciousness::pin::verify(&repaired, &target_blobs, &key).unwrap();
-        assert_eq!(verified.verified_chunks, 1);
-        assert_eq!(verified.verified_manifests, 1);
-        assert!(verified.damaged_chunks.is_empty());
-        assert!(verified.failed_manifests.is_empty());
-    }
-}
-
-#[cfg(test)]
-mod sync_target_tests {
-    use super::{read_peers, remote_for, write_peers, MAX_PEERS_FILE};
-    use hyperconsciousness::error::Error;
-
-    fn peers() -> Vec<(String, String)> {
-        vec![
-            ("macmini".into(), "/opt/hc/bin/brainmesh".into()),
-            ("win,win.tail.ts.net".into(), "cmd /c C:\\bm.exe".into()),
-        ]
-    }
-
-    #[test]
-    fn a_named_host_uses_the_command_it_was_added_with() {
-        // the bug: `sync macmini` ran a bare `brainmesh`, which is not on a
-        // non interactive ssh PATH, while a bare `sync` worked. finding out
-        // that way is confusing, so it is pinned here.
-        assert_eq!(
-            remote_for(&peers(), "macmini", None),
-            "/opt/hc/bin/brainmesh"
-        );
-    }
-
-    #[test]
-    fn any_of_a_peers_addresses_resolves_to_its_command() {
-        assert_eq!(
-            remote_for(&peers(), "win.tail.ts.net", None),
-            "cmd /c C:\\bm.exe"
-        );
-    }
-
-    #[test]
-    fn an_unknown_host_still_gets_a_sensible_default() {
-        assert_eq!(remote_for(&peers(), "somewhere-new", None), "hc");
-    }
-
-    #[test]
-    fn an_explicit_override_beats_the_peers_file() {
-        let over = Some("/opt/brainmesh".to_string());
-        assert_eq!(remote_for(&peers(), "macmini", over), "/opt/brainmesh");
-    }
-
-    #[test]
-    fn peer_routes_round_trip_through_a_bounded_private_file() {
-        let dir = tempfile::tempdir().unwrap();
-        write_peers(dir.path(), &peers()).unwrap();
-        assert_eq!(read_peers(dir.path()).unwrap(), peers());
-
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            assert_eq!(
-                std::fs::metadata(dir.path().join("peers"))
-                    .unwrap()
-                    .permissions()
-                    .mode()
-                    & 0o777,
-                0o600
-            );
-        }
-    }
-
-    #[test]
-    fn peer_routes_reject_control_characters_and_oversized_files() {
-        let dir = tempfile::tempdir().unwrap();
-        assert!(matches!(
-            write_peers(
-                dir.path(),
-                &[("trusted\ninjected".into(), "brainmesh".into())]
-            ),
-            Err(Error::Malformed(_))
-        ));
-
-        std::fs::write(dir.path().join("peers"), vec![b'x'; MAX_PEERS_FILE + 1]).unwrap();
-        assert!(matches!(
-            read_peers(dir.path()),
-            Err(Error::TooLarge { .. })
-        ));
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn peer_routes_never_follow_a_symlink() {
-        use std::os::unix::fs::symlink;
-
-        let dir = tempfile::tempdir().unwrap();
-        let outside = tempfile::NamedTempFile::new().unwrap();
-        std::fs::write(outside.path(), b"leave this alone").unwrap();
-        symlink(outside.path(), dir.path().join("peers")).unwrap();
-
-        assert!(read_peers(dir.path()).is_err());
-        assert!(write_peers(dir.path(), &peers()).is_err());
-        assert_eq!(std::fs::read(outside.path()).unwrap(), b"leave this alone");
-    }
-}
-
-#[cfg(test)]
-mod mesh_tests {
-    use super::mesh_from;
-    use serde_json::json;
-
-    fn announce(device: &str, address: &str, command: &str) -> serde_json::Value {
-        json!({"kind": "peer", "device": device, "address": address, "command": command})
-    }
-
-    #[test]
-    fn a_device_never_learns_to_sync_with_itself() {
-        // it would connect, transfer nothing and cost a round trip every
-        // timer tick, which is the worst kind of bug: invisible and billed
-        let records = vec![
-            announce("aa", "me@host", "bm"),
-            announce("bb", "you@host", "bm"),
-        ];
-        let mesh = mesh_from(&records, "aa");
-
-        assert_eq!(mesh, vec![("you@host".to_string(), "bm".to_string())]);
-    }
-
-    #[test]
-    fn a_machine_that_moved_is_tried_at_its_new_address_first() {
-        let records = vec![
-            announce("bb", "old@cafe", "bm"),
-            announce("bb", "new@home", "bm"),
-        ];
-
-        let mesh = mesh_from(&records, "aa");
-        assert_eq!(mesh.len(), 1, "one machine, one entry");
-        assert!(mesh[0].0.starts_with("new@home"), "got {}", mesh[0].0);
-        assert!(
-            mesh[0].0.contains("old@cafe"),
-            "the old one stays as a fallback"
-        );
-    }
-
-    #[test]
-    fn one_machine_announcing_two_transports_is_still_one_machine() {
-        let records = vec![
-            announce("bb", "user@10.0.0.1", "bm"),
-            announce("bb", "tcp://10.0.0.1:7778", "bm"),
-        ];
-
-        let mesh = mesh_from(&records, "aa");
-        assert_eq!(mesh.len(), 1, "syncing it twice is invisible work");
-
-        // the socket is tried first: ssh does not merely fail on windows, it
-        // hangs, and a hang in a fallback list is a sync that never finishes
-        assert!(mesh[0].0.starts_with("tcp://"), "got {}", mesh[0].0);
-    }
-
-    #[test]
-    fn a_relay_route_is_tried_before_an_unreachable_ssh_route() {
-        let records = vec![
-            announce("bb", "you@private", "bm"),
-            announce(
-                "bb",
-                "relay://relay.example:7779/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-                "bm",
-            ),
-        ];
-
-        let mesh = mesh_from(&records, "aa");
-        assert_eq!(mesh.len(), 1);
-        assert!(mesh[0].0.starts_with("relay://"), "got {}", mesh[0].0);
-    }
-
-    #[test]
-    fn an_announcement_missing_its_fields_is_skipped_not_guessed() {
-        let records = vec![
-            json!({"kind": "peer", "device": "bb"}),
-            json!({"kind": "peer", "address": "nobody@host"}),
-            announce("cc", "real@host", "bm"),
-        ];
-
-        assert_eq!(mesh_from(&records, "aa").len(), 1);
-    }
-
-    #[test]
-    fn a_command_defaults_rather_than_dropping_the_peer() {
-        let records = vec![json!({"kind": "peer", "device": "bb", "address": "you@host"})];
-        assert_eq!(
-            mesh_from(&records, "aa"),
-            vec![("you@host".into(), "brainmesh".into())]
-        );
     }
 }
 

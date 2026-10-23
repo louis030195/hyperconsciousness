@@ -46,10 +46,6 @@ for name, n, size, authors, diversity, managed, mode in [
     cases.append((name, 'dimension_bench', [n, size, authors, diversity, managed, mode]))
 for batch in [1, 25, 250]:
     cases.append((f'batch-{batch}-repeat', 'dimension_bench', [5000, 256, 1, 'repeat', 'plain', f'batch{batch}']))
-for mb in [1, 16, 128]:
-    cases.append((f'blob-{mb}mb', 'io_bench', ['blob', mb * 1024 * 1024]))
-for n, authors, page in [(1000, 1, 1048576), (10000, 1, 1048576), (50000, 1, 1048576), (10000, 1, 65536), (10000, 16, 1048576)]:
-    cases.append((f'sync-{n}-{authors}-{page}', 'io_bench', ['sync', n, authors, page]))
 for n in [100, 10000]:
     cases.append((f'iam-{n}', 'iam_bench', [n]))
 if args.case:

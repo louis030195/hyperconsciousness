@@ -2,9 +2,10 @@
 
 # Hyperconsciousness (`hc`)
 
-HC is an encrypted, append-only knowledge store for humans and agents. It keeps
-signed records in sync across devices. You choose what an agent can access and
-for how long through scoped, expiring grants.
+HC is an encrypted, append-only knowledge store for humans and agents. One
+trusted node owns the store; other devices use its authenticated API. You
+choose what an agent can access and for how long through scoped, expiring
+grants. The node can run on your own machine or server.
 
 The repository contains the Rust engine, CLI, MCP/HTTP server, and agent skills,
 along with the optional local dashboard described below. Desktop, iOS, Android,
@@ -76,7 +77,7 @@ selection, prerequisites and verification.
 ## Local dashboard
 
 Use the optional [HC Atlas dashboard](dashboard/README.md) to inspect storage,
-file metadata, identity, grants, and configured peers. You can navigate with the
+file metadata, identity, and grants. You can navigate with the
 keyboard or use its command menu. The [UI guide and screenshots](dashboard/docs/ui/README.md)
 show each view. With an existing authenticated HC reader configured, Records
 also lets you search notes and imported source records, page through older
@@ -220,15 +221,15 @@ HC stores opaque capability references and grants specific operations.
 ## Documentation
 
 - [Mission and scope](MISSION.md) and [scope evals](evals/scope/README.md).
-- [Operator skill](skills/hyperconsciousness-ops/SKILL.md): sync, workspaces, grants, secrets,
-  remote storage, services, and recovery commands.
+- [Operator skill](skills/hyperconsciousness-ops/SKILL.md): workspaces, grants, secrets,
+  object-storage backup, and recovery commands.
 - [Agent skill](skills/hyperconsciousness/SKILL.md): scoped knowledge discovery.
 - [Architecture](docs/ARCHITECTURE.md) and [format specification](docs/SPEC.md).
-- [Screenpipe backup adapter](docs/SCREENPIPE-ADAPTER.md): legacy SQLite and hybrid SQLite + Parquet archives.
+- [Central-only migration](docs/CENTRAL-ONLY-MIGRATION.md): move an existing store to one trusted node.
 - [Harness context plan](docs/HARNESS-CONTEXT-PLAN.md): bounded evidence, capture provenance, skills, handoffs and independent adapters.
 - [Threat model and constraints](docs/CONSTRAINTS.md).
 - [Failure cases](docs/EDGE-CASES.md) and [design decisions](docs/DECISIONS.md).
-- [Roadmap](docs/ROADMAP.md), [contributing](CONTRIBUTING.md), and
+- [Historical roadmap](docs/ROADMAP.md), [contributing](CONTRIBUTING.md), and
   [security reporting](SECURITY.md).
 
 ## Development

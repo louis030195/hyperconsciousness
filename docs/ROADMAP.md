@@ -4,6 +4,11 @@
 
 # ROADMAP
 
+This is a historical implementation record. Peer replication, peer transport,
+peer lifecycle commands, and the Screenpipe peer-backup adapter listed below
+were removed for the central-only model. See the current [architecture](ARCHITECTURE.md)
+and [migration guide](CENTRAL-ONLY-MIGRATION.md) before using any command here.
+
 ## what exists
 
 Verified between a MacBook Pro and a Mac mini over a relayed tailnet path using

@@ -77,12 +77,12 @@ deadline. Access denials are not retried. No record content is cached on disk.
 ## Views and interpretation
 
 - **Overview:** signed record counts, allocated local storage, device identity,
-  device histories, and configured peers. Counts include policy and audit records.
+  and device histories. Counts include policy and audit records.
 - **Records:** authenticated search, recent records, pagination, and text previews.
 - **Stored files:** newest file manifest metadata, filename filtering, versions,
   logical size, chunk availability, and a keyboard-accessible metadata dialog.
-- **Your topology:** locally held author histories and configured replication
-  routes. No peer connection or sync is triggered.
+- **Your topology:** locally held author histories and the central-node access
+  model. It does not test a remote client's login or grant.
 - **Identity & access:** HC's authority description and issued grant inventory.
   A future expiry does not mean a grant is currently effective. Revocations and
   grant chains remain HC's responsibility.
@@ -91,7 +91,7 @@ Storage measures disk allocation for `log`, `blobs`, and `cache`. It excludes
 projected folders, external backups, and other directories. It is not the size
 of readable or unique content. The staircase is illustrative, not a data chart.
 
-The API uses `hc status`, `hc --version`, `hc peers`, `hc files --json`, and
+The API uses `hc status`, `hc --version`, `hc files --json`, and
 `hc grants`. Browser input never becomes a command, executable, or filesystem path.
 Overview results are cached in memory for 15 seconds. The file inventory runs
 as one shared background job: the API returns immediately, the UI polls every two

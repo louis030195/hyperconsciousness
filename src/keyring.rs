@@ -248,21 +248,6 @@ impl RuntimeKeys {
         self.admission_state_from(None, records.iter().cloned().map(Ok))
     }
 
-    /// Root-aware admission also proves that a retained local device can open
-    /// the matching enrollment before a transition record is allowed to land.
-    /// Otherwise a truncated transfer could commit authority state while
-    /// withholding the next data key and leave the runtime unable to reopen.
-    pub(crate) fn admission_state_for<I>(
-        &self,
-        identity: &Identity,
-        records: I,
-    ) -> Result<Option<State>>
-    where
-        I: IntoIterator<Item = Result<Record>>,
-    {
-        self.admission_state_from(Some(identity), records)
-    }
-
     fn admission_state_from<I>(
         &self,
         identity: Option<&Identity>,
@@ -1719,7 +1704,7 @@ mod tests {
         assert_eq!(admitted.epoch(), 2);
         let store = Store::open(root.path()).unwrap();
         assert_eq!(
-            crate::sync::apply_authorized(&store, &[control.clone(), retained_new], &admitted,)
+            crate::ingest::apply_authorized(&store, &[control.clone(), retained_new], &admitted,)
                 .unwrap()
                 .accepted,
             2
@@ -1730,7 +1715,7 @@ mod tests {
             .unwrap()
             .unwrap();
         let rejected_root = tempfile::tempdir().unwrap();
-        assert!(crate::sync::apply_authorized(
+        assert!(crate::ingest::apply_authorized(
             &Store::open(rejected_root.path()).unwrap(),
             &[removed_head.clone(), removed_tail.clone()],
             &rejected,
