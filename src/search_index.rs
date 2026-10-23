@@ -2163,6 +2163,92 @@ mod tests {
     use crate::record::Record;
 
     #[test]
+    fn external_candidates_are_rechecked_against_grants_ids_and_revocation() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::open(root.path()).unwrap();
+        let signing = SigningKey::generate(&mut OsRng);
+        let key = random_key();
+        let authority = DeviceId(signing.verifying_key().to_bytes());
+        let grant = Grant::issue(
+            &signing,
+            authority,
+            Scope {
+                tags: vec!["work".into()],
+                max_sensitivity: crate::grant::SECRET,
+                ..Scope::default()
+            },
+            READ,
+            u64::MAX,
+        )
+        .unwrap();
+        append(
+            &store,
+            &signing,
+            &key,
+            &[
+                r#"{"kind":"note","tags":["work"],"text":"allowed"}"#.into(),
+                r#"{"kind":"note","tags":["personal"],"text":"denied"}"#.into(),
+            ],
+        );
+        let records = store
+            .log(authority)
+            .unwrap()
+            .iter_records()
+            .unwrap()
+            .collect::<Result<Vec<_>>>()
+            .unwrap();
+        let fingerprint = Hash::of(key.as_slice());
+        let index = Index::load_or_build(root.path(), &store, &key, fingerprint).unwrap();
+        let permissions =
+            crate::revocation::Index::load_or_build(root.path(), &store, &key, fingerprint)
+                .unwrap();
+        let good = (format!("{}:0", authority.short()), records[0].id());
+        let candidates = [
+            (format!("{}:1", authority.short()), records[1].id()),
+            (good.0.clone(), records[1].id()),
+            good.clone(),
+            good,
+        ];
+        let answer = query::look_external_indexed(
+            &store,
+            &key,
+            &index,
+            &permissions,
+            std::slice::from_ref(&grant),
+            authority,
+            1,
+            &Filter {
+                kind: Some("note".into()),
+                limit: 10,
+                ..Filter::default()
+            },
+            &candidates,
+        )
+        .unwrap();
+        assert_eq!(answer.records.len(), 1);
+        assert_eq!(answer.records[0].id(), records[0].id());
+
+        append(
+            &store,
+            &signing,
+            &key,
+            &[serde_json::json!({"kind":"revoke","grant":grant.id().hex()}).to_string()],
+        );
+        assert!(query::look_external_indexed(
+            &store,
+            &key,
+            &index,
+            &permissions,
+            &[grant],
+            authority,
+            1,
+            &Filter::default(),
+            &candidates,
+        )
+        .is_err());
+    }
+
+    #[test]
     fn point_reads_do_not_open_unrelated_metadata_shards() {
         let root = tempfile::tempdir().unwrap();
         let store = Store::open(root.path()).unwrap();

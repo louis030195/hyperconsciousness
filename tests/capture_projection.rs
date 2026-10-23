@@ -186,6 +186,60 @@ impl Fixture {
 }
 
 #[test]
+fn external_candidates_cannot_restore_corrected_or_retracted_content() {
+    let f = Fixture::new();
+    let signer = SigningKey::generate(&mut OsRng);
+    let original = f.event(&signer, None, 1, "original", false);
+    let corrected = f.event(&signer, Some(&original), 2, "corrected", false);
+    sync::apply(&f.store, &[original.clone(), corrected.clone()]).unwrap();
+    let fingerprint = Hash::of(f.key.as_slice());
+    let index =
+        search_index::Index::load_or_build(f.dir.path(), &f.store, &f.key, fingerprint).unwrap();
+    let permissions =
+        revocation::Index::load_or_build(f.dir.path(), &f.store, &f.key, fingerprint).unwrap();
+    let candidates = vec![
+        (Fixture::reference(&original), original.id()),
+        (Fixture::reference(&corrected), corrected.id()),
+    ];
+    let found = query::look_external_indexed(
+        &f.store,
+        &f.key,
+        &index,
+        &permissions,
+        std::slice::from_ref(&f.grant),
+        DeviceId(f.authority.verifying_key().to_bytes()),
+        10_000,
+        &query::Filter::default(),
+        &candidates,
+    )
+    .unwrap();
+    assert_eq!(
+        found.records.iter().map(Record::id).collect::<Vec<_>>(),
+        vec![corrected.id()]
+    );
+
+    let deleted = f.event(&signer, Some(&corrected), 3, "", false);
+    sync::apply(&f.store, std::slice::from_ref(&deleted)).unwrap();
+    let index =
+        search_index::Index::load_or_build(f.dir.path(), &f.store, &f.key, fingerprint).unwrap();
+    let permissions =
+        revocation::Index::load_or_build(f.dir.path(), &f.store, &f.key, fingerprint).unwrap();
+    let found = query::look_external_indexed(
+        &f.store,
+        &f.key,
+        &index,
+        &permissions,
+        &[f.grant],
+        DeviceId(f.authority.verifying_key().to_bytes()),
+        10_000,
+        &query::Filter::default(),
+        &candidates,
+    )
+    .unwrap();
+    assert!(found.records.is_empty());
+}
+
+#[test]
 fn remote_correction_and_retraction_survive_out_of_order_author_delivery_and_rebuild() {
     let f = Fixture::new();
     let a = SigningKey::generate(&mut OsRng);

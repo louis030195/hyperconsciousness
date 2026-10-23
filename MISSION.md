@@ -2,10 +2,11 @@
 
 # Mission and repository boundary
 
-HC is independent, private, decentralized knowledge storage and context access
-for humans and agents. It preserves useful records across devices and gives
-callers scoped, expiring, auditable access. It works without Screenpipe, a
-particular model, or a required hosted service.
+HC is independent, private knowledge storage and context access for humans and
+agents. Clients can use one authoritative node through its API; that node keeps
+signed, encrypted records and gives callers scoped, expiring, auditable access.
+It works without Screenpipe, a particular model, or a required third-party
+hosted service.
 
 ## What belongs here
 
@@ -36,6 +37,17 @@ become a CRM or collaboration app, or add blockchain consensus/token economics.
 A captured instruction or tool description remains evidence until a caller
 explicitly adopts it through its own trusted workflow. A keyless storage provider
 receives ciphertext, never the keys or authority needed to answer private queries.
+An explicitly configured external search adapter is a separate trust choice: it
+may receive plaintext note text for indexing, but remains only a candidate
+source. HC reopens records and checks current grants, revocations, corrections
+and retractions before returning content. Never enable it implicitly for a
+personal or company store.
+
+Hosted client access can be the primary deployment path while signed encrypted
+logs remain the canonical source of truth. Existing peer replication and local
+access stay compatible until a migration covers offline access, backup,
+recovery and existing installations. A provider index is rebuildable and cannot
+replace that durable authority.
 
 Compatibility endpoints and background **replication** services remain valid.
 The words "mobile", "company", "skill" or "daemon" do not themselves indicate

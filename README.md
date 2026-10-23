@@ -2,9 +2,10 @@
 
 # Hyperconsciousness (`hc`)
 
-HC is an encrypted, append-only knowledge store for humans and agents. It keeps
-signed records in sync across devices. You choose what an agent can access and
-for how long through scoped, expiring grants.
+HC is an encrypted, append-only knowledge store for humans and agents. Clients
+can use one authoritative node through its API. You choose what an agent can
+access and for how long through scoped, expiring grants. Existing peer sync
+remains available for compatible stores and recovery.
 
 The repository contains the Rust engine, CLI, MCP/HTTP server, and agent skills,
 along with the optional local dashboard described below. Desktop, iOS, Android,
@@ -55,6 +56,8 @@ hc status --remote
 Setup installs the supplied instruction skills and registers HC with Codex.
 Start a new Codex task after signing in. No Bun or provider API keys are needed.
 See [hosted access](docs/HOSTED-ACCESS.md) for other clients and access boundaries.
+The [search adapter guide](docs/SEARCH_ADAPTERS.md) explains local retrieval and
+the optional plaintext Turbopuffer semantic index.
 The company connection is separate from your personal brain.
 
 ## Ingest chats and tools
