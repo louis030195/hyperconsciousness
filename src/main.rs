@@ -43,7 +43,6 @@ mod oauth;
 mod permission;
 mod relay;
 mod screenpipe_adapter;
-mod search_backend;
 mod service;
 mod sigv4;
 mod snapshot_archive;
@@ -157,8 +156,6 @@ short command: hc.
                           share one authenticated MCP process across clients
   hc serve-http --as <g>   the same, over http, for phones
                                   --company-access requires current member/device policy
-  hc index-turbopuffer --as <grant> --config <private-json>
-                          explicitly rebuild one grant's plaintext note index
   hc access device-new <private-key-file>
                                   create a worker signing key without a brain or owner key
   hc access sign-policy <policy.json> [--space name]
@@ -4396,116 +4393,6 @@ fn run() -> Result<()> {
         "find" | "search-all" => find_command(&args.dir, &args.rest, remote || default_remote),
 
         "access" => access_cli::run(&args.dir, &args.rest),
-
-        "index-turbopuffer" => {
-            let prefix = option_value(&args.rest, "--as")?
-                .ok_or(Error::Malformed("index-turbopuffer needs --as <grant id>"))?;
-            let config = option_value(&args.rest, "--config")?.ok_or(Error::Malformed(
-                "index-turbopuffer needs --config <private-json>",
-            ))?;
-            if !Path::new(&config).is_absolute() || remote {
-                return Err(Error::Malformed(
-                    "index-turbopuffer needs an absolute local config path",
-                ));
-            }
-            let (identity, target_dir) = selected_brain(&args.dir, &args.rest)?;
-            let keys = runtime_keys_read_only(&target_dir, &identity)?;
-            let store = Store::open(&target_dir)?;
-            let chain = grant_chain(&target_dir, &prefix)?;
-            let grant_id = chain.last().ok_or(Error::Denied("empty grant chain"))?.id();
-            let backend =
-                search_backend::Turbopuffer::open(Path::new(&config), &target_dir, grant_id)?;
-            let index = hyperconsciousness::search_index::Index::load_or_build(
-                &target_dir,
-                &store,
-                &keys,
-                keys.cache_fingerprint(),
-            )?;
-            let permissions = hyperconsciousness::revocation::Index::load_or_build(
-                &target_dir,
-                &store,
-                &keys,
-                keys.cache_fingerprint(),
-            )?;
-            // Check the named grant before mutating the provider namespace.
-            hyperconsciousness::query::look_indexed(
-                &store,
-                &keys,
-                &index,
-                &permissions,
-                &chain,
-                identity.grant_authority()?,
-                Clock::new().now().millis,
-                &hyperconsciousness::query::Filter {
-                    kind: Some("note".to_owned()),
-                    limit: 1,
-                    ..Default::default()
-                },
-            )?;
-            let mut before = None;
-            let mut count = 0usize;
-            // A dedicated namespace is required. Clearing first removes
-            // revoked/retracted plaintext from the previous completed run.
-            backend.clear()?;
-            loop {
-                let permissions = hyperconsciousness::revocation::Index::load_or_build(
-                    &target_dir,
-                    &store,
-                    &keys,
-                    keys.cache_fingerprint(),
-                )?;
-                let filter = hyperconsciousness::query::Filter {
-                    kind: Some("note".to_owned()),
-                    before,
-                    limit: 32,
-                    ..Default::default()
-                };
-                let answer = hyperconsciousness::query::look_indexed(
-                    &store,
-                    &keys,
-                    &index,
-                    &permissions,
-                    &chain,
-                    identity.grant_authority()?,
-                    Clock::new().now().millis,
-                    &filter,
-                )?;
-                if let Some(oldest) = answer.records.first() {
-                    before = Some((oldest.hlc, oldest.author.0, oldest.seq));
-                }
-                let mut rows = Vec::new();
-                for record in &answer.records {
-                    let bytes = keys.open_record(record)?;
-                    let payload: serde_json::Value = serde_json::from_slice(&bytes)?;
-                    let Some(text) = payload.get("text").and_then(|text| text.as_str()) else {
-                        continue;
-                    };
-                    if text.trim().is_empty() {
-                        continue;
-                    }
-                    if text.len() > 256 * 1024 {
-                        return Err(Error::Malformed(
-                            "note exceeds Turbopuffer indexing limit; namespace rebuild is incomplete",
-                        ));
-                    }
-                    rows.push(serde_json::json!({
-                        "id": record.id().hex(),
-                        "hc_ref": format!("{}:{}", record.author.short(), record.seq),
-                        "record_id": record.id().hex(),
-                        "content": text,
-                    }));
-                }
-                // A failed audit write releases no plaintext to the provider.
-                append(&target_dir, &answer.read_receipt)?;
-                backend.upsert_notes(&rows)?;
-                count += rows.len();
-                if !answer.truncated {
-                    break;
-                }
-            }
-            println!("indexed {count} authorized notes; namespace rebuild complete");
-            Ok(())
-        }
 
         "start" => {
             let mut identity = Identity::load_or_create(&args.dir)?;
